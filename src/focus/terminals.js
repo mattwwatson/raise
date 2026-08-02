@@ -13,7 +13,12 @@
  * that takes seconds. See execAsync in ../exec.js.
  */
 
-import { itermFocusScript, terminalAppFocusScript, appRunningScript } from './applescript.js';
+import {
+  itermFocusScript,
+  itermFocusByTitleScript,
+  terminalAppFocusScript,
+  appRunningScript,
+} from './applescript.js';
 
 const OSASCRIPT = 'osascript';
 
@@ -52,6 +57,17 @@ export const iterm2 = {
       return (await runScript(exec, itermFocusScript({ tty }))) === 'ok';
     }
     return false;
+  },
+  /**
+   * Only iTerm2 implements this: it is the terminal that hosts tmux in control
+   * mode, and the only one where a pane has no tty to match on.
+   *
+   * @returns {Promise<'ok'|'notfound'|'ambiguous'>}
+   */
+  async focusByTitle(exec, { title }) {
+    if (!title) return 'notfound';
+    const result = (await runScript(exec, itermFocusByTitleScript({ title }))).trim();
+    return result === 'ok' || result === 'ambiguous' ? result : 'notfound';
   },
 };
 

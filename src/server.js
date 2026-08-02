@@ -24,7 +24,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(HERE, '..', 'public');
 
 const POLL_INTERVAL_MS = 1000;
-const KEEPALIVE_MS = 20000;
+export const KEEPALIVE_MS = 20000;
 const MAX_BODY_BYTES = 256 * 1024;
 
 /**
@@ -82,6 +82,7 @@ export function createMonitorServer({
   execAsync = defaultExecAsync,
   dbPath = statePath(),
   sessionsPath = sessionsDir(),
+  keepaliveMs = KEEPALIVE_MS,
 } = {}) {
   const registry = new SessionRegistry({ dir: sessionsPath });
   const nmState = new NoMistakesState({ dbPath, exec, execAsync });
@@ -170,6 +171,10 @@ export function createMonitorServer({
       servePage(res, token);
       return;
     }
+    if (req.method === 'GET' && url.pathname === '/connection.js') {
+      serveModule(res);
+      return;
+    }
     if (req.method === 'GET' && url.pathname === '/events') {
       openStream(req, res);
       return;
@@ -207,12 +212,35 @@ export function createMonitorServer({
     res.writeHead(200, {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': 'no-store',
-      // The page is fully self-contained; forbid anything external.
+      // Nothing external, ever. 'self' is here only so the page can import
+      // /connection.js; it does not widen anything beyond this origin.
       'content-security-policy':
-        "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'",
+        "default-src 'none'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'",
       'referrer-policy': 'no-referrer',
     });
     res.end(html);
+  }
+
+  /**
+   * The one script the page loads rather than inlines.
+   *
+   * It is a fixed filename, never anything derived from the request, so there
+   * is no path for a traversal to take. The page imports it with the token
+   * attached, which keeps "everything but /health needs the token" true.
+   */
+  function serveModule(res) {
+    let source;
+    try {
+      source = readFileSync(join(PUBLIC_DIR, 'connection.js'), 'utf8');
+    } catch {
+      res.writeHead(500).end('module missing');
+      return;
+    }
+    res.writeHead(200, {
+      'content-type': 'text/javascript; charset=utf-8',
+      'cache-control': 'no-store',
+    });
+    res.end(source);
   }
 
   function openStream(req, res) {
@@ -308,9 +336,16 @@ export function createMonitorServer({
         writtenInfoPath = serverInfoPath();
         writeFileSync(writtenInfoPath, JSON.stringify(info, null, 2), { mode: 0o600 });
         pollTimer = setInterval(() => broadcast(false), POLL_INTERVAL_MS);
+        // A named event, not an SSE comment. EventSource discards comments
+        // without telling the page, so a comment keepalive holds the socket
+        // open and proves nothing to the only party that needs convincing: with
+        // one, a server that freezes or whose connection stalls leaves the page
+        // showing a green "live" dot over state that stopped updating. The page
+        // watches for these and goes stale when they stop arriving.
         keepaliveTimer = setInterval(() => {
-          for (const client of [...clients]) send(client, ': keepalive\n\n');
-        }, KEEPALIVE_MS);
+          const frame = `event: ping\ndata: ${Date.now()}\n\n`;
+          for (const client of [...clients]) send(client, frame);
+        }, keepaliveMs);
         resolve(info);
       });
     });

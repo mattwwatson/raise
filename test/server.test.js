@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { createMonitorServer, writeFrame, stableJson } from '../src/server.js';
+import { probeHealth } from '../src/health.js';
 
 function scratch() {
   const dir = mkdtempSync(join(tmpdir(), 'nmmon-test-'));
@@ -254,5 +255,172 @@ test('an event stream survives a client that vanishes mid-broadcast', async () =
     if (previousHome === undefined) delete process.env.NMMON_HOME;
     else process.env.NMMON_HOME = previousHome;
     cleanup();
+  }
+});
+
+test('the keepalive is an event the page can see, not an invisible comment', async () => {
+  // It used to be `: keepalive`, an SSE comment. EventSource discards comments
+  // without telling the page, so the only liveness signal the browser had was
+  // an error - which never fires while the socket is merely quiet. A server
+  // frozen with SIGSTOP left the dashboard on a green "live" dot indefinitely.
+  const { dir, cleanup } = scratch();
+  const previousHome = process.env.NMMON_HOME;
+  process.env.NMMON_HOME = dir;
+  try {
+    const port = await freePort();
+    const monitor = createMonitorServer({
+      port,
+      token: 'test-token',
+      dbPath: join(dir, 'no-such.sqlite'),
+      sessionsPath: join(dir, 'sessions'),
+      keepaliveMs: 40,
+      exec: () => assert.fail('no blocking commands from the server'),
+      execAsync: async () => '',
+    });
+    await monitor.start();
+
+    const controller = new AbortController();
+    const stream = await fetch(`http://127.0.0.1:${port}/events?t=test-token`, {
+      signal: controller.signal,
+    });
+    const reader = stream.body.getReader();
+    const decoder = new TextDecoder();
+    let text = '';
+    while (!/^event: ping$/m.test(text)) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+    }
+    controller.abort();
+
+    assert.match(text, /^event: ping$/m, 'the keepalive must be a named event');
+    assert.match(text, /^data: \d+$/m, 'and carry data, or EventSource discards the frame');
+    assert.ok(!text.includes(': keepalive'), 'the comment form is gone');
+
+    await monitor.stop();
+  } finally {
+    if (previousHome === undefined) delete process.env.NMMON_HOME;
+    else process.env.NMMON_HOME = previousHome;
+    cleanup();
+  }
+});
+
+test('the page can load the connection module, and only with the token', async () => {
+  const { dir, cleanup } = scratch();
+  const previousHome = process.env.NMMON_HOME;
+  process.env.NMMON_HOME = dir;
+  try {
+    const port = await freePort();
+    const monitor = createMonitorServer({
+      port,
+      token: 'test-token',
+      dbPath: join(dir, 'no-such.sqlite'),
+      sessionsPath: join(dir, 'sessions'),
+      exec: () => assert.fail('no blocking commands from the server'),
+      execAsync: async () => '',
+    });
+    await monitor.start();
+
+    const served = await fetch(`http://127.0.0.1:${port}/connection.js?t=test-token`);
+    assert.equal(served.status, 200);
+    assert.match(served.headers.get('content-type'), /javascript/);
+    assert.match(await served.text(), /export function createConnectionWatch/);
+
+    // Serving a static file is no reason to punch a hole in the token rule.
+    const bare = await fetch(`http://127.0.0.1:${port}/connection.js`);
+    assert.equal(bare.status, 401);
+
+    // And the page is allowed to import it.
+    const page = await fetch(`http://127.0.0.1:${port}/?t=test-token`);
+    assert.match(page.headers.get('content-security-policy'), /script-src 'self'/);
+
+    await monitor.stop();
+  } finally {
+    if (previousHome === undefined) delete process.env.NMMON_HOME;
+    else process.env.NMMON_HOME = previousHome;
+    cleanup();
+  }
+});
+
+// -------------------------------------------------------------- probeHealth
+
+/** Occupy a port with something that is emphatically not nmmon. */
+async function occupy(port, handler) {
+  const server = createServer(handler);
+  await new Promise((resolve) => server.listen(port, '127.0.0.1', resolve));
+  return () =>
+    new Promise((resolve) => {
+      server.closeAllConnections();
+      server.close(resolve);
+    });
+}
+
+test('probeHealth identifies a live monitor, with no token', async () => {
+  // /health is the one unauthenticated route precisely so this is possible: the
+  // caller asking "is nmmon there?" has no reason to know its token, and may be
+  // a different installation entirely.
+  const { dir, cleanup } = scratch();
+  const previousHome = process.env.NMMON_HOME;
+  process.env.NMMON_HOME = dir;
+  try {
+    const port = await freePort();
+    const monitor = createMonitorServer({
+      port,
+      token: 'test-token',
+      dbPath: join(dir, 'no-such.sqlite'),
+      sessionsPath: join(dir, 'sessions'),
+      exec: () => assert.fail('no blocking commands from the server'),
+      execAsync: async () => '',
+    });
+    await monitor.start();
+
+    assert.deepEqual(await probeHealth(port), { pid: process.pid });
+
+    await monitor.stop();
+  } finally {
+    if (previousHome === undefined) delete process.env.NMMON_HOME;
+    else process.env.NMMON_HOME = previousHome;
+    cleanup();
+  }
+});
+
+test('probeHealth says nothing is there when nothing is there', async () => {
+  const port = await freePort();
+  assert.equal(await probeHealth(port), null);
+});
+
+test('probeHealth refuses to mistake another program for nmmon', async () => {
+  // Anything can be listening on a local port, including something that answers
+  // 200 with JSON of its own. Believing it would have us print `kill <pid>` for
+  // a pid belonging to an unrelated program.
+  const port = await freePort();
+  const impostors = [
+    (req, res) => res.writeHead(200, { 'content-type': 'application/json' }).end('{"hello":"world"}'),
+    (req, res) => res.writeHead(200, { 'content-type': 'text/plain' }).end('OK'),
+    (req, res) => res.writeHead(200, { 'content-type': 'application/json' }).end('{"ok":true}'),
+    (req, res) => res.writeHead(500).end('nope'),
+  ];
+  for (const handler of impostors) {
+    const close = await occupy(port, handler);
+    try {
+      assert.equal(await probeHealth(port), null, `${handler} must not read as nmmon`);
+    } finally {
+      await close();
+    }
+  }
+});
+
+test('probeHealth gives up on a port that accepts and never answers', async () => {
+  // A hung listener must not hang `serve`, `open` or `doctor` with it.
+  const port = await freePort();
+  const close = await occupy(port, () => {
+    // Deliberately never respond.
+  });
+  try {
+    const started = Date.now();
+    assert.equal(await probeHealth(port, { timeoutMs: 100 }), null);
+    assert.ok(Date.now() - started < 2000, 'the timeout is the one that applies');
+  } finally {
+    await close();
   }
 });

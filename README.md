@@ -86,6 +86,41 @@ default port when `--port` is absent; if it holds something that is not a port, 
 refuses to start and says so, while `nmmon --help` still prints (that being where you go to
 find out what the variable should contain).
 
+### When the port is already taken
+
+`serve` asks the port itself - `/health`, the one unauthenticated route - rather than
+trusting `~/.nmmon/server.json`, and answers with one of three things:
+
+| Message | Means | Do |
+| --- | --- | --- |
+| `nmmon is already running on port N (pid P)` | your own monitor is up | `nmmon open` |
+| `Port N is held by another nmmon (pid P) that this installation has no record of` | a leftover started under a different `NMMON_HOME` - usually a test run or a stray agent shell | `kill P`, or `nmmon serve --port <n>` |
+| `Port N is in use, and whatever is listening is not nmmon` | something unrelated | `lsof -nP -iTCP:N -sTCP:LISTEN` |
+
+The middle case is the awkward one, and it is why `server.json` is not the source of truth
+here: a monitor started under another `NMMON_HOME` writes its record somewhere you will never
+look, so the file says "not running" while the port very much disagrees. `doctor` reports the
+same four states, and `open` refuses to print a URL when the recorded server has stopped
+answering - a record outlives a server that was killed rather than shut down.
+
+## The dashboard is honest about not knowing
+
+Any row that can be focused is a button, says `Focus ↗` on the right, and raises that window
+when you click it. Rows without a live Claude session behind them - a pipeline running with
+no session attached - are plain and do nothing.
+
+The dot in the header is **positive evidence, not the absence of an error**. The server sends
+a `ping` event every 20 seconds; if nothing arrives for 50 the dot goes red, the header reads
+`no response for 2m`, and the whole page dims, because everything on it is now a snapshot of
+the past. The page then reopens the stream to find out which it is.
+
+This matters more than it sounds. `EventSource` only reports an error once the connection
+actually breaks, and a connection can stop carrying data long before that - a suspended
+laptop, a frozen server, a dropped NAT entry. The keepalive used to be an SSE *comment*, which
+the browser discards without telling the page, so in all of those the dashboard sat on a green
+"live" dot over state that had stopped updating. For a tool whose only job is telling you
+something needs you, quietly showing stale data is the worst thing it can do.
+
 ## How focusing works
 
 Both hosting styles collapse to the same final step - bring the terminal tab with a given tty
@@ -101,6 +136,19 @@ The host terminal for a tmux session is deliberately **not** stored. A tmux sess
 detached and reattached in a different terminal entirely, so it is resolved fresh every time
 you click. If the session is detached there is no window to focus, and nmmon tells you the
 `tmux attach` command instead of failing silently.
+
+**tmux control mode (`tmux -CC`) is its own case.** It is how iTerm2 hosts tmux, and it breaks
+every assumption above: each tmux window becomes a native iTerm2 tab that the tmux client
+knows nothing about, iTerm2 reports `tty` as `missing value` for all of them, and the client's
+own tty belongs to the idle tab where you typed `tmux -CC`. Focusing that tty - the correct
+move for ordinary tmux - raises that one tab no matter which session you clicked.
+
+So a control mode pane is matched on its **title** instead, which is the one handle both sides
+share: iTerm2 names each tab after the tmux pane title. The leading status glyph is stripped
+first, because Claude Code animates a braille spinner through it and the two sides are read a
+moment apart. If two windows share a title nmmon says so rather than raising an arbitrary one,
+and nothing is selected inside tmux, since iTerm2 does not follow tmux's selection in control
+mode and doing it anyway would just move the user's active window for no visible reason.
 
 Supported terminals today: **iTerm2** and **Terminal.app**, plus **tmux** inside either.
 Adding another is a single entry in `src/focus/terminals.js` - it needs an availability check

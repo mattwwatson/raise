@@ -126,6 +126,26 @@
       .dot.off {
         background: var(--blocked);
       }
+      /* Not yet heard from, which is not the same as healthy. */
+      .dot.wait {
+        background: var(--faint);
+      }
+      .conn.off {
+        color: var(--blocked);
+      }
+      /*
+       * Unconfirmed state must not look like confirmed state - including the
+       * header count, which is the loudest thing on the page and was the one
+       * part still rendering at full strength while everything under it dimmed.
+       */
+      body.unconfirmed main,
+      body.unconfirmed .counts {
+        opacity: 0.5;
+        filter: saturate(0.55);
+        transition:
+          opacity 0.2s ease,
+          filter 0.2s ease;
+      }
       main {
         max-width: 900px;
         margin: 0 auto;
@@ -175,6 +195,37 @@
       }
       button.card:active {
         transform: translateY(1px);
+      }
+      button.card:focus-visible {
+        outline: 2px solid var(--working);
+        outline-offset: 2px;
+      }
+      /*
+       * Click-to-focus was invisible: a hover border change and a title
+       * attribute, on a card that looks exactly like the ones that do nothing.
+       * Say it in the row itself, quietly at rest and plainly on hover.
+       */
+      .focus-hint {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 11px;
+        font-weight: 600;
+        white-space: nowrap;
+        color: var(--faint);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        padding: 1px 6px;
+        transition:
+          color 0.12s ease,
+          border-color 0.12s ease,
+          background-color 0.12s ease;
+      }
+      button.card:hover .focus-hint,
+      button.card:focus-visible .focus-hint {
+        color: var(--working);
+        border-color: color-mix(in srgb, var(--working) 45%, transparent);
+        background: color-mix(in srgb, var(--working) 10%, transparent);
       }
       .card.blocked {
         border-color: color-mix(in srgb, var(--blocked) 45%, transparent);
@@ -270,12 +321,13 @@
         font-size: 12px;
         color: var(--faint);
       }
+      /*
+       * Plain text, no chip. It sat next to the Focus chip looking identical,
+       * so the row offered two lookalike pills of which only one did anything.
+       */
       .host {
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         font-size: 11px;
-        border: 1px solid var(--border);
-        border-radius: 5px;
-        padding: 1px 5px;
       }
       a.pr {
         color: var(--working);
@@ -328,7 +380,9 @@
       <div class="counts" id="counts"></div>
       <div class="spacer"></div>
       <button id="notify">Enable alerts</button>
-      <span class="conn"><span class="dot" id="dot"></span><span id="connText">live</span></span>
+      <span class="conn" id="conn"
+        ><span class="dot" id="dot"></span><span id="connText">connecting</span></span
+      >
     </header>
 
     <main>
@@ -338,11 +392,19 @@
 
     <div class="toast" id="toast"></div>
 
-    <script>
+    <script type="module">
       const TOKEN = '__NMMON_TOKEN__';
+
+      // Imported with the token, so serving it needs no exception to the rule
+      // that /health is the only unauthenticated route.
+      const { createConnectionWatch, connectionLabel } = await import(
+        '/connection.js?t=' + TOKEN
+      );
+
       const rowsEl = document.getElementById('rows');
       const countsEl = document.getElementById('counts');
       const noticeEl = document.getElementById('notice');
+      const connEl = document.getElementById('conn');
       const dotEl = document.getElementById('dot');
       const connTextEl = document.getElementById('connText');
       const toastEl = document.getElementById('toast');
@@ -412,6 +474,10 @@
         if (row.focusable) {
           el.addEventListener('click', () => focusRow(row));
           el.title = 'Bring this window to the front';
+          el.setAttribute(
+            'aria-label',
+            row.title + ' - ' + row.attentionLabel + '. Bring this window to the front.',
+          );
         }
 
         const bar = document.createElement('div');
@@ -442,9 +508,11 @@
         state.textContent = row.attentionLabel;
         line2.appendChild(state);
 
+        // A finished run's last step is not news - "Done" already said it - and
+        // "Done - step ci" reads as though something is still happening.
         const detail = [];
         if (row.message) detail.push(row.message);
-        else if (row.run && row.run.step) {
+        else if (row.run && row.run.step && row.attention !== 'done') {
           detail.push(
             'step ' +
               row.run.step.name +
@@ -454,7 +522,9 @@
         if (detail.length) {
           const msg = document.createElement('span');
           msg.className = 'msg';
-          msg.textContent = '- ' + detail.join(' ');
+          // line2 is a flex row with a gap; the separator was a literal hyphen
+          // that read as a stray dash hanging off the state word.
+          msg.textContent = detail.join(' ');
           line2.appendChild(msg);
         }
         body.appendChild(line2);
@@ -490,6 +560,12 @@
           host.className = 'host';
           host.textContent = row.hostKind === 'tmux' ? 'tmux' : 'tab';
           meta.appendChild(host);
+        }
+        if (row.focusable) {
+          const hint = document.createElement('span');
+          hint.className = 'focus-hint';
+          hint.textContent = 'Focus ↗';
+          meta.appendChild(hint);
         }
         el.appendChild(meta);
         return el;
@@ -587,24 +663,62 @@
       }
       updateNotifyButton(hasNotifications() ? Notification.permission : 'denied');
 
+      const watch = createConnectionWatch();
+      let source = null;
+
+      function showConnection() {
+        const { text, tone } = connectionLabel(watch.status(), watch.quietForMs());
+        connTextEl.textContent = text;
+        dotEl.className = 'dot' + (tone === 'bad' ? ' off' : tone === 'wait' ? ' wait' : '');
+        connEl.className = 'conn' + (tone === 'bad' ? ' off' : '');
+        // Dim what we can no longer vouch for. A blocked session that cleared
+        // ten minutes ago must not keep sitting there looking current.
+        document.body.classList.toggle('unconfirmed', tone === 'bad');
+      }
+
       function connect() {
-        const source = new EventSource('/events?t=' + TOKEN);
+        const reopening = source !== null;
+        if (source) source.close();
+        if (reopening) watch.noteReconnect();
+        showConnection();
+        source = new EventSource('/events?t=' + TOKEN);
         source.addEventListener('state', (event) => {
-          dotEl.className = 'dot';
-          connTextEl.textContent = 'live';
+          watch.noteMessage();
+          showConnection();
           render(JSON.parse(event.data));
         });
+        // Nothing to render; its whole purpose is being evidence that the
+        // server is still on the other end.
+        source.addEventListener('ping', () => {
+          watch.noteMessage();
+          showConnection();
+        });
         source.onerror = () => {
-          dotEl.className = 'dot off';
-          connTextEl.textContent = 'reconnecting';
+          watch.noteError();
+          showConnection();
         };
       }
       connect();
 
-      // Keep the elapsed times honest between pushes.
+      // Keep the elapsed times honest between pushes, and re-judge the
+      // connection: going stale is the passage of time, so nothing else will
+      // ever wake us up to notice it.
       setInterval(() => {
+        showConnection();
+        // A half-open socket never recovers on its own, and EventSource will
+        // not retry one it still believes is open. Tear it down and let the
+        // reconnect prove the server either is or is not there.
+        if (watch.shouldReconnect()) connect();
         if (latest) render(latest);
       }, 5000);
+
+      // Waking from sleep is the common case, and it should not take five
+      // seconds of staring at a stale page to find out.
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'visible') return;
+        showConnection();
+        if (watch.shouldReconnect()) connect();
+      });
     </script>
   </body>
 </html>

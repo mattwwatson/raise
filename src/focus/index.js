@@ -15,6 +15,29 @@ import { resolveTmuxTarget, selectPane } from './tmux.js';
 import { orderedTerminals, ALL_TERMINALS } from './terminals.js';
 
 /**
+ * The stable part of a pane title, for matching against a terminal's own name
+ * for that pane.
+ *
+ * Claude Code prefixes its title with a status glyph and animates a braille
+ * spinner through it, so the title read from tmux and the name read from the
+ * terminal a moment later differ in their first character as often as not.
+ * Strip any leading run of non-alphanumerics and match on the rest.
+ *
+ * Returns null for anything too short to identify a window: a two-character
+ * title would match half the tabs open, and raising the wrong one is the exact
+ * failure this is here to fix.
+ *
+ * @param {string|null} title
+ * @returns {string|null}
+ */
+export function titleNeedle(title) {
+  const stripped = String(title || '')
+    .replace(/^[^\p{L}\p{N}]+/u, '')
+    .trim();
+  return stripped.length >= 4 ? stripped : null;
+}
+
+/**
  * Terminals export their session identity as "w0t2p0:UUID". Only the UUID part
  * matches the session id exposed to AppleScript.
  */
@@ -150,6 +173,37 @@ export async function focusSession(record, { exec, terminals = ALL_TERMINALS }) 
       tmuxSession: target.session || undefined,
     };
   }
+
+  // Control mode first, because for those panes the tmux client's tty is not
+  // just unhelpful but actively wrong - it names the idle tab that ran
+  // `tmux -CC`, so the old code raised that tab every single time.
+  if (target.controlMode) {
+    const byTitle = await focusByPaneTitle(exec, {
+      title: titleNeedle(target.title),
+      termProgram: plan.termProgram,
+      terminals,
+    });
+    // No selectPane here on purpose: the terminal owns the pane layout in
+    // control mode and does not follow tmux's selection, so selecting would
+    // move tmux's active window with nothing to show for it.
+    if (byTitle.ok) return { ...byTitle, tmuxSession: target.session };
+    if (byTitle.ambiguous) {
+      return {
+        ok: false,
+        reason: `More than one window is called "${titleNeedle(target.title)}", so nmmon cannot tell which is this session.`,
+        tmuxSession: target.session,
+      };
+    }
+    if (!target.tty) {
+      return {
+        ok: false,
+        reason: `Could not find the window for tmux pane ${plan.pane}. Its terminal hosts tmux in control mode, so there is no tty to fall back to.`,
+        tmuxSession: target.session,
+      };
+    }
+    // A plain client is attached as well; that tty is worth a try.
+  }
+
   await selectPane(exec, { pane: plan.pane, tmuxEnv: plan.tmuxEnv });
   const result = await focusTerminal(exec, {
     sessionUuid: null,
@@ -158,4 +212,25 @@ export async function focusSession(record, { exec, terminals = ALL_TERMINALS }) 
     terminals,
   });
   return { ...result, tmuxSession: target.session };
+}
+
+/**
+ * Ask each terminal that supports it to find a pane by title.
+ *
+ * @returns {Promise<{ok: boolean, adapter?: string, ambiguous?: boolean}>}
+ */
+async function focusByPaneTitle(exec, { title, termProgram, terminals }) {
+  if (!title) return { ok: false };
+  for (const terminal of orderedTerminals(termProgram, terminals)) {
+    if (typeof terminal.focusByTitle !== 'function') continue;
+    try {
+      if (!(await terminal.isAvailable(exec))) continue;
+      const result = await terminal.focusByTitle(exec, { title });
+      if (result === 'ok') return { ok: true, adapter: terminal.name };
+      if (result === 'ambiguous') return { ok: false, ambiguous: true };
+    } catch {
+      // Same rule as focusTerminal: a misbehaving adapter is "not this one".
+    }
+  }
+  return { ok: false };
 }
