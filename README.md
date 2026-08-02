@@ -40,8 +40,8 @@ work/hexbattle          /Users/you/work/hexbattle
 no-mistakes-monitor     unique already, so left alone
 ```
 
-Two sessions in the *same* directory keep the same name - no amount of path would separate
-them - and are told apart by their branch and state instead.
+Rows for the *same* place keep one name - two sessions in one repo, say. No amount of path
+would separate them, so they are told apart by their branch and state instead.
 
 ## Requirements
 
@@ -81,7 +81,10 @@ you want desktop notifications when something starts waiting on you.
 | `nmmon focus <session>` | Bring a session's window to the front from the terminal |
 | `nmmon install-hooks` / `uninstall-hooks` | Manage the Claude Code hooks |
 
-Useful flags: `--port`, `--settings <path>`, `--dry-run`, `--yes`.
+Useful flags: `--port`, `--settings <path>`, `--dry-run`, `--yes`. `NMMON_PORT` sets the
+default port when `--port` is absent; if it holds something that is not a port, `serve`
+refuses to start and says so, while `nmmon --help` still prints (that being where you go to
+find out what the variable should contain).
 
 ## How focusing works
 
@@ -154,10 +157,11 @@ you actually care about is the one that gets dropped. The server tests inject an
 fails the test if it is ever called, and `/focus` is exercised against it so that guard means
 something.
 
-Coverage under Node 26 needs Node 24 (`c8` breaks on 26):
+Coverage comes from Node's own `--experimental-test-coverage`, so it needs no dependency
+either:
 
 ```sh
-PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
+npm run coverage
 ```
 
 ### Layout
