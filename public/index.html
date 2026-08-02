@@ -392,6 +392,20 @@
         }
       }
 
+      // The PR link comes from the no-mistakes database, which nmmon only ever
+      // reads. The page allows inline script, so a "javascript:" value in that
+      // column would run in the origin holding the monitor token. Only ever
+      // navigate to the web.
+      function webUrl(value) {
+        if (typeof value !== 'string' || !value) return null;
+        try {
+          const url = new URL(value, location.href);
+          return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
+        } catch (err) {
+          return null;
+        }
+      }
+
       function card(row) {
         const el = document.createElement(row.focusable ? 'button' : 'div');
         el.className = 'card ' + row.attention;
@@ -448,10 +462,10 @@
 
         const meta = document.createElement('div');
         meta.className = 'meta';
-        if (row.run && row.run.prUrl) {
+        if (row.run && webUrl(row.run.prUrl)) {
           const a = document.createElement('a');
           a.className = 'pr';
-          a.href = row.run.prUrl;
+          a.href = webUrl(row.run.prUrl);
           a.target = '_blank';
           a.rel = 'noreferrer';
           a.textContent = 'PR';

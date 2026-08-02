@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { createMonitorServer, writeFrame } from '../src/server.js';
+import { createMonitorServer, writeFrame, stableJson } from '../src/server.js';
 
 function scratch() {
   const dir = mkdtempSync(join(tmpdir(), 'nmmon-test-'));
@@ -66,6 +66,26 @@ test('a healthy client is written to and kept', () => {
     true,
   );
   assert.deepEqual(written, ['frame']);
+});
+
+test('a ticking clock is not a change - elapsed fields must not defeat the push guard', () => {
+  // waitingForMs and parkedForMs are recomputed from now on every poll, so
+  // comparing them means a blocked session or a parked run - exactly what this
+  // tool is for - pushes a full frame and a full DOM rebuild every second.
+  const snapshot = (now) => ({
+    generatedAt: now,
+    summary: { blocked: 1, parked: 1, failed: 0, total: 2 },
+    rows: [
+      { id: 'session:s1', attention: 'blocked', sessionStateSince: 1000, waitingForMs: now - 1000 },
+      { id: 'run:r1', attention: 'parked', run: { parkedSince: 500, parkedForMs: now - 500 } },
+    ],
+  });
+  assert.equal(stableJson(snapshot(9000)), stableJson(snapshot(90_000)));
+  assert.notEqual(
+    stableJson(snapshot(9000)),
+    stableJson({ ...snapshot(9000), rows: [] }),
+    'a real change must still be seen',
+  );
 });
 
 test('stopping the server removes the file that tells hooks where to post', async () => {

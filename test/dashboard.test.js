@@ -199,6 +199,25 @@ test('sessions sharing a directory keep one name - a longer path cannot separate
   );
 });
 
+test('two sessions in one registered repo keep the repo name, subdirectory or not', () => {
+  // Both rows are titled after the run's repo, so growing the session's own
+  // directory would retitle the subpackage one "packages/api" and lose the
+  // repo name entirely. The path the title came from is the repo, and it is
+  // the same repo, so there is nothing to grow.
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 's1', cwd: '/Users/x/work/repo/packages/api' }),
+      session({ sessionId: 's2', cwd: '/Users/x/work/repo' }),
+    ],
+    runs: [run()],
+    now: 5000,
+  });
+  assert.deepEqual(
+    rows.map((r) => r.title),
+    ['repo', 'repo'],
+  );
+});
+
 test('a run row is disambiguated against a session row in a different checkout', () => {
   const rows = buildRows({
     sessions: [session({ cwd: '/Users/x/work/repo' })],

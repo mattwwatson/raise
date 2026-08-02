@@ -116,7 +116,7 @@ export function readSettings(settingsPath) {
 }
 
 /**
- * @returns {{changed: boolean, changes: string[], backupPath: string|null, settingsPath: string}}
+ * @returns {string|null} the path the previous settings were copied to, if any
  */
 export function writeSettings(settingsPath, settings, { backup = true } = {}) {
   mkdirSync(dirname(settingsPath), { recursive: true });

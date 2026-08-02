@@ -103,6 +103,10 @@ export function buildRows({ sessions, runs, now = Date.now() }) {
       sessionId: session.sessionId,
       cwd: session.cwd,
       title: run?.repoName || basename(session.cwd || '') || 'unknown',
+      // The path the title was taken from, which is what disambiguation grows.
+      // For a session inside a registered repo that is the repo, not the
+      // session's own directory.
+      titlePath: (run?.repoName ? run.repoPath : session.cwd) || null,
       branch: run?.branch || null,
       attention,
       attentionLabel: attentionLabel(attention),
@@ -130,6 +134,7 @@ export function buildRows({ sessions, runs, now = Date.now() }) {
       sessionId: null,
       cwd: run.repoPath,
       title: run.repoName,
+      titlePath: run.repoPath || null,
       branch: run.branch,
       attention,
       attentionLabel: attentionLabel(attention),
@@ -220,15 +225,21 @@ export function shortestUniqueTitles(paths) {
  * are both "thing", and the page becomes a guessing game about which card is
  * which.
  *
- * Rows sharing a working directory are genuinely the same place and keep the
- * same title; extending the path could not separate them and only adds noise.
- * Only distinct directories are disambiguated.
+ * Growing happens on `titlePath`, the path the title was derived from, so the
+ * original name always survives as the tail of the longer one. A session inside
+ * a registered repo is titled after the repo, so it grows the repo's path and
+ * not its own subdirectory.
+ *
+ * Rows sharing that path are genuinely the same place and keep the same title;
+ * extending the path could not separate them and only adds noise - branch and
+ * state already do. Only distinct paths are disambiguated.
  */
 export function disambiguateTitles(rows) {
+  const anchor = (row) => row.titlePath || row.cwd;
   /** @type {Map<string, object[]>} */
   const groups = new Map();
   for (const row of rows) {
-    if (!row.cwd) continue;
+    if (!anchor(row)) continue;
     const group = groups.get(row.title);
     if (group) group.push(row);
     else groups.set(row.title, [row]);
@@ -237,10 +248,10 @@ export function disambiguateTitles(rows) {
   /** @type {Map<string, string>} row id -> replacement title */
   const overrides = new Map();
   for (const group of groups.values()) {
-    const paths = [...new Set(group.map((row) => row.cwd))];
+    const paths = [...new Set(group.map(anchor))];
     if (paths.length < 2) continue;
     const titles = shortestUniqueTitles(paths);
-    for (const row of group) overrides.set(row.id, titles.get(row.cwd));
+    for (const row of group) overrides.set(row.id, titles.get(anchor(row)));
   }
   if (overrides.size === 0) return rows;
   return rows.map((row) => (overrides.has(row.id) ? { ...row, title: overrides.get(row.id) } : row));

@@ -54,6 +54,9 @@ export function isSafeSessionId(id) {
   return typeof id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(id);
 }
 
+/** How long a record with no pid to probe may sit untouched before it is junk. */
+const MAX_UNVERIFIABLE_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+
 export class SessionRegistry {
   #dir;
 
@@ -114,9 +117,10 @@ export class SessionRegistry {
   /**
    * @param {object} [options]
    * @param {Function} [options.isAlive] pid liveness probe, injected for tests
+   * @param {number} [options.now]
    * @returns {object[]}
    */
-  list({ isAlive = defaultIsAlive } = {}) {
+  list({ isAlive = defaultIsAlive, now = Date.now() } = {}) {
     let names;
     try {
       names = readdirSync(this.#dir);
@@ -132,7 +136,16 @@ export class SessionRegistry {
       // A session whose process is gone was killed or crashed without a
       // SessionEnd. Drop it rather than offering a row that focuses nothing.
       const pid = record.host?.pid;
-      if (pid && !isAlive(pid)) {
+      if (pid) {
+        if (!isAlive(pid)) {
+          this.remove(sessionId);
+          continue;
+        }
+      } else if (now - (record.updatedAt || 0) > MAX_UNVERIFIABLE_AGE_MS) {
+        // No pid means the agent could not be identified confidently, so there
+        // is nothing to probe and the same crash leaves the record forever.
+        // Fall back to age, generously: a session idle over a long weekend is
+        // still a session, so only weeks of silence count as gone.
         this.remove(sessionId);
         continue;
       }

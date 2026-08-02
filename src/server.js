@@ -53,6 +53,28 @@ export function writeFrame(client, frame, onError) {
   }
 }
 
+/**
+ * Fields derived from the current clock rather than from state.
+ *
+ * They move every tick even when nothing has happened, so including them in the
+ * change comparison means a blocked session or a parked run - precisely the
+ * states this tool exists for - pushes a full frame and a full DOM rebuild once
+ * a second, forever. The page renders elapsed time from the absolute
+ * `sessionStateSince`/`parkedSince` instead, so nothing is lost by ignoring
+ * them here. Any future elapsed field belongs in this set.
+ */
+const VOLATILE_FIELDS = new Set(['generatedAt', 'waitingForMs', 'parkedForMs']);
+
+/**
+ * Serialise a snapshot for change detection only, never for the wire.
+ *
+ * @param {object} payload
+ * @returns {string}
+ */
+export function stableJson(payload) {
+  return JSON.stringify(payload, (key, value) => (VOLATILE_FIELDS.has(key) ? undefined : value));
+}
+
 export function createMonitorServer({
   port = defaultPort(),
   token = readOrCreateToken(),
@@ -111,9 +133,7 @@ export function createMonitorServer({
 
   function broadcast(force = false) {
     const payload = snapshot();
-    // generatedAt changes every tick, so compare everything else.
-    const { generatedAt, ...stable } = payload;
-    const json = JSON.stringify(stable);
+    const json = stableJson(payload);
     if (!force && json === lastPayloadJson) return;
     lastPayloadJson = json;
     const frame = `event: state\ndata: ${JSON.stringify(payload)}\n\n`;

@@ -145,6 +145,32 @@ test('a session with no recorded pid is kept', () => {
   }
 });
 
+test('a pidless record is dropped once it is weeks stale, not while it is merely idle', () => {
+  // The agent process cannot always be identified, and such a record has no pid
+  // to probe: if that session dies without a SessionEnd its file would live in
+  // the registry forever, rendering a row that focuses nothing. Age is the only
+  // signal left, so it has to be a generous one.
+  const { dir, cleanup } = scratch();
+  const day = 24 * 60 * 60 * 1000;
+  try {
+    const registry = new SessionRegistry({ dir });
+    registry.record({ session_id: 'idle', hook_event_name: 'SessionStart', host: {} }, 1000);
+    registry.record({ session_id: 'ancient', hook_event_name: 'SessionStart', host: {} }, 1000);
+
+    assert.equal(
+      registry.list({ isAlive: alwaysAlive, now: 1000 + 4 * day }).length,
+      2,
+      'a session left open over a long weekend is still a session',
+    );
+
+    const list = registry.list({ isAlive: alwaysAlive, now: 1000 + 30 * day });
+    assert.deepEqual(list, []);
+    assert.deepEqual(readdirSync(dir), [], 'the files should be cleaned up, not just hidden');
+  } finally {
+    cleanup();
+  }
+});
+
 test('list returns most recently updated first', () => {
   const { dir, cleanup } = scratch();
   try {
@@ -152,7 +178,7 @@ test('list returns most recently updated first', () => {
     registry.record({ session_id: 'old', hook_event_name: 'SessionStart' }, 1000);
     registry.record({ session_id: 'new', hook_event_name: 'SessionStart' }, 2000);
     assert.deepEqual(
-      registry.list({ isAlive: alwaysAlive }).map((r) => r.sessionId),
+      registry.list({ isAlive: alwaysAlive, now: 3000 }).map((r) => r.sessionId),
       ['new', 'old'],
     );
   } finally {

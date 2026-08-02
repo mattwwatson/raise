@@ -142,7 +142,7 @@ updated.
 npm test
 ```
 
-123 tests, no dependencies, no network, no build step. The focus adapters take an injected
+126 tests, no dependencies, no network, no build step. The focus adapters take an injected
 command runner, so the suite asserts on the AppleScript and tmux commands that *would* run
 without stealing your focus mid-test. The same goes for the process table and the pid
 liveness probe, which are injected rather than read from the machine running the tests.
