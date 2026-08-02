@@ -1,0 +1,596 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>nmmon</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #f6f7f9;
+        --panel: #ffffff;
+        --border: #e2e5ea;
+        --text: #1c2024;
+        --muted: #6b7280;
+        --faint: #9aa1ab;
+        --blocked: #d92d20;
+        --blocked-bg: #fef3f2;
+        --parked: #b54708;
+        --parked-bg: #fffaeb;
+        --failed: #7a271a;
+        --working: #175cd3;
+        --idle: #667085;
+        --done: #067647;
+        --shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0f1115;
+          --panel: #161a20;
+          --border: #262c36;
+          --text: #e6e8eb;
+          --muted: #9aa1ab;
+          --faint: #6b7280;
+          --blocked: #ff6b5e;
+          --blocked-bg: #2a1614;
+          --parked: #fdb022;
+          --parked-bg: #2a2114;
+          --failed: #ff8a7a;
+          --working: #6699ff;
+          --idle: #8b94a3;
+          --done: #4ade80;
+          --shadow: none;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font:
+          14px/1.5 -apple-system,
+          BlinkMacSystemFont,
+          'Segoe UI',
+          Roboto,
+          sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      header {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 14px 20px;
+        background: color-mix(in srgb, var(--bg) 88%, transparent);
+        backdrop-filter: blur(8px);
+        border-bottom: 1px solid var(--border);
+      }
+      h1 {
+        font-size: 14px;
+        font-weight: 650;
+        letter-spacing: -0.01em;
+        margin: 0;
+      }
+      .counts {
+        display: flex;
+        gap: 6px;
+        margin-left: 2px;
+      }
+      .pill {
+        font-size: 11px;
+        font-weight: 600;
+        padding: 2px 8px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .pill.alert {
+        color: var(--blocked);
+        border-color: color-mix(in srgb, var(--blocked) 35%, transparent);
+        background: var(--blocked-bg);
+      }
+      .spacer {
+        flex: 1;
+      }
+      button {
+        font: inherit;
+        font-size: 12px;
+        color: var(--muted);
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        padding: 5px 10px;
+        cursor: pointer;
+      }
+      button:hover {
+        color: var(--text);
+      }
+      .conn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--faint);
+      }
+      .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--done);
+      }
+      .dot.off {
+        background: var(--blocked);
+      }
+      main {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 20px;
+      }
+      .notice {
+        border: 1px solid color-mix(in srgb, var(--parked) 35%, transparent);
+        background: var(--parked-bg);
+        color: var(--parked);
+        border-radius: 10px;
+        padding: 10px 14px;
+        font-size: 13px;
+        margin-bottom: 16px;
+      }
+      .group-title {
+        font-size: 11px;
+        font-weight: 650;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--faint);
+        margin: 22px 0 8px;
+      }
+      .group-title:first-child {
+        margin-top: 0;
+      }
+      .card {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        width: 100%;
+        text-align: left;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 12px 14px;
+        margin-bottom: 8px;
+        box-shadow: var(--shadow);
+        transition:
+          border-color 0.12s ease,
+          transform 0.06s ease;
+      }
+      button.card {
+        cursor: pointer;
+      }
+      button.card:hover {
+        border-color: color-mix(in srgb, var(--text) 25%, var(--border));
+      }
+      button.card:active {
+        transform: translateY(1px);
+      }
+      .card.blocked {
+        border-color: color-mix(in srgb, var(--blocked) 45%, transparent);
+        background: var(--blocked-bg);
+      }
+      .card.parked {
+        border-color: color-mix(in srgb, var(--parked) 40%, transparent);
+      }
+      .bar {
+        width: 3px;
+        align-self: stretch;
+        border-radius: 2px;
+        background: var(--idle);
+        flex: none;
+      }
+      .bar.blocked {
+        background: var(--blocked);
+      }
+      .bar.parked {
+        background: var(--parked);
+      }
+      .bar.failed {
+        background: var(--failed);
+      }
+      .bar.working {
+        background: var(--working);
+      }
+      .bar.done {
+        background: var(--done);
+      }
+      .body {
+        flex: 1;
+        min-width: 0;
+      }
+      .line1 {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        min-width: 0;
+      }
+      .repo {
+        font-weight: 620;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+      }
+      .branch {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        color: var(--muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+      }
+      .line2 {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 3px;
+        font-size: 12.5px;
+        color: var(--muted);
+        min-width: 0;
+      }
+      .state {
+        font-weight: 600;
+      }
+      .state.blocked {
+        color: var(--blocked);
+      }
+      .state.parked {
+        color: var(--parked);
+      }
+      .state.failed {
+        color: var(--failed);
+      }
+      .state.working {
+        color: var(--working);
+      }
+      .state.done {
+        color: var(--done);
+      }
+      .msg {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+      }
+      .meta {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex: none;
+        font-size: 12px;
+        color: var(--faint);
+      }
+      .host {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 11px;
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        padding: 1px 5px;
+      }
+      a.pr {
+        color: var(--working);
+        text-decoration: none;
+        font-size: 12px;
+        white-space: nowrap;
+      }
+      a.pr:hover {
+        text-decoration: underline;
+      }
+      .empty {
+        text-align: center;
+        color: var(--faint);
+        padding: 64px 20px;
+      }
+      .empty h2 {
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--muted);
+        margin: 0 0 6px;
+      }
+      .toast {
+        position: fixed;
+        left: 50%;
+        bottom: 24px;
+        transform: translateX(-50%);
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 9px;
+        padding: 9px 14px;
+        font-size: 13px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.18s ease;
+        max-width: 80vw;
+      }
+      .toast.show {
+        opacity: 1;
+      }
+      .toast.bad {
+        color: var(--blocked);
+        border-color: color-mix(in srgb, var(--blocked) 40%, transparent);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>nmmon</h1>
+      <div class="counts" id="counts"></div>
+      <div class="spacer"></div>
+      <button id="notify">Enable alerts</button>
+      <span class="conn"><span class="dot" id="dot"></span><span id="connText">live</span></span>
+    </header>
+
+    <main>
+      <div id="notice"></div>
+      <div id="rows"></div>
+    </main>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+      const TOKEN = '__NMMON_TOKEN__';
+      const rowsEl = document.getElementById('rows');
+      const countsEl = document.getElementById('counts');
+      const noticeEl = document.getElementById('notice');
+      const dotEl = document.getElementById('dot');
+      const connTextEl = document.getElementById('connText');
+      const toastEl = document.getElementById('toast');
+      const notifyBtn = document.getElementById('notify');
+
+      let lastBlocked = new Set();
+      let latest = null;
+
+      const GROUPS = [
+        ['blocked', 'Waiting for you'],
+        ['parked', 'Pipeline parked'],
+        ['failed', 'Failed'],
+        ['working', 'Working'],
+        ['idle', 'Idle'],
+        ['done', 'Recently finished'],
+      ];
+
+      function ago(ms) {
+        if (ms == null) return '';
+        const s = Math.max(0, Math.round(ms / 1000));
+        if (s < 60) return s + 's';
+        const m = Math.floor(s / 60);
+        if (m < 60) return m + 'm';
+        const h = Math.floor(m / 60);
+        return h + 'h' + (m % 60 ? ' ' + (m % 60) + 'm' : '');
+      }
+
+      function toast(text, bad) {
+        toastEl.textContent = text;
+        toastEl.className = 'toast show' + (bad ? ' bad' : '');
+        clearTimeout(toast.timer);
+        toast.timer = setTimeout(() => (toastEl.className = 'toast'), 3200);
+      }
+
+      async function focusRow(row) {
+        if (!row.focusable || !row.sessionId) return;
+        try {
+          const res = await fetch('/focus?t=' + TOKEN, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', 'x-nmmon-token': TOKEN },
+            body: JSON.stringify({ sessionId: row.sessionId }),
+          });
+          const data = await res.json();
+          if (!data.ok) toast(data.hint ? data.reason + '  ->  ' + data.hint : data.reason, true);
+        } catch (err) {
+          toast('Could not reach nmmon: ' + err.message, true);
+        }
+      }
+
+      function card(row) {
+        const el = document.createElement(row.focusable ? 'button' : 'div');
+        el.className = 'card ' + row.attention;
+        if (row.focusable) {
+          el.addEventListener('click', () => focusRow(row));
+          el.title = 'Bring this window to the front';
+        }
+
+        const bar = document.createElement('div');
+        bar.className = 'bar ' + row.attention;
+        el.appendChild(bar);
+
+        const body = document.createElement('div');
+        body.className = 'body';
+
+        const line1 = document.createElement('div');
+        line1.className = 'line1';
+        const repo = document.createElement('span');
+        repo.className = 'repo';
+        repo.textContent = row.title;
+        line1.appendChild(repo);
+        if (row.branch) {
+          const branch = document.createElement('span');
+          branch.className = 'branch';
+          branch.textContent = row.branch;
+          line1.appendChild(branch);
+        }
+        body.appendChild(line1);
+
+        const line2 = document.createElement('div');
+        line2.className = 'line2';
+        const state = document.createElement('span');
+        state.className = 'state ' + row.attention;
+        state.textContent = row.attentionLabel;
+        line2.appendChild(state);
+
+        const detail = [];
+        if (row.message) detail.push(row.message);
+        else if (row.run && row.run.step) {
+          detail.push(
+            'step ' +
+              row.run.step.name +
+              (row.run.step.findings ? ' - ' + row.run.step.findings + ' finding(s)' : ''),
+          );
+        }
+        if (detail.length) {
+          const msg = document.createElement('span');
+          msg.className = 'msg';
+          msg.textContent = '- ' + detail.join(' ');
+          line2.appendChild(msg);
+        }
+        body.appendChild(line2);
+        el.appendChild(body);
+
+        const meta = document.createElement('div');
+        meta.className = 'meta';
+        if (row.run && row.run.prUrl) {
+          const a = document.createElement('a');
+          a.className = 'pr';
+          a.href = row.run.prUrl;
+          a.target = '_blank';
+          a.rel = 'noreferrer';
+          a.textContent = 'PR';
+          a.addEventListener('click', (e) => e.stopPropagation());
+          meta.appendChild(a);
+        }
+        // Computed from absolute timestamps, not the server's elapsed values, so
+        // the ticking re-render below stays accurate between pushes.
+        const since =
+          row.attention === 'blocked'
+            ? row.sessionStateSince
+            : row.run && row.run.parked
+              ? row.run.parkedSince
+              : null;
+        if (since) {
+          const t = document.createElement('span');
+          t.textContent = ago(Date.now() - since);
+          meta.appendChild(t);
+        }
+        if (row.hostKind) {
+          const host = document.createElement('span');
+          host.className = 'host';
+          host.textContent = row.hostKind === 'tmux' ? 'tmux' : 'tab';
+          meta.appendChild(host);
+        }
+        el.appendChild(meta);
+        return el;
+      }
+
+      function render(payload) {
+        latest = payload;
+        const rows = payload.rows || [];
+
+        noticeEl.innerHTML = '';
+        if (payload.warning) {
+          const n = document.createElement('div');
+          n.className = 'notice';
+          n.textContent = payload.warning;
+          noticeEl.appendChild(n);
+        }
+
+        const s = payload.summary || {};
+        countsEl.innerHTML = '';
+        const pills = [];
+        if (s.blocked) pills.push([s.blocked + ' waiting for you', true]);
+        if (s.parked) pills.push([s.parked + ' parked', false]);
+        if (s.failed) pills.push([s.failed + ' failed', false]);
+        for (const [text, alert] of pills) {
+          const p = document.createElement('span');
+          p.className = 'pill' + (alert ? ' alert' : '');
+          p.textContent = text;
+          countsEl.appendChild(p);
+        }
+        document.title = s.blocked ? '(' + s.blocked + ') nmmon' : 'nmmon';
+
+        rowsEl.innerHTML = '';
+        if (rows.length === 0) {
+          const empty = document.createElement('div');
+          empty.className = 'empty';
+          empty.innerHTML =
+            '<h2>Nothing running</h2><div>Start a Claude session and it will appear here.</div>';
+          rowsEl.appendChild(empty);
+          return;
+        }
+
+        for (const [key, label] of GROUPS) {
+          const group = rows.filter((r) => r.attention === key);
+          if (group.length === 0) continue;
+          const title = document.createElement('div');
+          title.className = 'group-title';
+          title.textContent = label;
+          rowsEl.appendChild(title);
+          for (const row of group) rowsEl.appendChild(card(row));
+        }
+
+        notifyOnNewlyBlocked(rows);
+      }
+
+      function notifyOnNewlyBlocked(rows) {
+        const blocked = new Set(rows.filter((r) => r.attention === 'blocked').map((r) => r.id));
+        if (hasNotifications() && Notification.permission === 'granted') {
+          for (const row of rows) {
+            if (row.attention !== 'blocked' || lastBlocked.has(row.id)) continue;
+            const n = new Notification(row.title + ' needs you', {
+              body: row.message || 'Claude is waiting for input',
+              tag: row.id,
+            });
+            n.onclick = () => {
+              window.focus();
+              focusRow(row);
+            };
+          }
+        }
+        lastBlocked = blocked;
+      }
+
+      function hasNotifications() {
+        return typeof Notification !== 'undefined';
+      }
+
+      notifyBtn.addEventListener('click', async () => {
+        if (!hasNotifications()) return;
+        updateNotifyButton(await Notification.requestPermission());
+      });
+
+      function updateNotifyButton(permission) {
+        if (!hasNotifications()) {
+          notifyBtn.textContent = 'Alerts unavailable';
+          notifyBtn.disabled = true;
+          return;
+        }
+        if (permission === 'granted') {
+          notifyBtn.textContent = 'Alerts on';
+          notifyBtn.disabled = true;
+        } else if (permission === 'denied') {
+          notifyBtn.textContent = 'Alerts blocked';
+          notifyBtn.disabled = true;
+        }
+      }
+      updateNotifyButton(hasNotifications() ? Notification.permission : 'denied');
+
+      function connect() {
+        const source = new EventSource('/events?t=' + TOKEN);
+        source.addEventListener('state', (event) => {
+          dotEl.className = 'dot';
+          connTextEl.textContent = 'live';
+          render(JSON.parse(event.data));
+        });
+        source.onerror = () => {
+          dotEl.className = 'dot off';
+          connTextEl.textContent = 'reconnecting';
+        };
+      }
+      connect();
+
+      // Keep the elapsed times honest between pushes.
+      setInterval(() => {
+        if (latest) render(latest);
+      }, 5000);
+    </script>
+  </body>
+</html>

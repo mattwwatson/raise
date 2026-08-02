@@ -1,0 +1,243 @@
+/**
+ * The monitor server: one poller, one event stream, one page.
+ *
+ * Push rather than poll on the browser side (server-sent events), and a one
+ * second poll of the no-mistakes database on the server side. Polling a local
+ * SQLite file is effectively free, and far more stable than the daemon's
+ * private socket protocol, which is undocumented and would break on upgrade.
+ */
+
+import { createServer } from 'node:http';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+import { NoMistakesState } from './nm-state.js';
+import { SessionRegistry } from './registry.js';
+import { buildRows, summarise } from './dashboard.js';
+import { focusSession } from './focus/index.js';
+import { checkRequest } from './security.js';
+import { exec as defaultExec } from './exec.js';
+import { sessionsDir, statePath, serverInfoPath, readOrCreateToken, defaultPort } from './config.js';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const PUBLIC_DIR = join(HERE, '..', 'public');
+
+const POLL_INTERVAL_MS = 1000;
+const KEEPALIVE_MS = 20000;
+const MAX_BODY_BYTES = 256 * 1024;
+
+export function createMonitorServer({
+  port = defaultPort(),
+  token = readOrCreateToken(),
+  exec = defaultExec,
+  dbPath = statePath(),
+  sessionsPath = sessionsDir(),
+} = {}) {
+  const registry = new SessionRegistry({ dir: sessionsPath });
+  const nmState = new NoMistakesState({ dbPath, exec });
+  const probe = nmState.probe();
+
+  /** @type {Set<import('node:http').ServerResponse>} */
+  const clients = new Set();
+  let lastPayloadJson = '';
+  let pollTimer = null;
+  let keepaliveTimer = null;
+
+  function snapshot() {
+    const sessions = registry.list();
+    const candidateDirs = [...new Set(sessions.map((s) => s.cwd).filter(Boolean))];
+    const { runs, source, warning } = nmState.read({ candidateDirs });
+    const rows = buildRows({ sessions, runs });
+    return {
+      rows,
+      summary: summarise(rows),
+      source,
+      warning,
+      generatedAt: Date.now(),
+    };
+  }
+
+  function broadcast(force = false) {
+    const payload = snapshot();
+    // generatedAt changes every tick, so compare everything else.
+    const { generatedAt, ...stable } = payload;
+    const json = JSON.stringify(stable);
+    if (!force && json === lastPayloadJson) return;
+    lastPayloadJson = json;
+    const frame = `event: state\ndata: ${JSON.stringify(payload)}\n\n`;
+    for (const client of clients) {
+      client.write(frame);
+    }
+  }
+
+  const server = createServer((req, res) => {
+    let url;
+    try {
+      url = new URL(req.url, `http://127.0.0.1:${port}`);
+    } catch {
+      res.writeHead(400).end('bad request');
+      return;
+    }
+
+    // Unauthenticated liveness probe, so `nmmon doctor` can tell "not running"
+    // from "running but I have the wrong token". Reveals nothing.
+    if (url.pathname === '/health') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, pid: process.pid }));
+      return;
+    }
+
+    const check = checkRequest(req, url, { token, port });
+    if (!check.ok) {
+      res.writeHead(check.status, { 'content-type': 'text/plain' });
+      res.end(check.reason);
+      return;
+    }
+
+    if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
+      servePage(res, token);
+      return;
+    }
+    if (req.method === 'GET' && url.pathname === '/events') {
+      openStream(req, res);
+      return;
+    }
+    if (req.method === 'POST' && url.pathname === '/event') {
+      handleHookEvent(req, res);
+      return;
+    }
+    if (req.method === 'POST' && url.pathname === '/focus') {
+      handleFocus(req, res);
+      return;
+    }
+    if (req.method === 'GET' && url.pathname === '/state') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(snapshot()));
+      return;
+    }
+
+    res.writeHead(404).end('not found');
+  });
+
+  function servePage(res, pageToken) {
+    let html;
+    try {
+      html = readFileSync(join(PUBLIC_DIR, 'index.html'), 'utf8');
+    } catch {
+      res.writeHead(500).end('page missing');
+      return;
+    }
+    // The page needs the token to open the event stream and to focus.
+    html = html.replace('__NMMON_TOKEN__', pageToken);
+    res.writeHead(200, {
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': 'no-store',
+      // The page is fully self-contained; forbid anything external.
+      'content-security-policy':
+        "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'",
+      'referrer-policy': 'no-referrer',
+    });
+    res.end(html);
+  }
+
+  function openStream(req, res) {
+    res.writeHead(200, {
+      'content-type': 'text/event-stream',
+      'cache-control': 'no-store',
+      connection: 'keep-alive',
+      'x-accel-buffering': 'no',
+    });
+    res.write(': connected\n\n');
+    res.write(`event: state\ndata: ${JSON.stringify(snapshot())}\n\n`);
+    clients.add(res);
+    req.on('close', () => {
+      clients.delete(res);
+    });
+  }
+
+  function readBody(req) {
+    return new Promise((resolve, reject) => {
+      let size = 0;
+      const chunks = [];
+      req.on('data', (chunk) => {
+        size += chunk.length;
+        if (size > MAX_BODY_BYTES) {
+          reject(new Error('body too large'));
+          req.destroy();
+          return;
+        }
+        chunks.push(chunk);
+      });
+      req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+      req.on('error', reject);
+    });
+  }
+
+  async function handleHookEvent(req, res) {
+    let payload;
+    try {
+      payload = JSON.parse(await readBody(req));
+    } catch (err) {
+      res.writeHead(400, { 'content-type': 'text/plain' });
+      res.end(`bad payload: ${err.message}`);
+      return;
+    }
+    try {
+      registry.record(payload);
+    } catch (err) {
+      res.writeHead(400, { 'content-type': 'text/plain' });
+      res.end(err.message);
+      return;
+    }
+    // A hook event is exactly the moment something changed, so push at once
+    // rather than waiting up to a second for the next poll.
+    broadcast(true);
+    res.writeHead(204).end();
+  }
+
+  async function handleFocus(req, res) {
+    let payload;
+    try {
+      payload = JSON.parse(await readBody(req));
+    } catch {
+      res.writeHead(400).end('bad payload');
+      return;
+    }
+    const record = registry.get(payload.sessionId);
+    if (!record) {
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, reason: 'that session is no longer registered' }));
+      return;
+    }
+    const result = focusSession(record, { exec });
+    res.writeHead(result.ok ? 200 : 409, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(result));
+  }
+
+  function start() {
+    return new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(port, '127.0.0.1', () => {
+        const info = { port, token, pid: process.pid, startedAt: Date.now() };
+        writeFileSync(serverInfoPath(), JSON.stringify(info, null, 2), { mode: 0o600 });
+        pollTimer = setInterval(() => broadcast(false), POLL_INTERVAL_MS);
+        keepaliveTimer = setInterval(() => {
+          for (const client of clients) client.write(': keepalive\n\n');
+        }, KEEPALIVE_MS);
+        resolve(info);
+      });
+    });
+  }
+
+  function stop() {
+    clearInterval(pollTimer);
+    clearInterval(keepaliveTimer);
+    for (const client of clients) client.end();
+    clients.clear();
+    nmState.close();
+    return new Promise((resolve) => server.close(resolve));
+  }
+
+  return { server, start, stop, snapshot, probe, url: () => `http://127.0.0.1:${port}/?t=${token}` };
+}
