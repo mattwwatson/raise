@@ -1,0 +1,401 @@
+#!/usr/bin/env node
+/**
+ * nmmon - the no-mistakes monitor command line.
+ *
+ * `nmmon serve` is the whole product; everything else exists to get you there
+ * or to explain why you are not there yet.
+ */
+
+import { homedir } from 'node:os';
+import { join, dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { existsSync, readFileSync } from 'node:fs';
+import { createInterface } from 'node:readline/promises';
+
+import { createMonitorServer } from '../src/server.js';
+import {
+  mergeHooks,
+  removeHooks,
+  readSettings,
+  writeSettings,
+  hookCommand,
+  HOOK_EVENTS,
+} from '../src/hooks.js';
+import { NoMistakesState } from '../src/nm-state.js';
+import { SessionRegistry } from '../src/registry.js';
+import { focusSession } from '../src/focus/index.js';
+import { ALL_TERMINALS } from '../src/focus/terminals.js';
+import { exec, execAsync, tryExec, tryExecAsync } from '../src/exec.js';
+import {
+  monitorHome,
+  sessionsDir,
+  statePath,
+  serverInfoPath,
+  DEFAULT_PORT,
+  defaultPort,
+  portFromFlag,
+  ensureDirs,
+} from '../src/config.js';
+import { buildRows } from '../src/dashboard.js';
+import { parseArgv } from '../src/cli-args.js';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const HOOK_SCRIPT = resolve(HERE, '..', 'hooks', 'nmmon-hook.js');
+const DEFAULT_SETTINGS = join(homedir(), '.claude', 'settings.json');
+
+const bold = (s) => `[1m${s}[0m`;
+const dim = (s) => `[2m${s}[0m`;
+const green = (s) => `[32m${s}[0m`;
+const red = (s) => `[31m${s}[0m`;
+const yellow = (s) => `[33m${s}[0m`;
+
+/**
+ * Help must never fail.
+ *
+ * A malformed NMMON_PORT is a real error for `serve`, which reports it properly
+ * - but `nmmon --help` is often exactly how you go looking for what that
+ * variable is supposed to contain, and throwing out of usage() leaves you with
+ * a stack trace instead of the answer.
+ */
+function describedDefaultPort() {
+  try {
+    return String(defaultPort());
+  } catch {
+    return `${DEFAULT_PORT}; NMMON_PORT is currently set to something that is not a port`;
+  }
+}
+
+function usage() {
+  return `${bold('nmmon')} - watch every no-mistakes run and Claude session on this machine
+
+${bold('Usage')}
+  nmmon serve              start the monitor and print the dashboard URL
+  nmmon open               print (and open) the dashboard URL
+  nmmon status             one-shot text summary, no server needed
+  nmmon focus <session>    bring a session's window to the front
+  nmmon install-hooks      add the Claude Code hooks to settings.json
+  nmmon uninstall-hooks    remove them again
+  nmmon doctor             check the setup and explain anything missing
+
+${bold('Options')}
+  --port <n>               listen on a different port (default ${describedDefaultPort()})
+  --settings <path>        settings file for install/uninstall (default ~/.claude/settings.json)
+  --dry-run                show what would change, write nothing
+  --yes                    do not ask for confirmation
+`;
+}
+
+async function confirm(question) {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = await rl.question(`${question} [y/N] `);
+    return /^y(es)?$/i.test(answer.trim());
+  } finally {
+    rl.close();
+  }
+}
+
+// ------------------------------------------------------------------ commands
+
+async function cmdServe(flags) {
+  ensureDirs();
+  let port;
+  try {
+    port = flags.port === undefined ? defaultPort() : portFromFlag(flags.port);
+  } catch (err) {
+    console.error(red(err.message));
+    process.exitCode = 1;
+    return;
+  }
+  const monitor = createMonitorServer({ port });
+  await monitor.start();
+
+  console.log(`${bold('nmmon')} is watching.`);
+  console.log(`  Dashboard  ${green(monitor.url())}`);
+  console.log(`  Source     ${monitor.probe.mode === 'sqlite' ? 'no-mistakes database' : 'per-repo fallback'}`);
+  if (monitor.probe.warning) console.log(`  ${yellow('Note')}       ${monitor.probe.warning}`);
+
+  const settings = readSettingsQuietly(DEFAULT_SETTINGS);
+  if (!hooksInstalled(settings)) {
+    console.log(
+      `\n  ${yellow('Hooks are not installed.')} Pipeline state will still show, but nmmon cannot\n` +
+        '  tell when Claude is waiting for you, and cannot focus windows.\n' +
+        `  Run ${bold('nmmon install-hooks')}, then restart your Claude sessions.`,
+    );
+  }
+  console.log(dim('\n  Ctrl-C to stop.'));
+
+  const shutdown = async () => {
+    await monitor.stop();
+    process.exit(0);
+  };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+}
+
+function readServerInfo() {
+  try {
+    return JSON.parse(readFileSync(serverInfoPath(), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+async function cmdOpen() {
+  const info = readServerInfo();
+  if (!info) {
+    console.error(`nmmon is not running. Start it with ${bold('nmmon serve')}.`);
+    process.exitCode = 1;
+    return;
+  }
+  const url = `http://127.0.0.1:${info.port}/?t=${info.token}`;
+  console.log(url);
+  if (process.platform === 'darwin') tryExec(exec, 'open', [url]);
+}
+
+function cmdStatus() {
+  const registry = new SessionRegistry({ dir: sessionsDir() });
+  const sessions = registry.list();
+  const nmState = new NoMistakesState({ dbPath: statePath(), exec });
+  nmState.probe();
+  const candidateDirs = [...new Set(sessions.map((s) => s.cwd).filter(Boolean))];
+  // One shot and then gone, so this is the one caller that can afford to wait
+  // for the degraded path rather than reporting an empty cache.
+  const { runs, warning } = nmState.read({ candidateDirs, blocking: true });
+
+  // Reuse the dashboard projection so the CLI and the page can never disagree.
+  const rows = buildRows({ sessions, runs });
+
+  if (warning) console.log(`${yellow('Note')} ${warning}\n`);
+  if (rows.length === 0) {
+    console.log('Nothing running.');
+    nmState.close();
+    return;
+  }
+  for (const row of rows) {
+    const colour = row.attention === 'blocked' ? red : row.attention === 'parked' ? yellow : dim;
+    const step = row.run?.step ? ` ${dim(`step ${row.run.step.name}`)}` : '';
+    console.log(
+      `${colour(row.attentionLabel.padEnd(26))} ${bold(row.title)} ${dim(row.branch || '')}${step}`,
+    );
+    if (row.message) console.log(`  ${dim(row.message)}`);
+  }
+  nmState.close();
+}
+
+async function cmdFocus(positional) {
+  const sessionId = positional[0];
+  if (!sessionId) {
+    console.error('Usage: nmmon focus <session-id>');
+    process.exitCode = 1;
+    return;
+  }
+  const registry = new SessionRegistry({ dir: sessionsDir() });
+  const record = registry.get(sessionId);
+  if (!record) {
+    console.error(`No session ${sessionId}. Run ${bold('nmmon status')} to list them.`);
+    process.exitCode = 1;
+    return;
+  }
+  const result = await focusSession(record, { exec: execAsync });
+  if (result.ok) {
+    console.log(`Focused via ${result.adapter}.`);
+  } else {
+    console.error(result.reason || 'Could not focus that session.');
+    if (result.hint) console.error(`  Try: ${bold(result.hint)}`);
+    process.exitCode = 1;
+  }
+}
+
+function readSettingsQuietly(path) {
+  try {
+    return readSettings(path);
+  } catch {
+    return {};
+  }
+}
+
+function hooksInstalled(settings) {
+  return HOOK_EVENTS.every((event) =>
+    (settings?.hooks?.[event] || []).some((group) =>
+      (group?.hooks || []).some((h) => String(h?.command || '').includes('nmmon-hook.js')),
+    ),
+  );
+}
+
+async function cmdInstallHooks(flags) {
+  const settingsPath = flags.settings || DEFAULT_SETTINGS;
+  const command = hookCommand(process.execPath, HOOK_SCRIPT);
+  let existing;
+  try {
+    existing = readSettings(settingsPath);
+  } catch (err) {
+    console.error(red(err.message));
+    process.exitCode = 1;
+    return;
+  }
+  const { settings, changes } = mergeHooks(existing, command);
+
+  if (changes.length === 0) {
+    console.log(`${green('Already installed')} - hooks in ${settingsPath} are up to date.`);
+    return;
+  }
+
+  console.log(`${bold('Changes to')} ${settingsPath}`);
+  for (const change of changes) console.log(`  ${change}`);
+  console.log(`\n${bold('Hook command')}\n  ${command}\n`);
+
+  if (flags['dry-run']) {
+    console.log(dim('Dry run; nothing written.'));
+    return;
+  }
+  if (!flags.yes && !(await confirm('Write these changes?'))) {
+    console.log('Nothing written.');
+    return;
+  }
+  const backupPath = writeSettings(settingsPath, settings);
+  console.log(green(`Installed. ${backupPath ? `Backup at ${backupPath}` : ''}`));
+  console.log(
+    dim('Restart any Claude sessions you already have open - hooks are read at session start.'),
+  );
+}
+
+async function cmdUninstallHooks(flags) {
+  const settingsPath = flags.settings || DEFAULT_SETTINGS;
+  const existing = readSettings(settingsPath);
+  const { settings, changes } = removeHooks(existing);
+  if (changes.length === 0) {
+    console.log('No nmmon hooks found.');
+    return;
+  }
+  if (flags['dry-run']) {
+    console.log(changes.join('\n'));
+    return;
+  }
+  if (!flags.yes && !(await confirm(`Remove ${changes.length} hook entries from ${settingsPath}?`))) {
+    console.log('Nothing written.');
+    return;
+  }
+  writeSettings(settingsPath, settings);
+  console.log(green('Removed.'));
+}
+
+async function cmdDoctor() {
+  const checks = [];
+  const ok = (name, detail) => checks.push({ state: 'ok', name, detail });
+  const warn = (name, detail) => checks.push({ state: 'warn', name, detail });
+  const bad = (name, detail) => checks.push({ state: 'bad', name, detail });
+
+  const [major, minor] = process.versions.node.split('.').map(Number);
+  if (major > 22 || (major === 22 && minor >= 5)) {
+    ok('Node', `v${process.versions.node}`);
+  } else {
+    bad('Node', `v${process.versions.node} - nmmon needs 22.5 or newer for the built-in SQLite support`);
+  }
+
+  const dbPath = statePath();
+  if (!existsSync(dbPath)) {
+    bad('no-mistakes database', `not found at ${dbPath} - is no-mistakes installed?`);
+  } else {
+    const state = new NoMistakesState({ dbPath, exec });
+    const probe = state.probe();
+    if (probe.mode === 'sqlite') {
+      const { runs } = state.read();
+      ok('no-mistakes database', `readable, ${runs.length} run(s) in the current window`);
+    } else {
+      warn('no-mistakes database', probe.warning);
+    }
+    state.close();
+  }
+
+  const settings = readSettingsQuietly(DEFAULT_SETTINGS);
+  if (hooksInstalled(settings)) {
+    ok('Claude Code hooks', `installed in ${DEFAULT_SETTINGS}`);
+  } else {
+    warn('Claude Code hooks', `not installed - run ${bold('nmmon install-hooks')}`);
+  }
+
+  const sessions = new SessionRegistry({ dir: sessionsDir() }).list();
+  if (sessions.length > 0) {
+    const focusable = sessions.filter((s) => s.host?.tmux_pane || s.host?.iterm_session_id || s.host?.tty);
+    ok('Sessions', `${sessions.length} registered, ${focusable.length} focusable`);
+  } else {
+    warn('Sessions', 'none registered yet - start a Claude session after installing the hooks');
+  }
+
+  if (await tryExecAsync(execAsync, 'tmux', ['-V'])) {
+    ok('tmux', 'available');
+  } else {
+    warn('tmux', 'not installed - only plain terminal tabs can be focused');
+  }
+
+  const available = [];
+  for (const terminal of ALL_TERMINALS) {
+    if (await terminal.isAvailable(execAsync)) available.push(terminal.label);
+  }
+  if (available.length > 0) {
+    ok('Terminals', available.join(', '));
+  } else if (process.platform === 'darwin') {
+    warn('Terminals', 'no supported terminal running (iTerm2, Terminal.app)');
+  } else {
+    warn('Terminals', `focusing is macOS-only so far; on ${process.platform} nmmon still monitors`);
+  }
+
+  const info = readServerInfo();
+  if (info) {
+    ok('Server', `recorded on port ${info.port} (pid ${info.pid})`);
+  } else {
+    warn('Server', `not running - start it with ${bold('nmmon serve')}`);
+  }
+
+  console.log(`${bold('nmmon doctor')}   home: ${monitorHome()}\n`);
+  for (const check of checks) {
+    const mark = check.state === 'ok' ? green('ok  ') : check.state === 'warn' ? yellow('warn') : red('fail');
+    console.log(`  ${mark}  ${check.name.padEnd(22)} ${check.detail}`);
+  }
+  if (checks.some((c) => c.state === 'bad')) process.exitCode = 1;
+}
+
+// --------------------------------------------------------------------- entry
+
+async function main() {
+  const { command, flags, positional, wantsHelp } = parseArgv(process.argv.slice(2));
+
+  if (wantsHelp) {
+    console.log(usage());
+    return;
+  }
+
+  switch (command) {
+    case 'serve':
+      await cmdServe(flags);
+      break;
+    case 'open':
+      await cmdOpen();
+      break;
+    case 'status':
+      cmdStatus();
+      break;
+    case 'focus':
+      await cmdFocus(positional);
+      break;
+    case 'install-hooks':
+      await cmdInstallHooks(flags);
+      break;
+    case 'uninstall-hooks':
+      await cmdUninstallHooks(flags);
+      break;
+    case 'doctor':
+      await cmdDoctor();
+      break;
+    default:
+      console.error(`Unknown command: ${command}\n`);
+      console.log(usage());
+      process.exitCode = 1;
+  }
+}
+
+main().catch((err) => {
+  console.error(red(err.stack || err.message));
+  process.exit(1);
+});
