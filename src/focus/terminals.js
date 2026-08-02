@@ -7,6 +7,10 @@
  * configuring anything.
  *
  * Adding a terminal means adding an entry here and nothing else.
+ *
+ * `exec` is asynchronous throughout: an adapter can be reached from an HTTP
+ * handler, and osascript against a busy terminal is exactly the sort of command
+ * that takes seconds. See execAsync in ../exec.js.
  */
 
 import { itermFocusScript, terminalAppFocusScript, appRunningScript } from './applescript.js';
@@ -17,9 +21,9 @@ function runScript(exec, script) {
   return exec(OSASCRIPT, ['-e', script], { timeoutMs: 5000 });
 }
 
-function isAppRunning(exec, processName) {
+async function isAppRunning(exec, processName) {
   try {
-    return runScript(exec, appRunningScript(processName)).trim() === 'true';
+    return (await runScript(exec, appRunningScript(processName))).trim() === 'true';
   } catch {
     return false;
   }
@@ -30,22 +34,22 @@ export const iterm2 = {
   label: 'iTerm2',
   /** Set by the hook as TERM_PROGRAM when Claude runs in a plain iTerm2 tab. */
   termProgram: 'iTerm.app',
-  isAvailable(exec) {
-    return process.platform === 'darwin' && isAppRunning(exec, 'iTerm2');
+  async isAvailable(exec) {
+    return process.platform === 'darwin' && (await isAppRunning(exec, 'iTerm2'));
   },
   /**
    * @param {{sessionUuid?: string|null, tty?: string|null}} target
-   * @returns {boolean} whether a matching tab was found and focused
+   * @returns {Promise<boolean>} whether a matching tab was found and focused
    */
-  focus(exec, { sessionUuid = null, tty = null }) {
+  async focus(exec, { sessionUuid = null, tty = null }) {
     if (!sessionUuid && !tty) return false;
     // Prefer the session UUID: it survives the tab moving between windows,
     // whereas a tty can be recycled by a later process.
     if (sessionUuid) {
-      if (runScript(exec, itermFocusScript({ sessionUuid })) === 'ok') return true;
+      if ((await runScript(exec, itermFocusScript({ sessionUuid }))) === 'ok') return true;
     }
     if (tty) {
-      return runScript(exec, itermFocusScript({ tty })) === 'ok';
+      return (await runScript(exec, itermFocusScript({ tty }))) === 'ok';
     }
     return false;
   },
@@ -55,16 +59,18 @@ export const terminalApp = {
   name: 'terminal-app',
   label: 'Terminal.app',
   termProgram: 'Apple_Terminal',
-  isAvailable(exec) {
-    return process.platform === 'darwin' && isAppRunning(exec, 'Terminal');
+  async isAvailable(exec) {
+    return process.platform === 'darwin' && (await isAppRunning(exec, 'Terminal'));
   },
   /**
    * Terminal.app exposes no session identifier we can match from the shell, so
    * this adapter is tty-only.
+   *
+   * @returns {Promise<boolean>}
    */
-  focus(exec, { tty = null }) {
+  async focus(exec, { tty = null }) {
     if (!tty) return false;
-    return runScript(exec, terminalAppFocusScript({ tty })) === 'ok';
+    return (await runScript(exec, terminalAppFocusScript({ tty }))) === 'ok';
   },
 };
 

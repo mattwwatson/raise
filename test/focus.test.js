@@ -2,14 +2,19 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { planFocus, itermUuid, focusSession } from '../src/focus/index.js';
-import { orderedTerminals } from '../src/focus/terminals.js';
+import { orderedTerminals, ALL_TERMINALS } from '../src/focus/terminals.js';
 import { socketArgs, resolveTmuxTarget } from '../src/focus/tmux.js';
 import { itermFocusScript, terminalAppFocusScript, escapeAppleScript } from '../src/focus/applescript.js';
 
-/** A fake exec that answers from a table and records what it was asked. */
+/**
+ * A fake exec that answers from a table and records what it was asked.
+ *
+ * Async, like the real runner the focus path is given: everything here is
+ * reachable from an HTTP handler, so a synchronous exec would be the bug.
+ */
 function fakeExec(responses) {
   const calls = [];
-  const run = (command, args = []) => {
+  const run = async (command, args = []) => {
     const key = [command, ...args].join(' ');
     calls.push(key);
     for (const [pattern, value] of Object.entries(responses)) {
@@ -102,34 +107,34 @@ test('socketArgs honours a custom tmux socket', () => {
   assert.deepEqual(socketArgs(null), []);
 });
 
-test('resolveTmuxTarget returns the attached client tty', () => {
+test('resolveTmuxTarget returns the attached client tty', async () => {
   const exec = fakeExec({
     'display-message': 'firstmate',
     'list-clients': '/dev/ttys002',
   });
-  assert.deepEqual(resolveTmuxTarget(exec, { pane: '%1', tmuxEnv: null }), {
+  assert.deepEqual(await resolveTmuxTarget(exec, { pane: '%1', tmuxEnv: null }), {
     ok: true,
     session: 'firstmate',
     tty: '/dev/ttys002',
   });
 });
 
-test('resolveTmuxTarget reports a detached session with an attach hint', () => {
+test('resolveTmuxTarget reports a detached session with an attach hint', async () => {
   const exec = fakeExec({ 'display-message': 'background', 'list-clients': '' });
-  const result = resolveTmuxTarget(exec, { pane: '%1', tmuxEnv: null });
+  const result = await resolveTmuxTarget(exec, { pane: '%1', tmuxEnv: null });
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'detached');
   assert.equal(result.hint, 'tmux attach -t background');
 });
 
-test('resolveTmuxTarget reports a pane that no longer exists', () => {
+test('resolveTmuxTarget reports a pane that no longer exists', async () => {
   const exec = fakeExec({ 'display-message': new Error('no such pane') });
-  const result = resolveTmuxTarget(exec, { pane: '%99', tmuxEnv: null });
+  const result = await resolveTmuxTarget(exec, { pane: '%99', tmuxEnv: null });
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'pane-gone');
 });
 
-test('focusSession focuses a plain tab through the matching terminal', () => {
+test('focusSession focuses a plain tab through the matching terminal', async () => {
   const seen = [];
   const terminals = [
     {
@@ -143,7 +148,7 @@ test('focusSession focuses a plain tab through the matching terminal', () => {
       },
     },
   ];
-  const result = focusSession(
+  const result = await focusSession(
     { host: { iterm_session_id: 'w0t1p0:57A1A161-0489-48BD-8C6E-A540C57DD9DE', term_program: 'iTerm.app' } },
     { exec: fakeExec({}), terminals },
   );
@@ -151,35 +156,64 @@ test('focusSession focuses a plain tab through the matching terminal', () => {
   assert.equal(seen[0].sessionUuid, '57A1A161-0489-48BD-8C6E-A540C57DD9DE');
 });
 
-test('focusSession falls through to the next terminal when the first has no match', () => {
+test('focusSession falls through to the next terminal when the first has no match', async () => {
   const terminals = [
     { name: 'a', label: 'A', termProgram: 'x', isAvailable: () => true, focus: () => false },
     { name: 'b', label: 'B', termProgram: 'y', isAvailable: () => true, focus: () => true },
   ];
-  const result = focusSession({ host: { tty: '/dev/ttys004' } }, { exec: fakeExec({}), terminals });
+  const result = await focusSession(
+    { host: { tty: '/dev/ttys004' } },
+    { exec: fakeExec({}), terminals },
+  );
   assert.equal(result.ok, true);
   assert.equal(result.adapter, 'b');
 });
 
-test('focusSession does not let a throwing adapter block the others', () => {
+test('focusSession does not let a rejecting adapter block the others', async () => {
   const terminals = [
     {
       name: 'broken',
       label: 'Broken',
       termProgram: 'x',
       isAvailable: () => true,
-      focus: () => {
+      // A rejected promise, not a synchronous throw: that is how the real
+      // async adapters fail, and it has to be caught the same way.
+      focus: async () => {
         throw new Error('osascript blew up');
       },
     },
     { name: 'good', label: 'Good', termProgram: 'y', isAvailable: () => true, focus: () => true },
   ];
-  const result = focusSession({ host: { tty: '/dev/ttys004' } }, { exec: fakeExec({}), terminals });
+  const result = await focusSession(
+    { host: { tty: '/dev/ttys004' } },
+    { exec: fakeExec({}), terminals },
+  );
   assert.equal(result.ok, true);
   assert.equal(result.adapter, 'good');
 });
 
-test('focusSession selects the pane then focuses the tmux host window', () => {
+test('focusSession survives an adapter whose availability check rejects', async () => {
+  const terminals = [
+    {
+      name: 'broken',
+      label: 'Broken',
+      termProgram: 'x',
+      isAvailable: async () => {
+        throw new Error('osascript timed out');
+      },
+      focus: () => true,
+    },
+    { name: 'good', label: 'Good', termProgram: 'y', isAvailable: () => true, focus: () => true },
+  ];
+  const result = await focusSession(
+    { host: { tty: '/dev/ttys004' } },
+    { exec: fakeExec({}), terminals },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.adapter, 'good');
+});
+
+test('focusSession selects the pane then focuses the tmux host window', async () => {
   const exec = fakeExec({
     'display-message': 'firstmate',
     'list-clients': '/dev/ttys002',
@@ -199,7 +233,7 @@ test('focusSession selects the pane then focuses the tmux host window', () => {
       },
     },
   ];
-  const result = focusSession(
+  const result = await focusSession(
     { host: { tmux_pane: '%7', tmux: '/tmp/tmux-501/default,1,0' } },
     { exec, terminals },
   );
@@ -214,21 +248,41 @@ test('focusSession selects the pane then focuses the tmux host window', () => {
   assert.deepEqual(focused[0], { sessionUuid: null, tty: '/dev/ttys002' });
 });
 
-test('focusSession explains a detached tmux session instead of failing silently', () => {
+test('focusSession explains a detached tmux session instead of failing silently', async () => {
   const exec = fakeExec({ 'display-message': 'background', 'list-clients': '' });
-  const result = focusSession({ host: { tmux_pane: '%7' } }, { exec, terminals: [] });
+  const result = await focusSession({ host: { tmux_pane: '%7' } }, { exec, terminals: [] });
   assert.equal(result.ok, false);
   assert.match(result.reason, /not attached/);
   assert.equal(result.hint, 'tmux attach -t background');
 });
 
-test('focusSession reports when no supported terminal is running', () => {
+test('focusSession reports when no supported terminal is running', async () => {
   const terminals = [
     { name: 'a', label: 'A', termProgram: 'x', isAvailable: () => false, focus: () => true },
   ];
-  const result = focusSession({ host: { tty: '/dev/ttys004' } }, { exec: fakeExec({}), terminals });
+  const result = await focusSession(
+    { host: { tty: '/dev/ttys004' } },
+    { exec: fakeExec({}), terminals },
+  );
   assert.equal(result.ok, false);
   assert.match(result.reason, /No supported terminal|only implemented for macOS/);
+});
+
+test('the terminal adapters never run a command synchronously', async () => {
+  // The whole point of the async chain: anything the /focus handler can reach
+  // must hand back a promise rather than block the event loop. A sync adapter
+  // would return a plain boolean here and the assertion would fail.
+  const exec = async () => 'false';
+  for (const terminal of ALL_TERMINALS) {
+    assert.ok(
+      terminal.isAvailable(exec) instanceof Promise,
+      `${terminal.name}.isAvailable must be async`,
+    );
+    assert.ok(
+      terminal.focus(exec, { tty: '/dev/ttys004' }) instanceof Promise,
+      `${terminal.name}.focus must be async`,
+    );
+  }
 });
 
 test('AppleScript values are escaped', () => {

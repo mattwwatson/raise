@@ -25,12 +25,13 @@ import { NoMistakesState } from '../src/nm-state.js';
 import { SessionRegistry } from '../src/registry.js';
 import { focusSession } from '../src/focus/index.js';
 import { ALL_TERMINALS } from '../src/focus/terminals.js';
-import { exec, tryExec } from '../src/exec.js';
+import { exec, execAsync, tryExec, tryExecAsync } from '../src/exec.js';
 import {
   monitorHome,
   sessionsDir,
   statePath,
   serverInfoPath,
+  DEFAULT_PORT,
   defaultPort,
   portFromFlag,
   ensureDirs,
@@ -48,6 +49,22 @@ const green = (s) => `[32m${s}[0m`;
 const red = (s) => `[31m${s}[0m`;
 const yellow = (s) => `[33m${s}[0m`;
 
+/**
+ * Help must never fail.
+ *
+ * A malformed NMMON_PORT is a real error for `serve`, which reports it properly
+ * - but `nmmon --help` is often exactly how you go looking for what that
+ * variable is supposed to contain, and throwing out of usage() leaves you with
+ * a stack trace instead of the answer.
+ */
+function describedDefaultPort() {
+  try {
+    return String(defaultPort());
+  } catch {
+    return `${DEFAULT_PORT}; NMMON_PORT is currently set to something that is not a port`;
+  }
+}
+
 function usage() {
   return `${bold('nmmon')} - watch every no-mistakes run and Claude session on this machine
 
@@ -61,7 +78,7 @@ ${bold('Usage')}
   nmmon doctor             check the setup and explain anything missing
 
 ${bold('Options')}
-  --port <n>               listen on a different port (default ${defaultPort()})
+  --port <n>               listen on a different port (default ${describedDefaultPort()})
   --settings <path>        settings file for install/uninstall (default ~/.claude/settings.json)
   --dry-run                show what would change, write nothing
   --yes                    do not ask for confirmation
@@ -166,7 +183,7 @@ function cmdStatus() {
   nmState.close();
 }
 
-function cmdFocus(positional) {
+async function cmdFocus(positional) {
   const sessionId = positional[0];
   if (!sessionId) {
     console.error('Usage: nmmon focus <session-id>');
@@ -180,7 +197,7 @@ function cmdFocus(positional) {
     process.exitCode = 1;
     return;
   }
-  const result = focusSession(record, { exec });
+  const result = await focusSession(record, { exec: execAsync });
   if (result.ok) {
     console.log(`Focused via ${result.adapter}.`);
   } else {
@@ -263,7 +280,7 @@ async function cmdUninstallHooks(flags) {
   console.log(green('Removed.'));
 }
 
-function cmdDoctor() {
+async function cmdDoctor() {
   const checks = [];
   const ok = (name, detail) => checks.push({ state: 'ok', name, detail });
   const warn = (name, detail) => checks.push({ state: 'warn', name, detail });
@@ -306,13 +323,16 @@ function cmdDoctor() {
     warn('Sessions', 'none registered yet - start a Claude session after installing the hooks');
   }
 
-  if (tryExec(exec, 'tmux', ['-V'])) {
+  if (await tryExecAsync(execAsync, 'tmux', ['-V'])) {
     ok('tmux', 'available');
   } else {
     warn('tmux', 'not installed - only plain terminal tabs can be focused');
   }
 
-  const available = ALL_TERMINALS.filter((t) => t.isAvailable(exec)).map((t) => t.label);
+  const available = [];
+  for (const terminal of ALL_TERMINALS) {
+    if (await terminal.isAvailable(execAsync)) available.push(terminal.label);
+  }
   if (available.length > 0) {
     ok('Terminals', available.join(', '));
   } else if (process.platform === 'darwin') {
@@ -357,7 +377,7 @@ async function main() {
       cmdStatus();
       break;
     case 'focus':
-      cmdFocus(positional);
+      await cmdFocus(positional);
       break;
     case 'install-hooks':
       await cmdInstallHooks(flags);
@@ -366,7 +386,7 @@ async function main() {
       await cmdUninstallHooks(flags);
       break;
     case 'doctor':
-      cmdDoctor();
+      await cmdDoctor();
       break;
     default:
       console.error(`Unknown command: ${command}\n`);

@@ -144,11 +144,106 @@ export function buildRows({ sessions, runs, now = Date.now() }) {
     });
   }
 
-  return sortRows(rows);
+  return sortRows(disambiguateTitles(rows));
 }
 
 function isRecent(run, now, windowMs = 30 * 60 * 1000) {
   return run.updatedAt != null && now - run.updatedAt < windowMs;
+}
+
+/**
+ * Beyond this a title has stopped being a label and become a path. Two
+ * directories that agree on their last eight segments are indistinguishable in
+ * a one-line card either way.
+ */
+const MAX_TITLE_SEGMENTS = 8;
+
+function pathSegments(path) {
+  return String(path).split('/').filter(Boolean);
+}
+
+function suffixTitle(segments, depth) {
+  return segments.slice(Math.max(0, segments.length - depth)).join('/');
+}
+
+/**
+ * Give each path the shortest trailing run of segments that tells it apart from
+ * the rest of the group.
+ *
+ * Depths are decided per path, not for the group as a whole: a path that is
+ * already unique with one parent does not get lengthened because two others
+ * needed two. A path with no segments left to add is taken as final - it has
+ * said everything it can - and any deeper title necessarily has more segments,
+ * so it can never collide with one.
+ *
+ * @param {string[]} paths distinct directory paths
+ * @returns {Map<string, string>} path -> title
+ */
+export function shortestUniqueTitles(paths) {
+  const segments = new Map(paths.map((path) => [path, pathSegments(path)]));
+  const deepest = Math.min(
+    MAX_TITLE_SEGMENTS,
+    Math.max(...paths.map((path) => segments.get(path).length)),
+  );
+  const resolved = new Map();
+  let pending = [...paths];
+
+  for (let depth = 2; depth <= deepest && pending.length > 0; depth += 1) {
+    const candidates = new Map(pending.map((path) => [path, suffixTitle(segments.get(path), depth)]));
+    const counts = new Map();
+    for (const title of [...candidates.values(), ...resolved.values()]) {
+      counts.set(title, (counts.get(title) || 0) + 1);
+    }
+    const unresolved = [];
+    for (const path of pending) {
+      const title = candidates.get(path);
+      if (counts.get(title) === 1 || segments.get(path).length <= depth) {
+        resolved.set(path, title);
+      } else {
+        unresolved.push(path);
+      }
+    }
+    pending = unresolved;
+  }
+
+  // Anything still ambiguous at the cap gets the longest title allowed. Rare
+  // enough to be worth accepting rather than growing the card without limit.
+  for (const path of pending) resolved.set(path, suffixTitle(segments.get(path), deepest));
+  return resolved;
+}
+
+/**
+ * Pull apart rows that would otherwise render under the same name.
+ *
+ * A title is a basename, so a repo, its worktrees and any second clone all show
+ * as the same word - `/Users/x/work/thing` and `/Users/x/.trees/ab12/thing`
+ * are both "thing", and the page becomes a guessing game about which card is
+ * which.
+ *
+ * Rows sharing a working directory are genuinely the same place and keep the
+ * same title; extending the path could not separate them and only adds noise.
+ * Only distinct directories are disambiguated.
+ */
+export function disambiguateTitles(rows) {
+  /** @type {Map<string, object[]>} */
+  const groups = new Map();
+  for (const row of rows) {
+    if (!row.cwd) continue;
+    const group = groups.get(row.title);
+    if (group) group.push(row);
+    else groups.set(row.title, [row]);
+  }
+
+  /** @type {Map<string, string>} row id -> replacement title */
+  const overrides = new Map();
+  for (const group of groups.values()) {
+    const paths = [...new Set(group.map((row) => row.cwd))];
+    if (paths.length < 2) continue;
+    const titles = shortestUniqueTitles(paths);
+    for (const row of group) overrides.set(row.id, titles.get(row.cwd));
+  }
+  if (overrides.size === 0) return rows;
+  return rows.map((row) => (overrides.has(row.id) ? { ...row, title: overrides.get(row.id) } : row));
 }
 
 export function sortRows(rows) {

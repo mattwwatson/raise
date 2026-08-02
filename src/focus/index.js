@@ -81,21 +81,25 @@ export function planFocus(record) {
 /**
  * Try every terminal adapter in turn until one reports it found the tab.
  *
- * @returns {{ok: boolean, adapter?: string, reason?: string}}
+ * @returns {Promise<{ok: boolean, adapter?: string, reason?: string}>}
  */
-function focusTerminal(exec, { sessionUuid, tty, termProgram, terminals }) {
+async function focusTerminal(exec, { sessionUuid, tty, termProgram, terminals }) {
   const candidates = orderedTerminals(termProgram, terminals);
   const attempted = [];
   for (const terminal of candidates) {
-    if (!terminal.isAvailable(exec)) continue;
-    attempted.push(terminal.label);
+    // Sequential on purpose: the adapters compete to raise a window, so asking
+    // them all at once would race two terminals to the front.
     try {
-      if (terminal.focus(exec, { sessionUuid, tty })) {
+      if (!(await terminal.isAvailable(exec))) continue;
+      attempted.push(terminal.label);
+      if (await terminal.focus(exec, { sessionUuid, tty })) {
         return { ok: true, adapter: terminal.name };
       }
     } catch {
       // A terminal that errors is treated as "not this one" so a single
-      // misbehaving adapter cannot block the others.
+      // misbehaving adapter cannot block the others. The availability check is
+      // inside the guard too: osascript against a wedged terminal times out,
+      // and that must not decide the answer for every other terminal.
     }
   }
   if (attempted.length === 0) {
@@ -117,10 +121,11 @@ function focusTerminal(exec, { sessionUuid, tty, termProgram, terminals }) {
  * Focus the window hosting a session.
  *
  * @param {object} record session record
- * @param {{exec: Function, terminals?: object[]}} deps
- * @returns {{ok: boolean, adapter?: string, reason?: string, hint?: string, tmuxSession?: string}}
+ * @param {{exec: Function, terminals?: object[]}} deps `exec` must be
+ *   asynchronous; this is reachable from the server's /focus handler.
+ * @returns {Promise<{ok: boolean, adapter?: string, reason?: string, hint?: string, tmuxSession?: string}>}
  */
-export function focusSession(record, { exec, terminals = ALL_TERMINALS }) {
+export async function focusSession(record, { exec, terminals = ALL_TERMINALS }) {
   const plan = planFocus(record);
 
   if (plan.kind === 'unfocusable') {
@@ -133,7 +138,7 @@ export function focusSession(record, { exec, terminals = ALL_TERMINALS }) {
 
   // tmux: put the right pane in front inside tmux first, then surface the
   // terminal window that tmux client is living in.
-  const target = resolveTmuxTarget(exec, { pane: plan.pane, tmuxEnv: plan.tmuxEnv });
+  const target = await resolveTmuxTarget(exec, { pane: plan.pane, tmuxEnv: plan.tmuxEnv });
   if (!target.ok) {
     return {
       ok: false,
@@ -145,8 +150,8 @@ export function focusSession(record, { exec, terminals = ALL_TERMINALS }) {
       tmuxSession: target.session || undefined,
     };
   }
-  selectPane(exec, { pane: plan.pane, tmuxEnv: plan.tmuxEnv });
-  const result = focusTerminal(exec, {
+  await selectPane(exec, { pane: plan.pane, tmuxEnv: plan.tmuxEnv });
+  const result = await focusTerminal(exec, {
     sessionUuid: null,
     tty: target.tty,
     termProgram: plan.termProgram,

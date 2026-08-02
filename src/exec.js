@@ -138,3 +138,17 @@ export function tryExec(runner, command, args, options) {
     return null;
   }
 }
+
+/**
+ * The same for an async runner, which rejects rather than throwing - so
+ * tryExec would hand back a live rejected promise and blow up at the await.
+ *
+ * @returns {Promise<string|null>}
+ */
+export async function tryExecAsync(runner, command, args, options) {
+  try {
+    return await runner(command, args, options);
+  } catch {
+    return null;
+  }
+}

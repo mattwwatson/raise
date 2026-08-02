@@ -86,6 +86,16 @@ export function createMonitorServer({
     };
   }
 
+  /** Last resort for a request whose handler failed after the socket died. */
+  function endQuietly(res) {
+    try {
+      if (!res.headersSent) res.writeHead(500, { 'content-type': 'text/plain' });
+      res.end('request failed');
+    } catch {
+      // The socket is gone, which is why we are here.
+    }
+  }
+
   function dropClient(client) {
     clients.delete(client);
     try {
@@ -145,11 +155,14 @@ export function createMonitorServer({
       return;
     }
     if (req.method === 'POST' && url.pathname === '/event') {
-      handleHookEvent(req, res);
+      handleHookEvent(req, res).catch(() => endQuietly(res));
       return;
     }
     if (req.method === 'POST' && url.pathname === '/focus') {
-      handleFocus(req, res);
+      // /focus now waits on osascript and tmux, so the client has plenty of
+      // time to walk away. A write to its dead socket must not surface as an
+      // unhandled rejection and kill the monitor.
+      handleFocus(req, res).catch(() => endQuietly(res));
       return;
     }
     if (req.method === 'GET' && url.pathname === '/state') {
@@ -254,7 +267,15 @@ export function createMonitorServer({
       res.end(JSON.stringify({ ok: false, reason: 'that session is no longer registered' }));
       return;
     }
-    const result = focusSession(record, { exec });
+    // execAsync, never exec: focusing shells out to osascript and tmux, and a
+    // synchronous child here would stall the poll timer, every open event
+    // stream and every hook post along with it.
+    let result;
+    try {
+      result = await focusSession(record, { exec: execAsync });
+    } catch (err) {
+      result = { ok: false, reason: `Could not focus that session: ${err.message}` };
+    }
     res.writeHead(result.ok ? 200 : 409, { 'content-type': 'application/json' });
     res.end(JSON.stringify(result));
   }

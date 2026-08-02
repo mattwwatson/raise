@@ -98,6 +98,102 @@ test('stopping the server removes the file that tells hooks where to post', asyn
   }
 });
 
+test('/focus never runs a synchronous child process', async () => {
+  // The guard the other tests carry - exec: assert.fail - only means anything
+  // if something actually exercises the route. Focusing shells out to osascript
+  // and tmux, and a synchronous child in the HTTP handler stalls the poll
+  // timer, every open event stream and every hook post at once.
+  const { dir, cleanup } = scratch();
+  const previousHome = process.env.NMMON_HOME;
+  process.env.NMMON_HOME = dir;
+  try {
+    const port = await freePort();
+    const ran = [];
+    const monitor = createMonitorServer({
+      port,
+      token: 'test-token',
+      dbPath: join(dir, 'no-such.sqlite'),
+      sessionsPath: join(dir, 'sessions'),
+      exec: () => assert.fail('no blocking commands from the server'),
+      execAsync: async (command, args = []) => {
+        ran.push(command);
+        return '';
+      },
+    });
+    await monitor.start();
+
+    // Register a focusable session the way a hook would.
+    const registered = await fetch(`http://127.0.0.1:${port}/event`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-nmmon-token': 'test-token' },
+      body: JSON.stringify({
+        session_id: 'focus-me',
+        hook_event_name: 'SessionStart',
+        cwd: dir,
+        host: { tty: '/dev/ttys004', term_program: 'iTerm.app' },
+      }),
+    });
+    assert.equal(registered.status, 204);
+
+    const res = await fetch(`http://127.0.0.1:${port}/focus?t=test-token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-nmmon-token': 'test-token' },
+      body: JSON.stringify({ sessionId: 'focus-me' }),
+    });
+    // No terminal answers the fake runner, so the honest outcome is 409 with a
+    // reason - what matters is that it got there without a blocking exec.
+    assert.equal(res.status, 409);
+    const body = await res.json();
+    assert.equal(body.ok, false);
+    assert.ok(body.reason, 'a failed focus always explains itself');
+    if (process.platform === 'darwin') {
+      assert.ok(ran.includes('osascript'), 'the async runner is the one that was used');
+    }
+
+    // And the server is still answering afterwards.
+    const state = await fetch(`http://127.0.0.1:${port}/state?t=test-token`);
+    assert.equal(state.status, 200);
+
+    await monitor.stop();
+  } finally {
+    if (previousHome === undefined) delete process.env.NMMON_HOME;
+    else process.env.NMMON_HOME = previousHome;
+    cleanup();
+  }
+});
+
+test('/focus answers a session that is no longer registered', async () => {
+  const { dir, cleanup } = scratch();
+  const previousHome = process.env.NMMON_HOME;
+  process.env.NMMON_HOME = dir;
+  try {
+    const port = await freePort();
+    const monitor = createMonitorServer({
+      port,
+      token: 'test-token',
+      dbPath: join(dir, 'no-such.sqlite'),
+      sessionsPath: join(dir, 'sessions'),
+      exec: () => assert.fail('no blocking commands from the server'),
+      execAsync: async () => '',
+    });
+    await monitor.start();
+
+    const res = await fetch(`http://127.0.0.1:${port}/focus?t=test-token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-nmmon-token': 'test-token' },
+      body: JSON.stringify({ sessionId: 'gone' }),
+    });
+    assert.equal(res.status, 404);
+    assert.equal((await res.json()).ok, false);
+
+    await monitor.stop();
+  } finally {
+    if (previousHome === undefined) delete process.env.NMMON_HOME;
+    else process.env.NMMON_HOME = previousHome;
+    cleanup();
+  }
+});
+
 test('an event stream survives a client that vanishes mid-broadcast', async () => {
   const { dir, cleanup } = scratch();
   const previousHome = process.env.NMMON_HOME;

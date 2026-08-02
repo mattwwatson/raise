@@ -29,6 +29,20 @@ Two different things, because they answer two different questions.
 nmmon reads every repo's state from one place. You do not register repos with it and there is
 nothing to configure per project.
 
+**Rows name themselves apart.** A row is normally labelled with just the repo directory name,
+but a repo, its worktrees and a second clone of it all share that name - three cards reading
+`hexbattle` tell you nothing about which is which. When two rows would collide, each grows
+one parent directory at a time until they differ, and no further:
+
+```
+work/hexbattle          /Users/you/work/hexbattle
+2/hexbattle             /Users/you/.treehouse/hexbattle-04b649/2/hexbattle
+no-mistakes-monitor     unique already, so left alone
+```
+
+Two sessions in the *same* directory keep the same name - no amount of path would separate
+them - and are told apart by their branch and state instead.
+
 ## Requirements
 
 - Node 22.5 or newer (`node:sqlite` is used, and it is built in - **there are no npm dependencies**)
@@ -128,10 +142,17 @@ updated.
 npm test
 ```
 
-108 tests, no dependencies, no network, no build step. The focus adapters take an injected
+123 tests, no dependencies, no network, no build step. The focus adapters take an injected
 command runner, so the suite asserts on the AppleScript and tmux commands that *would* run
 without stealing your focus mid-test. The same goes for the process table and the pid
 liveness probe, which are injected rather than read from the machine running the tests.
+
+That injected runner is **asynchronous everywhere it is reachable from the server**. The
+server polls on a one second timer, pushes an event stream and answers hook posts that give
+up after two seconds; one synchronous child process stalls all three at once, and the signal
+you actually care about is the one that gets dropped. The server tests inject an `exec` that
+fails the test if it is ever called, and `/focus` is exercised against it so that guard means
+something.
 
 Coverage under Node 26 needs Node 24 (`c8` breaks on 26):
 
