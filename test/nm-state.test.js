@@ -1,7 +1,43 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { DatabaseSync } from 'node:sqlite';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { normaliseRun, currentStep, countFindings, parseAxiStatus } from '../src/nm-state.js';
+import {
+  NoMistakesState,
+  normaliseRun,
+  currentStep,
+  countFindings,
+  parseAxiStatus,
+  REQUIRED_RUN_COLUMNS,
+  REQUIRED_REPO_COLUMNS,
+  REQUIRED_STEP_COLUMNS,
+} from '../src/nm-state.js';
+
+function scratch() {
+  const dir = mkdtempSync(join(tmpdir(), 'nmmon-test-'));
+  return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
+/**
+ * Build a database whose schema matches what the queries need, minus whatever
+ * a test asks to drop. Column types do not matter to the probe.
+ */
+function makeDb(dir, { omit = [] } = {}) {
+  const path = join(dir, 'state.sqlite');
+  const db = new DatabaseSync(path);
+  const columns = (table, names) =>
+    names.filter((n) => !omit.includes(`${table}.${n}`)).map((n) => `${n} TEXT`).join(', ');
+  db.exec(`CREATE TABLE runs (${columns('runs', REQUIRED_RUN_COLUMNS)})`);
+  db.exec(`CREATE TABLE repos (${columns('repos', REQUIRED_REPO_COLUMNS)})`);
+  db.exec(`CREATE TABLE step_results (${columns('step_results', REQUIRED_STEP_COLUMNS)})`);
+  db.close();
+  return path;
+}
+
+const nextTick = () => new Promise((resolve) => setImmediate(resolve));
 
 test('currentStep prefers the running step', () => {
   const steps = [
@@ -118,4 +154,173 @@ test('the degraded parser does not call a finished run parked', () => {
 test('the degraded parser returns null for output it does not understand', () => {
   assert.equal(parseAxiStatus('', '/repo'), null);
   assert.equal(parseAxiStatus('error: not a repo', '/repo'), null);
+});
+
+test('a schema with every column the queries read takes the fast path', () => {
+  const { dir, cleanup } = scratch();
+  try {
+    const state = new NoMistakesState({ dbPath: makeDb(dir) });
+    assert.deepEqual(state.probe(), { mode: 'sqlite', warning: null });
+    state.close();
+  } finally {
+    cleanup();
+  }
+});
+
+test('the probe covers every column the queries select, not just the obvious ones', () => {
+  // A column that is selected but not probed degrades late and misleadingly,
+  // as "Lost the no-mistakes database (no such column: pr_url)" rather than the
+  // startup warning that says which build of no-mistakes you are running.
+  for (const column of ['runs.pr_url', 'runs.head_sha', 'runs.created_at', 'repos.working_path']) {
+    const { dir, cleanup } = scratch();
+    try {
+      const state = new NoMistakesState({ dbPath: makeDb(dir, { omit: [column] }) });
+      const probe = state.probe();
+      assert.equal(probe.mode, 'cli', column);
+      assert.match(probe.warning, new RegExp(column.replace('.', '\\.')));
+      state.close();
+    } finally {
+      cleanup();
+    }
+  }
+});
+
+test('the step_results columns are probed too', () => {
+  const { dir, cleanup } = scratch();
+  try {
+    const state = new NoMistakesState({ dbPath: makeDb(dir, { omit: ['step_results.log_path'] }) });
+    const probe = state.probe();
+    assert.equal(probe.mode, 'cli');
+    assert.match(probe.warning, /step_results\.log_path/);
+    state.close();
+  } finally {
+    cleanup();
+  }
+});
+
+test('an unreadable database degrades rather than throwing', () => {
+  const { dir, cleanup } = scratch();
+  try {
+    const state = new NoMistakesState({ dbPath: join(dir, 'not-there.sqlite') });
+    assert.equal(state.probe().mode, 'cli');
+    state.close();
+  } finally {
+    cleanup();
+  }
+});
+
+test('the degraded path never shells out on a server read', async () => {
+  // The server reads on a one second timer, on every hook post and on every
+  // /state request. A synchronous `no-mistakes axi status` per repo there stalls
+  // the poll loop and the event stream, and hook posts give up after two
+  // seconds - losing exactly the "waiting for you" signal that matters most.
+  const { dir, cleanup } = scratch();
+  try {
+    const asyncCalls = [];
+    const state = new NoMistakesState({
+      dbPath: join(dir, 'not-there.sqlite'),
+      exec: () => assert.fail('the server path must never use the blocking runner'),
+      execAsync: async (command, args, options) => {
+        asyncCalls.push(options.cwd);
+        return `run:\n  id: "r1"\n  branch: main\n  status: running\n`;
+      },
+    });
+    state.probe();
+
+    const first = state.read({ candidateDirs: ['/repo-a'] });
+    assert.deepEqual(first.runs, [], 'nothing cached yet, and nothing blocked on');
+    assert.equal(first.source, 'cli');
+
+    await nextTick();
+    await nextTick();
+    assert.deepEqual(asyncCalls, ['/repo-a']);
+
+    const second = state.read({ candidateDirs: ['/repo-a'] });
+    assert.equal(second.runs.length, 1);
+    assert.equal(second.runs[0].repoPath, '/repo-a');
+    state.close();
+  } finally {
+    cleanup();
+  }
+});
+
+test('a degraded reading is cached well past the poll interval', async () => {
+  const { dir, cleanup } = scratch();
+  try {
+    let calls = 0;
+    const state = new NoMistakesState({
+      dbPath: join(dir, 'not-there.sqlite'),
+      execAsync: async () => {
+        calls += 1;
+        return `run:\n  id: "r1"\n  branch: main\n  status: running\n`;
+      },
+    });
+    state.probe();
+    state.read({ candidateDirs: ['/repo-a'] });
+    await nextTick();
+    await nextTick();
+    assert.equal(calls, 1);
+
+    // A second of poll ticks must not turn into a second of process starts.
+    for (let i = 0; i < 5; i += 1) state.read({ candidateDirs: ['/repo-a'] });
+    await nextTick();
+    assert.equal(calls, 1);
+
+    // Once it is stale, one refresh - and the caller still does not wait.
+    state.read({ candidateDirs: ['/repo-a'], now: Date.now() + 60_000 });
+    await nextTick();
+    await nextTick();
+    assert.equal(calls, 2);
+    state.close();
+  } finally {
+    cleanup();
+  }
+});
+
+test('a one-shot command may still block for the degraded reading', () => {
+  const { dir, cleanup } = scratch();
+  try {
+    const calls = [];
+    const state = new NoMistakesState({
+      dbPath: join(dir, 'not-there.sqlite'),
+      exec: (command, args, options) => {
+        calls.push(options.cwd);
+        return `run:\n  id: "r1"\n  branch: main\n  status: running\n`;
+      },
+      execAsync: async () => assert.fail('blocking reads should not also refresh'),
+    });
+    state.probe();
+    const { runs } = state.read({ candidateDirs: ['/repo-a'], blocking: true });
+    assert.deepEqual(calls, ['/repo-a']);
+    assert.equal(runs.length, 1);
+    state.close();
+  } finally {
+    cleanup();
+  }
+});
+
+test('a repo whose CLI call fails is skipped, not fatal', async () => {
+  const { dir, cleanup } = scratch();
+  try {
+    const state = new NoMistakesState({
+      dbPath: join(dir, 'not-there.sqlite'),
+      execAsync: async (command, args, options) => {
+        if (options.cwd === '/broken') throw new Error('no-mistakes: not a repo');
+        return `run:\n  id: "r1"\n  branch: main\n  status: running\n`;
+      },
+    });
+    state.probe();
+    state.read({ candidateDirs: ['/broken', '/repo-a'] });
+    await nextTick();
+    await nextTick();
+    await nextTick();
+    const { runs } = state.read({ candidateDirs: ['/broken', '/repo-a'] });
+    assert.deepEqual(
+      runs.map((r) => r.repoPath),
+      ['/repo-a'],
+    );
+    state.close();
+  } finally {
+    cleanup();
+  }
 });

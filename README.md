@@ -128,9 +128,10 @@ updated.
 npm test
 ```
 
-81 tests, no dependencies, no network, no build step. The focus adapters take an injected
+108 tests, no dependencies, no network, no build step. The focus adapters take an injected
 command runner, so the suite asserts on the AppleScript and tmux commands that *would* run
-without stealing your focus mid-test.
+without stealing your focus mid-test. The same goes for the process table and the pid
+liveness probe, which are injected rather than read from the machine running the tests.
 
 Coverage under Node 26 needs Node 24 (`c8` breaks on 26):
 
@@ -148,6 +149,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 | `src/registry.js` | live Claude sessions, fed by hooks |
 | `src/dashboard.js` | joins the two into ranked rows (pure) |
 | `src/focus/` | tmux resolution and per-terminal adapters |
+| `src/process-tree.js` | which terminal and which agent process a hook is running under |
 | `src/security.js` | token, Host and Origin checks (pure) |
 | `src/server.js` | HTTP, server-sent events, the poll loop |
 | `hooks/nmmon-hook.js` | the Claude Code hook |

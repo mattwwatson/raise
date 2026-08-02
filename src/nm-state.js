@@ -13,17 +13,41 @@
 import { DatabaseSync } from 'node:sqlite';
 import { basename } from 'node:path';
 
-/** Columns we cannot work without. Presence of these defines the fast path. */
+/**
+ * Every column the queries below touch. The probe and the queries have to stay
+ * in step: a column that is selected but not probed degrades late, as a query
+ * error reported as "lost the database", rather than at startup with the
+ * accurate "this build of no-mistakes is not the one nmmon expects".
+ *
+ * The rule that keeps them in step is that nothing is selected unless it is
+ * read, and everything that is read is listed here.
+ */
 export const REQUIRED_RUN_COLUMNS = [
   'id',
   'repo_id',
   'branch',
   'status',
   'awaiting_agent_since',
+  'created_at',
   'updated_at',
+  'pr_url',
+  'pr_state',
+  'head_sha',
+  'error',
 ];
 
 export const REQUIRED_REPO_COLUMNS = ['id', 'working_path'];
+
+export const REQUIRED_STEP_COLUMNS = [
+  'run_id',
+  'step_name',
+  'status',
+  'step_order',
+  'findings_json',
+  'last_activity',
+  'last_activity_at',
+  'log_path',
+];
 
 const ACTIVE_STATUSES = ['pending', 'running'];
 
@@ -33,7 +57,6 @@ const RUNS_QUERY = `
     r.branch        AS branch,
     r.status        AS status,
     r.awaiting_agent_since AS awaiting_agent_since,
-    r.parked_ms     AS parked_ms,
     r.pr_url        AS pr_url,
     r.pr_state      AS pr_state,
     r.head_sha      AS head_sha,
@@ -54,7 +77,7 @@ const RUNS_QUERY = `
  * which gate parked it.
  */
 const STEPS_QUERY = `
-  SELECT run_id, step_name, status, findings_json, started_at,
+  SELECT run_id, step_name, status, findings_json,
          last_activity, last_activity_at, log_path, step_order
   FROM step_results
   WHERE run_id IN (SELECT id FROM runs WHERE status IN (?, ?) OR updated_at >= ?)
@@ -64,22 +87,39 @@ const STEPS_QUERY = `
 /** How far back terminal runs stay visible, so you see what just finished. */
 const RECENT_WINDOW_MS = 30 * 60 * 1000;
 
+/**
+ * How long a degraded-mode reading stays good for.
+ *
+ * Far longer than the one second database poll on purpose. Shelling out to
+ * `no-mistakes axi status` costs a process start per repo, so refreshing it at
+ * poll speed would spend the whole second doing it. State that is up to fifteen
+ * seconds old is a fair price for a fallback that was never the fast path.
+ */
+const CLI_CACHE_MS = 15000;
+
 export class NoMistakesState {
   #dbPath;
   #db = null;
   #mode = 'unknown';
   #warning = null;
   #exec;
+  #execAsync;
+  #closed = false;
+  #cliCache = { runs: [], key: null, at: 0 };
+  #refreshing = false;
 
   /**
    * @param {object} options
    * @param {string} options.dbPath  path to no-mistakes state.sqlite
    * @param {Function} [options.exec] injected command runner for the degraded
    *   path, so tests never shell out. Signature: (cmd, args, opts) => string
+   * @param {Function} [options.execAsync] the same, without blocking. Required
+   *   for non-blocking reads; the server always passes it.
    */
-  constructor({ dbPath, exec }) {
+  constructor({ dbPath, exec, execAsync }) {
     this.#dbPath = dbPath;
     this.#exec = exec;
+    this.#execAsync = execAsync;
   }
 
   get mode() {
@@ -99,9 +139,11 @@ export class NoMistakesState {
       this.#open();
       const runCols = this.#columns('runs');
       const repoCols = this.#columns('repos');
+      const stepCols = this.#columns('step_results');
       const missing = [
         ...REQUIRED_RUN_COLUMNS.filter((c) => !runCols.includes(c)).map((c) => `runs.${c}`),
         ...REQUIRED_REPO_COLUMNS.filter((c) => !repoCols.includes(c)).map((c) => `repos.${c}`),
+        ...REQUIRED_STEP_COLUMNS.filter((c) => !stepCols.includes(c)).map((c) => `step_results.${c}`),
       ];
       if (missing.length > 0) {
         this.#mode = 'cli';
@@ -130,9 +172,12 @@ export class NoMistakesState {
    * @param {string[]} [options.candidateDirs] directories to inspect when the
    *   database is unavailable. Ignored on the fast path.
    * @param {number} [options.now]
+   * @param {boolean} [options.blocking] allow the degraded path to shell out
+   *   inline. Only ever true for one-shot commands; a long-lived server must
+   *   leave this alone so a hung CLI cannot stall the poll loop.
    * @returns {{runs: object[], source: string, warning: string|null}}
    */
-  read({ candidateDirs = [], now = Date.now() } = {}) {
+  read({ candidateDirs = [], now = Date.now(), blocking = false } = {}) {
     if (this.#mode === 'unknown') this.probe();
     if (this.#mode === 'sqlite') {
       try {
@@ -150,13 +195,14 @@ export class NoMistakesState {
       }
     }
     return {
-      runs: this.#readFromCli(candidateDirs),
+      runs: this.#cliRuns(candidateDirs, now, blocking),
       source: 'cli',
       warning: this.#warning,
     };
   }
 
   close() {
+    this.#closed = true;
     this.#close();
   }
 
@@ -192,6 +238,56 @@ export class NoMistakesState {
     const steps = db.prepare(STEPS_QUERY).all(...ACTIVE_STATUSES, cutoffSeconds);
     const stepsByRun = groupSteps(steps);
     return rows.map((row) => normaliseRun(row, stepsByRun.get(row.run_id), now));
+  }
+
+  /**
+   * The degraded path, served from cache.
+   *
+   * A caller that can afford to wait (the one-shot CLI) fills the cache inline.
+   * A caller that cannot (the server) gets whatever is cached and triggers a
+   * background refresh, so no amount of slowness in `no-mistakes axi status`
+   * can delay a poll tick, a broadcast, or a hook post.
+   */
+  #cliRuns(candidateDirs, now, blocking) {
+    const key = candidateDirs.join('\n');
+    if (candidateDirs.length === 0) return [];
+    if (this.#cliCache.key === key && now - this.#cliCache.at < CLI_CACHE_MS) {
+      return this.#cliCache.runs;
+    }
+    if (blocking) {
+      const runs = this.#readFromCli(candidateDirs);
+      this.#cliCache = { runs, key, at: now };
+      return runs;
+    }
+    this.#refreshCli(candidateDirs, key);
+    return this.#cliCache.runs;
+  }
+
+  #refreshCli(candidateDirs, key) {
+    if (this.#refreshing || this.#closed || !this.#execAsync) return;
+    this.#refreshing = true;
+    (async () => {
+      const runs = [];
+      for (const dir of candidateDirs) {
+        if (this.#closed) return;
+        let out;
+        try {
+          out = await this.#execAsync('no-mistakes', ['axi', 'status'], { cwd: dir, timeoutMs: 5000 });
+        } catch {
+          continue; // Not a no-mistakes repo, or the CLI is unavailable here.
+        }
+        const parsed = parseAxiStatus(out, dir);
+        if (parsed) runs.push(parsed);
+      }
+      this.#cliCache = { runs, key, at: Date.now() };
+    })()
+      .catch(() => {
+        // A degraded reading we could not take is not worth reporting; the
+        // warning already says state is being read the slow way.
+      })
+      .finally(() => {
+        this.#refreshing = false;
+      });
   }
 
   #readFromCli(candidateDirs) {

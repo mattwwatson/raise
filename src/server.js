@@ -8,7 +8,7 @@
  */
 
 import { createServer } from 'node:http';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -17,7 +17,7 @@ import { SessionRegistry } from './registry.js';
 import { buildRows, summarise } from './dashboard.js';
 import { focusSession } from './focus/index.js';
 import { checkRequest } from './security.js';
-import { exec as defaultExec } from './exec.js';
+import { exec as defaultExec, execAsync as defaultExecAsync } from './exec.js';
 import { sessionsDir, statePath, serverInfoPath, readOrCreateToken, defaultPort } from './config.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -27,15 +27,42 @@ const POLL_INTERVAL_MS = 1000;
 const KEEPALIVE_MS = 20000;
 const MAX_BODY_BYTES = 256 * 1024;
 
+/**
+ * Write one frame to one client without ever throwing.
+ *
+ * A client socket can be gone before we notice - laptop sleep, a dropped
+ * network, an abort racing the close handler. Writing to it emits `error` on a
+ * response with no listener, which is an uncaught exception and takes the whole
+ * monitor down. Since nmmon is the thing that tells you a session is blocked,
+ * it dying is silent: you just stop being told anything.
+ *
+ * @param {import('node:http').ServerResponse} client
+ * @param {string} frame
+ * @param {(err: Error) => void} onError called on both the sync and async failure
+ * @returns {boolean} whether the write was accepted
+ */
+export function writeFrame(client, frame, onError) {
+  try {
+    client.write(frame, (err) => {
+      if (err) onError(err);
+    });
+    return true;
+  } catch (err) {
+    onError(err);
+    return false;
+  }
+}
+
 export function createMonitorServer({
   port = defaultPort(),
   token = readOrCreateToken(),
   exec = defaultExec,
+  execAsync = defaultExecAsync,
   dbPath = statePath(),
   sessionsPath = sessionsDir(),
 } = {}) {
   const registry = new SessionRegistry({ dir: sessionsPath });
-  const nmState = new NoMistakesState({ dbPath, exec });
+  const nmState = new NoMistakesState({ dbPath, exec, execAsync });
   const probe = nmState.probe();
 
   /** @type {Set<import('node:http').ServerResponse>} */
@@ -43,6 +70,7 @@ export function createMonitorServer({
   let lastPayloadJson = '';
   let pollTimer = null;
   let keepaliveTimer = null;
+  let writtenInfoPath = null;
 
   function snapshot() {
     const sessions = registry.list();
@@ -58,6 +86,19 @@ export function createMonitorServer({
     };
   }
 
+  function dropClient(client) {
+    clients.delete(client);
+    try {
+      client.end();
+    } catch {
+      // Already gone; that is the whole reason we are here.
+    }
+  }
+
+  function send(client, frame) {
+    writeFrame(client, frame, () => dropClient(client));
+  }
+
   function broadcast(force = false) {
     const payload = snapshot();
     // generatedAt changes every tick, so compare everything else.
@@ -66,8 +107,8 @@ export function createMonitorServer({
     if (!force && json === lastPayloadJson) return;
     lastPayloadJson = json;
     const frame = `event: state\ndata: ${JSON.stringify(payload)}\n\n`;
-    for (const client of clients) {
-      client.write(frame);
+    for (const client of [...clients]) {
+      send(client, frame);
     }
   }
 
@@ -148,12 +189,15 @@ export function createMonitorServer({
       connection: 'keep-alive',
       'x-accel-buffering': 'no',
     });
-    res.write(': connected\n\n');
-    res.write(`event: state\ndata: ${JSON.stringify(snapshot())}\n\n`);
     clients.add(res);
+    // A destroyed socket must never reach the process as an uncaught error.
+    res.on('error', () => dropClient(res));
+    req.on('error', () => dropClient(res));
     req.on('close', () => {
       clients.delete(res);
     });
+    send(res, ': connected\n\n');
+    send(res, `event: state\ndata: ${JSON.stringify(snapshot())}\n\n`);
   }
 
   function readBody(req) {
@@ -220,10 +264,11 @@ export function createMonitorServer({
       server.once('error', reject);
       server.listen(port, '127.0.0.1', () => {
         const info = { port, token, pid: process.pid, startedAt: Date.now() };
-        writeFileSync(serverInfoPath(), JSON.stringify(info, null, 2), { mode: 0o600 });
+        writtenInfoPath = serverInfoPath();
+        writeFileSync(writtenInfoPath, JSON.stringify(info, null, 2), { mode: 0o600 });
         pollTimer = setInterval(() => broadcast(false), POLL_INTERVAL_MS);
         keepaliveTimer = setInterval(() => {
-          for (const client of clients) client.write(': keepalive\n\n');
+          for (const client of [...clients]) send(client, ': keepalive\n\n');
         }, KEEPALIVE_MS);
         resolve(info);
       });
@@ -233,9 +278,20 @@ export function createMonitorServer({
   function stop() {
     clearInterval(pollTimer);
     clearInterval(keepaliveTimer);
-    for (const client of clients) client.end();
+    for (const client of [...clients]) dropClient(client);
     clients.clear();
     nmState.close();
+    // Leaving server.json behind is not just a stale URL in `nmmon open`: every
+    // hook keeps posting the session id, cwd, transcript path and the token to
+    // whatever binds this port next.
+    if (writtenInfoPath) {
+      try {
+        unlinkSync(writtenInfoPath);
+      } catch {
+        // Never written, or already cleaned up.
+      }
+      writtenInfoPath = null;
+    }
     return new Promise((resolve) => server.close(resolve));
   }
 

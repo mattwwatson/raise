@@ -32,6 +32,7 @@ import {
   statePath,
   serverInfoPath,
   defaultPort,
+  portFromFlag,
   ensureDirs,
 } from '../src/config.js';
 import { buildRows } from '../src/dashboard.js';
@@ -81,7 +82,14 @@ async function confirm(question) {
 
 async function cmdServe(flags) {
   ensureDirs();
-  const port = flags.port ? Number(flags.port) : defaultPort();
+  let port;
+  try {
+    port = flags.port === undefined ? defaultPort() : portFromFlag(flags.port);
+  } catch (err) {
+    console.error(red(err.message));
+    process.exitCode = 1;
+    return;
+  }
   const monitor = createMonitorServer({ port });
   await monitor.start();
 
@@ -134,7 +142,9 @@ function cmdStatus() {
   const nmState = new NoMistakesState({ dbPath: statePath(), exec });
   nmState.probe();
   const candidateDirs = [...new Set(sessions.map((s) => s.cwd).filter(Boolean))];
-  const { runs, warning } = nmState.read({ candidateDirs });
+  // One shot and then gone, so this is the one caller that can afford to wait
+  // for the degraded path rather than reporting an empty cache.
+  const { runs, warning } = nmState.read({ candidateDirs, blocking: true });
 
   // Reuse the dashboard projection so the CLI and the page can never disagree.
   const rows = buildRows({ sessions, runs });

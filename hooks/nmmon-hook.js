@@ -20,6 +20,8 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
+import { parsePsLine, inspectHost } from '../src/process-tree.js';
+
 const TIMEOUT_MS = 2000;
 
 function quietExit() {
@@ -43,45 +45,22 @@ function readStdin() {
   }
 }
 
-/**
- * Walk up the process tree looking for the Claude process and a real
- * controlling terminal.
- *
- * The hook runs as a grandchild of Claude Code (Claude spawns a shell, the
- * shell runs this), so neither is available without looking upward.
- */
-function inspectAncestors(startPid, maxDepth = 8) {
-  let pid = startPid;
-  let tty = null;
-  let claudePid = null;
-  for (let depth = 0; depth < maxDepth && pid && pid > 1; depth += 1) {
-    let line;
-    try {
-      line = execFileSync('ps', ['-o', 'ppid=,tty=,comm=', '-p', String(pid)], {
-        encoding: 'utf8',
-        timeout: 1000,
-      }).trim();
-    } catch {
-      break;
-    }
-    if (!line) break;
-    const match = line.match(/^\s*(\d+)\s+(\S+)\s+(.*)$/);
-    if (!match) break;
-    const [, ppid, ttyField, comm] = match;
-    // "??" means no controlling terminal.
-    if (!tty && ttyField && ttyField !== '??') {
-      tty = ttyField.startsWith('/dev/') ? ttyField : `/dev/${ttyField}`;
-    }
-    if (!claudePid && /(^|\/)claude$/.test(comm.trim())) {
-      claudePid = pid;
-    }
-    pid = Number(ppid);
+/** One process, read from the process table. Null if it has already gone. */
+function readProcess(pid) {
+  let line;
+  try {
+    line = execFileSync('ps', ['-o', 'ppid=,tty=,args=', '-p', String(pid)], {
+      encoding: 'utf8',
+      timeout: 1000,
+    });
+  } catch {
+    return null;
   }
-  return { tty, claudePid };
+  return parsePsLine(line);
 }
 
 function collectHost() {
-  const { tty, claudePid } = inspectAncestors(process.ppid);
+  const { tty, agentPid } = inspectHost(process.ppid, { readProcess });
   return {
     term_program: process.env.TERM_PROGRAM || null,
     // iTerm2 gives every split and tab a stable UUID, which survives the tab
@@ -93,7 +72,9 @@ function collectHost() {
     tmux: process.env.TMUX || null,
     tmux_pane: process.env.TMUX_PANE || null,
     tty,
-    pid: claudePid || process.ppid || null,
+    // Only ever the agent itself. The shell that runs this hook exits the
+    // instant it returns, and a session recorded against a dead pid is pruned.
+    pid: agentPid,
     hostname: process.env.HOST || null,
   };
 }
