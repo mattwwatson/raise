@@ -38,6 +38,7 @@ import {
 } from '../src/config.js';
 import { buildRows } from '../src/dashboard.js';
 import { parseArgv } from '../src/cli-args.js';
+import { probeHealth } from '../src/health.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HOOK_SCRIPT = resolve(HERE, '..', 'hooks', 'nmmon-hook.js');
@@ -62,6 +63,20 @@ function describedDefaultPort() {
     return String(defaultPort());
   } catch {
     return `${DEFAULT_PORT}; NMMON_PORT is currently set to something that is not a port`;
+  }
+}
+
+/**
+ * The port `serve` would most likely use, for diagnostics that must not throw.
+ *
+ * `doctor` reports on a bad NMMON_PORT by way of the port it then fails to
+ * find a server on; refusing to run at all would be a worse diagnosis.
+ */
+function probablePort() {
+  try {
+    return defaultPort();
+  } catch {
+    return DEFAULT_PORT;
   }
 }
 
@@ -108,7 +123,27 @@ async function cmdServe(flags) {
     return;
   }
   const monitor = createMonitorServer({ port });
-  await monitor.start();
+  try {
+    await monitor.start();
+  } catch (err) {
+    if (err?.code !== 'EADDRINUSE' && err?.code !== 'EACCES') {
+      await monitor.stop();
+      throw err;
+    }
+    const lines =
+      err.code === 'EACCES'
+        ? [
+            red(`Port ${port} needs root.`),
+            `  Pick one above 1024, ${bold('for example --port 7718')}.`,
+          ]
+        : await explainBusyPort(port);
+    for (const line of lines) console.error(line);
+    // Nothing was bound, so no server.json of ours exists to remove; this is
+    // only here to close the database handle the monitor opened on the way up.
+    await monitor.stop();
+    process.exitCode = 1;
+    return;
+  }
 
   console.log(`${bold('nmmon')} is watching.`);
   console.log(`  Dashboard  ${green(monitor.url())}`);
@@ -141,10 +176,57 @@ function readServerInfo() {
   }
 }
 
+/**
+ * Turn a busy port into the one sentence that tells you what to do about it.
+ *
+ * The three cases need three different answers, and guessing wrong is
+ * expensive: telling someone to `kill` a pid that belongs to an unrelated
+ * program is worse than saying nothing. So the port is asked directly rather
+ * than inferred from server.json, which is silent about both a server that was
+ * killed rather than stopped and a server started under another NMMON_HOME -
+ * the second of which is the usual cause of this message.
+ *
+ * @param {number} port
+ * @returns {Promise<string[]>} lines to print, already coloured
+ */
+async function explainBusyPort(port) {
+  const live = await probeHealth(port);
+  if (!live) {
+    return [
+      red(`Port ${port} is in use, and whatever is listening is not nmmon.`),
+      `  Find it   ${bold(`lsof -nP -iTCP:${port} -sTCP:LISTEN`)}`,
+      `  Or run    ${bold('nmmon serve --port <n>')}`,
+    ];
+  }
+  const info = readServerInfo();
+  if (info?.port === port && info?.pid === live.pid) {
+    return [
+      `${bold('nmmon')} is already running on port ${port} (pid ${live.pid}).`,
+      `  Open it   ${bold('nmmon open')}`,
+    ];
+  }
+  return [
+    red(`Port ${port} is held by another nmmon (pid ${live.pid}) that this installation has`),
+    red('no record of - most likely a leftover started with a different NMMON_HOME.'),
+    `  Stop it   ${bold(`kill ${live.pid}`)}`,
+    `  Or run    ${bold('nmmon serve --port <n>')}`,
+  ];
+}
+
 async function cmdOpen() {
   const info = readServerInfo();
   if (!info) {
     console.error(`nmmon is not running. Start it with ${bold('nmmon serve')}.`);
+    process.exitCode = 1;
+    return;
+  }
+  // The record outlives a server that was killed rather than stopped. Opening a
+  // browser tab onto a dead port is a worse answer than admitting it is dead.
+  if (!(await probeHealth(info.port))) {
+    console.error(
+      `Recorded on port ${info.port} (pid ${info.pid}), but nothing is answering - the server has stopped.`,
+    );
+    console.error(`Start it with ${bold('nmmon serve')}.`);
     process.exitCode = 1;
     return;
   }
@@ -341,9 +423,28 @@ async function cmdDoctor() {
     warn('Terminals', `focusing is macOS-only so far; on ${process.platform} nmmon still monitors`);
   }
 
+  // server.json says where the monitor was last started, which is a different
+  // question from where it is now - so ask the port as well as the record.
   const info = readServerInfo();
-  if (info) {
-    ok('Server', `recorded on port ${info.port} (pid ${info.pid})`);
+  const probePort = info?.port ?? probablePort();
+  const live = await probeHealth(probePort);
+  if (info && live && live.pid === info.pid) {
+    ok('Server', `running on port ${info.port} (pid ${live.pid})`);
+  } else if (info && live) {
+    warn(
+      'Server',
+      `server.json names pid ${info.pid}, but port ${info.port} is answered by pid ${live.pid} - stale record, and another nmmon has the port`,
+    );
+  } else if (info) {
+    warn(
+      'Server',
+      `server.json names port ${info.port} (pid ${info.pid}) but nothing is answering - stale record from a server that did not shut down cleanly`,
+    );
+  } else if (live) {
+    warn(
+      'Server',
+      `port ${probePort} is held by another nmmon (pid ${live.pid}) with no record here - probably a leftover; ${bold(`kill ${live.pid}`)} or use --port`,
+    );
   } else {
     warn('Server', `not running - start it with ${bold('nmmon serve')}`);
   }
