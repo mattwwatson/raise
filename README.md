@@ -137,6 +137,19 @@ detached and reattached in a different terminal entirely, so it is resolved fres
 you click. If the session is detached there is no window to focus, and nmmon tells you the
 `tmux attach` command instead of failing silently.
 
+**tmux control mode (`tmux -CC`) is its own case.** It is how iTerm2 hosts tmux, and it breaks
+every assumption above: each tmux window becomes a native iTerm2 tab that the tmux client
+knows nothing about, iTerm2 reports `tty` as `missing value` for all of them, and the client's
+own tty belongs to the idle tab where you typed `tmux -CC`. Focusing that tty - the correct
+move for ordinary tmux - raises that one tab no matter which session you clicked.
+
+So a control mode pane is matched on its **title** instead, which is the one handle both sides
+share: iTerm2 names each tab after the tmux pane title. The leading status glyph is stripped
+first, because Claude Code animates a braille spinner through it and the two sides are read a
+moment apart. If two windows share a title nmmon says so rather than raising an arbitrary one,
+and nothing is selected inside tmux, since iTerm2 does not follow tmux's selection in control
+mode and doing it anyway would just move the user's active window for no visible reason.
+
 Supported terminals today: **iTerm2** and **Terminal.app**, plus **tmux** inside either.
 Adding another is a single entry in `src/focus/terminals.js` - it needs an availability check
 and a focus function, and nothing else in the codebase changes.

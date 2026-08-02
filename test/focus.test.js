@@ -1,10 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { planFocus, itermUuid, focusSession } from '../src/focus/index.js';
+import { planFocus, itermUuid, focusSession, titleNeedle } from '../src/focus/index.js';
 import { orderedTerminals, ALL_TERMINALS } from '../src/focus/terminals.js';
-import { socketArgs, resolveTmuxTarget } from '../src/focus/tmux.js';
-import { itermFocusScript, terminalAppFocusScript, escapeAppleScript } from '../src/focus/applescript.js';
+import { socketArgs, resolveTmuxTarget, parseClients } from '../src/focus/tmux.js';
+import {
+  itermFocusScript,
+  itermFocusByTitleScript,
+  terminalAppFocusScript,
+  escapeAppleScript,
+} from '../src/focus/applescript.js';
 
 /**
  * A fake exec that answers from a table and records what it was asked.
@@ -110,13 +115,52 @@ test('socketArgs honours a custom tmux socket', () => {
 test('resolveTmuxTarget returns the attached client tty', async () => {
   const exec = fakeExec({
     'display-message': 'firstmate',
-    'list-clients': '/dev/ttys002',
+    'list-clients': '/dev/ttys002\t0',
   });
   assert.deepEqual(await resolveTmuxTarget(exec, { pane: '%1', tmuxEnv: null }), {
     ok: true,
     session: 'firstmate',
     tty: '/dev/ttys002',
+    controlMode: false,
+    title: null,
   });
+});
+
+test('resolveTmuxTarget refuses to hand back a control mode client tty', async () => {
+  // The bug this exists for. `tmux -CC` is how iTerm2 hosts tmux, and the
+  // control client's tty is the tab where `tmux -CC` was typed - an idle tab
+  // that shows none of the panes. Treating it as the host tty meant every
+  // focus click raised that one tab, whichever session you clicked.
+  const exec = fakeExec({
+    '#{session_name}': 'firstmate',
+    'list-clients': '/dev/ttys002\t1',
+    '#{pane_title}': '✹ Enroll multiple operations in webapp',
+  });
+  const target = await resolveTmuxTarget(exec, { pane: '%289', tmuxEnv: null });
+  assert.equal(target.ok, true);
+  assert.equal(target.controlMode, true);
+  assert.equal(target.tty, null, 'the control client tty must never be offered as the host');
+  assert.equal(target.title, '✹ Enroll multiple operations in webapp');
+});
+
+test('resolveTmuxTarget prefers a plain client when both kinds are attached', async () => {
+  const exec = fakeExec({
+    '#{session_name}': 'firstmate',
+    'list-clients': '/dev/ttys002\t1\n/dev/ttys031\t0',
+    '#{pane_title}': '✹ something',
+  });
+  const target = await resolveTmuxTarget(exec, { pane: '%1', tmuxEnv: null });
+  assert.equal(target.tty, '/dev/ttys031');
+  assert.equal(target.controlMode, true, 'still worth trying the title path first');
+});
+
+test('parseClients reads the control mode flag, not just the tty', () => {
+  assert.deepEqual(parseClients('/dev/ttys002\t1\n/dev/ttys031\t0'), [
+    { tty: '/dev/ttys002', controlMode: true },
+    { tty: '/dev/ttys031', controlMode: false },
+  ]);
+  assert.deepEqual(parseClients(''), []);
+  assert.deepEqual(parseClients(null), []);
 });
 
 test('resolveTmuxTarget reports a detached session with an attach hint', async () => {
@@ -216,7 +260,7 @@ test('focusSession survives an adapter whose availability check rejects', async 
 test('focusSession selects the pane then focuses the tmux host window', async () => {
   const exec = fakeExec({
     'display-message': 'firstmate',
-    'list-clients': '/dev/ttys002',
+    'list-clients': '/dev/ttys002\t0',
     'select-window': '',
     'select-pane': '',
   });
@@ -246,6 +290,150 @@ test('focusSession selects the pane then focuses the tmux host window', async ()
   assert.ok(exec.calls.some((c) => c.includes('select-pane -t %7')));
   // The host terminal is matched on the live client tty, never on a stored one.
   assert.deepEqual(focused[0], { sessionUuid: null, tty: '/dev/ttys002' });
+});
+
+// ------------------------------------------- tmux control mode (`tmux -CC`)
+
+test('titleNeedle survives the spinner that animates in the title', () => {
+  // Read from tmux and from the terminal a moment apart, the same pane reports
+  // "⠂ port-conflict-diagnostics" and "⠐ port-conflict-diagnostics". Matching
+  // the whole string would work about as often as it failed.
+  assert.equal(titleNeedle('⠂ port-conflict-diagnostics'), 'port-conflict-diagnostics');
+  assert.equal(titleNeedle('⠐ port-conflict-diagnostics'), 'port-conflict-diagnostics');
+  assert.equal(titleNeedle('✳ Enroll multiple operations'), 'Enroll multiple operations');
+  assert.equal(titleNeedle('plain-title'), 'plain-title');
+});
+
+test('titleNeedle refuses a title too short to identify a window', () => {
+  // A two-character needle matches half the tabs open, and `ends with` on it
+  // would land somewhere arbitrary - the exact failure being fixed here.
+  assert.equal(titleNeedle('⠂ ab'), null);
+  assert.equal(titleNeedle('⠂'), null);
+  assert.equal(titleNeedle(''), null);
+  assert.equal(titleNeedle(null), null);
+});
+
+test('itermFocusByTitleScript matches on the tail and refuses to guess', () => {
+  const script = itermFocusByTitleScript({ title: 'port-conflict-diagnostics' });
+  assert.match(script, /ends with "port-conflict-diagnostics"/);
+  assert.match(script, /if \(count of matched\) > 1 then return "ambiguous"/);
+  assert.match(script, /activate/);
+  assert.match(itermFocusByTitleScript({ title: 'say "hi"' }), /ends with "say \\"hi\\""/);
+});
+
+test('focusSession finds a control mode pane by title, not by the client tty', async () => {
+  // The reported bug end to end: clicking a moroku-skills row focused the tab
+  // running `tmux -CC new -s firstmate` instead.
+  const exec = fakeExec({
+    '#{session_name}': 'firstmate',
+    'list-clients': '/dev/ttys002\t1',
+    '#{pane_title}': '⠂ Enroll multiple operations in webapp',
+  });
+  const byTitle = [];
+  const byTty = [];
+  const terminals = [
+    {
+      name: 'iterm2',
+      label: 'iTerm2',
+      termProgram: 'iTerm.app',
+      isAvailable: () => true,
+      focus: (_e, target) => {
+        byTty.push(target);
+        return true;
+      },
+      focusByTitle: (_e, target) => {
+        byTitle.push(target);
+        return 'ok';
+      },
+    },
+  ];
+  const result = await focusSession(
+    { host: { tmux_pane: '%289', tmux: '/tmp/tmux-502/default,1,0', term_program: 'tmux' } },
+    { exec, terminals },
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.tmuxSession, 'firstmate');
+  assert.deepEqual(byTitle, [{ title: 'Enroll multiple operations in webapp' }]);
+  assert.deepEqual(byTty, [], 'the control client tty is never offered to a terminal');
+  // select-window moves tmux's active window and the terminal does not follow,
+  // so in control mode it is a pure side effect on the user's tmux state.
+  assert.ok(
+    !exec.calls.some((c) => c.includes('select-window')),
+    'nothing should be selected in tmux for a control mode pane',
+  );
+});
+
+test('focusSession says so rather than raising one of two identical titles', async () => {
+  const exec = fakeExec({
+    '#{session_name}': 'firstmate',
+    'list-clients': '/dev/ttys002\t1',
+    '#{pane_title}': '⠂ Claude Code',
+  });
+  const terminals = [
+    {
+      name: 'iterm2',
+      label: 'iTerm2',
+      termProgram: 'iTerm.app',
+      isAvailable: () => true,
+      focus: () => assert.fail('must not fall through to a tty that does not exist'),
+      focusByTitle: () => 'ambiguous',
+    },
+  ];
+  const result = await focusSession({ host: { tmux_pane: '%1' } }, { exec, terminals });
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /More than one window is called "Claude Code"/);
+});
+
+test('focusSession admits there is no tty to fall back to in control mode', async () => {
+  const exec = fakeExec({
+    '#{session_name}': 'firstmate',
+    'list-clients': '/dev/ttys002\t1',
+    '#{pane_title}': '⠂ a window that has since closed',
+  });
+  const terminals = [
+    {
+      name: 'iterm2',
+      label: 'iTerm2',
+      termProgram: 'iTerm.app',
+      isAvailable: () => true,
+      focus: () => assert.fail('the control client tty must never be tried'),
+      focusByTitle: () => 'notfound',
+    },
+  ];
+  const result = await focusSession({ host: { tmux_pane: '%1' } }, { exec, terminals });
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /control mode, so there is no tty to fall back to/);
+});
+
+test('focusSession still uses a plain client tty when one is also attached', async () => {
+  // Control mode plus a second, ordinary `tmux attach` elsewhere. The title
+  // path is tried first, but a real tty is a real fallback.
+  const exec = fakeExec({
+    '#{session_name}': 'firstmate',
+    'list-clients': '/dev/ttys002\t1\n/dev/ttys031\t0',
+    '#{pane_title}': '⠂ not shown in iTerm2',
+    'select-window': '',
+    'select-pane': '',
+  });
+  const focused = [];
+  const terminals = [
+    {
+      name: 'iterm2',
+      label: 'iTerm2',
+      termProgram: 'iTerm.app',
+      isAvailable: () => true,
+      focus: (_e, target) => {
+        focused.push(target);
+        return true;
+      },
+      focusByTitle: () => 'notfound',
+    },
+  ];
+  const result = await focusSession({ host: { tmux_pane: '%1' } }, { exec, terminals });
+  assert.equal(result.ok, true);
+  assert.deepEqual(focused, [{ sessionUuid: null, tty: '/dev/ttys031' }]);
+  assert.ok(exec.calls.some((c) => c.includes('select-pane -t %1')));
 });
 
 test('focusSession explains a detached tmux session instead of failing silently', async () => {
