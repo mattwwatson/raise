@@ -15,9 +15,11 @@
 
 import { basename } from 'node:path';
 import { planFocus } from './focus/index.js';
+import { pullRequestNumber } from './nm-state.js';
 
 /** @typedef {import('./registry.js').Session} Session */
 /** @typedef {import('./nm-state.js').Run} Run */
+/** @typedef {import('./nm-state.js').PullRequest} PullRequest */
 
 /**
  * How much a row wants a human, most urgent first.
@@ -59,6 +61,9 @@ import { planFocus } from './focus/index.js';
  * @property {string|null} activity the tool it is running right now
  * @property {string|null} mode 'plan' and the like; null for an ordinary turn
  * @property {string|null} reviewUrl the Lavish page this row is waiting on
+ * @property {PullRequest|null} pr the pull request open on this branch
+ * @property {number|null} lastActivityAt epoch ms this session last wrote to
+ *   its transcript, which is when it last actually did something
  */
 
 /**
@@ -122,6 +127,101 @@ export function matchRunForCwd(cwd, runs) {
     }
   }
   return best;
+}
+
+/**
+ * Find the pull request open on a directory's branch.
+ *
+ * Both halves of the match are required. The path alone is not enough: a repo
+ * accumulates a pull request per branch, and a worktree sitting under a repo
+ * would otherwise inherit whichever one happened to be newest. Sending someone
+ * to another branch's review is worse than showing no link at all - it is the
+ * same rule the tmux title match and the Lavish basename fallback both follow.
+ *
+ * A row with no branch therefore gets no pull request, rather than a guess.
+ *
+ * @param {string|null} cwd
+ * @param {string|null} branch
+ * @param {PullRequest[]} pullRequests
+ * @returns {PullRequest|null}
+ */
+export function matchPullRequest(cwd, branch, pullRequests) {
+  if (!cwd || !branch) return null;
+  let best = null;
+  let bestLength = -1;
+  for (const pr of pullRequests) {
+    if (pr.branch !== branch || !pr.repoPath) continue;
+    if (cwd !== pr.repoPath && !cwd.startsWith(`${pr.repoPath}/`)) continue;
+    // Longest matching prefix, so a worktree registered in its own right beats
+    // the repo it happens to live inside.
+    if (pr.repoPath.length > bestLength) {
+      best = pr;
+      bestLength = pr.repoPath.length;
+    }
+  }
+  return best;
+}
+
+/**
+ * The pull request a run carries on its own record.
+ *
+ * The database query finds this one too, and with better provenance, so this
+ * only ever matters on the degraded `axi status` path - where there is no
+ * history to query and the run in front of us is all there is.
+ *
+ * @param {Run} run
+ * @returns {PullRequest|null}
+ */
+function pullRequestForRun(run) {
+  if (!run.prUrl) return null;
+  return {
+    url: run.prUrl,
+    number: pullRequestNumber(run.prUrl),
+    state: run.prState || null,
+    observedAt: run.updatedAt ?? null,
+    branch: run.branch,
+    repoPath: run.repoPath,
+    live: run.active,
+  };
+}
+
+/**
+ * The pull request a session's own transcript reported, if it is ours.
+ *
+ * The last resort, and the one that covers what the database cannot: a pull
+ * request opened by hand, or on a branch no-mistakes has not run. The session
+ * printed the URL itself, so the sighting is free.
+ *
+ * The repository in the URL has to match the checkout. A session reviewing
+ * somebody else's pull request, or reading about one, mentions URLs that are
+ * nothing to do with the branch in front of it - and a confident link to the
+ * wrong review is the failure this whole feature has to avoid. A directory
+ * whose name differs from its remote's is the price: it gets no link rather
+ * than a doubtful one.
+ *
+ * The state is never presented as current. Unlike a live run, nothing is
+ * watching this pull request - the reading is from whenever the session
+ * happened to print it - so it survives only as the tooltip's "was open".
+ *
+ * @param {import('./transcript.js').TranscriptSummary|null} summary
+ * @param {string|null} repoPath
+ * @param {string|null} branch
+ * @returns {PullRequest|null}
+ */
+export function transcriptPullRequest(summary, repoPath, branch) {
+  const seen = summary?.pullRequest;
+  if (!seen?.url || !repoPath) return null;
+  const repo = basename(repoPath);
+  if (!seen.slug || !repo || seen.slug.toLowerCase() !== repo.toLowerCase()) return null;
+  return {
+    url: seen.url,
+    number: seen.number,
+    state: seen.state,
+    observedAt: seen.observedAt,
+    branch,
+    repoPath,
+    live: false,
+  };
 }
 
 /** @param {Run|null} run */
@@ -210,13 +310,16 @@ export function attentionFor({ session, run, summary = null }) {
 /**
  * Build the rows the page renders.
  *
- * `summaries` and `reviewUrls` are looked up rather than passed in per session
- * so that reading transcripts and asking Lavish for links stay outside this
- * file - it is pure, and both of those touch the filesystem and a subprocess.
+ * `summaries`, `reviewUrls` and `branches` are looked up rather than passed in
+ * per session so that reading transcripts, reading `.git` and asking Lavish for
+ * links stay outside this file - it is pure, and all three touch the filesystem
+ * or a subprocess.
  *
  * @param {{sessions: Session[], runs: Run[], now?: number,
  *          summaries?: Map<string, import('./transcript.js').TranscriptSummary>,
- *          reviewUrls?: Map<string, string|null>}} input
+ *          reviewUrls?: Map<string, string|null>,
+ *          branches?: Map<string, string|null>,
+ *          pullRequests?: PullRequest[]}} input
  * @returns {Row[]}
  */
 export function buildRows({
@@ -225,6 +328,8 @@ export function buildRows({
   now = Date.now(),
   summaries = new Map(),
   reviewUrls = new Map(),
+  branches = new Map(),
+  pullRequests = [],
 }) {
   /** @type {Row[]} */
   const rows = [];
@@ -236,6 +341,10 @@ export function buildRows({
     const summary = summaries.get(session.sessionId) || null;
     const attention = attentionFor({ session, run, summary });
     const plan = planFocus(session);
+    // The checkout's own branch is the truth about where this session is. The
+    // run's is a second choice: it belongs to a pipeline that may have finished
+    // on a branch that has since been left behind.
+    const branch = branches.get(session.sessionId) || run?.branch || null;
     rows.push({
       id: `session:${session.sessionId}`,
       kind: 'session',
@@ -246,7 +355,7 @@ export function buildRows({
       // For a session inside a registered repo that is the repo, not the
       // session's own directory.
       titlePath: (run?.repoName ? run.repoPath : session.cwd) || null,
-      branch: run?.branch || null,
+      branch,
       attention,
       attentionLabel: attentionLabel(attention),
       // Everything below follows `attention`, not the raw hook state, so a
@@ -275,6 +384,16 @@ export function buildRows({
       // noise on the one thing this page has to keep scannable.
       mode: summary?.mode && summary.mode !== 'normal' ? summary.mode : null,
       reviewUrl: reviewUrls.get(session.sessionId) || null,
+      // Three sources, most trustworthy first. A live run is being watched
+      // right now, so its state is real. The database's history is branch
+      // verified but frozen. The transcript is neither, and is the only one
+      // that sees a pull request no-mistakes never opened - which is common
+      // enough that leaving it out means no link at all on plain Claude work.
+      pr:
+        (run?.prUrl ? pullRequestForRun(run) : null) ||
+        matchPullRequest(session.cwd, branch, pullRequests) ||
+        transcriptPullRequest(summary, run?.repoPath || session.cwd, branch),
+      lastActivityAt: summary?.lastActivityAt ?? null,
     });
   }
 
@@ -307,6 +426,10 @@ export function buildRows({
       activity: null,
       mode: null,
       reviewUrl: null,
+      pr: pullRequestForRun(run) || matchPullRequest(run.repoPath, run.branch, pullRequests),
+      // No session means no transcript to have written anything, so the run's
+      // own clock is the only account of when this last moved.
+      lastActivityAt: run.updatedAt || null,
     });
   }
 

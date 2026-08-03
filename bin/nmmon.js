@@ -24,6 +24,7 @@ import {
 import { NoMistakesState } from '../src/nm-state.js';
 import { SessionRegistry } from '../src/registry.js';
 import { TranscriptReader } from '../src/transcript-reader.js';
+import { GitBranch } from '../src/git-branch.js';
 import { LavishState } from '../src/lavish.js';
 import { PollWatch } from '../src/poll-watch.js';
 import { focusSession } from '../src/focus/index.js';
@@ -246,15 +247,17 @@ async function cmdStatus() {
   const candidateDirs = [...new Set(sessions.map((s) => s.cwd).filter(Boolean))];
   // One shot and then gone, so this is the one caller that can afford to wait
   // for the degraded path rather than reporting an empty cache.
-  const { runs, warning } = nmState.read({ candidateDirs, blocking: true });
+  const { runs, pullRequests, warning } = nmState.read({ candidateDirs, blocking: true });
 
   const transcripts = new TranscriptReader();
+  const gitBranches = new GitBranch();
+  const branches = new Map(sessions.map((s) => [s.sessionId, gitBranches.branchFor(s.cwd)]));
   const agentPids = new Set(sessions.map((s) => s.host?.pid).filter(Boolean));
   const polls = new PollWatch({ execAsync });
   await polls.load(agentPids);
   const summaries = new Map(
     sessions.map((s) => {
-      const read = transcripts.read(s.transcriptPath);
+      const read = transcripts.read(s.transcriptPath, branches.get(s.sessionId));
       const polledFile = polls.fileFor(s.host?.pid, agentPids);
       return [s.sessionId, polledFile ? { ...read, lavishFile: polledFile } : read];
     }),
@@ -273,7 +276,7 @@ async function cmdStatus() {
   }
 
   // Reuse the dashboard projection so the CLI and the page can never disagree.
-  const rows = buildRows({ sessions, runs, summaries, reviewUrls });
+  const rows = buildRows({ sessions, runs, summaries, reviewUrls, branches, pullRequests });
 
   if (warning) console.log(`${yellow('Note')} ${warning}\n`);
   if (rows.length === 0) {
@@ -299,6 +302,13 @@ async function cmdStatus() {
       console.log(`  ${dim(row.activity)}`);
     }
     if (row.reviewUrl) console.log(`  ${row.reviewUrl}`);
+    // The state word only while the run is live: no-mistakes stops observing a
+    // pull request when its run ends, so anything later is a frozen reading.
+    if (row.pr) {
+      const label = row.pr.number ? `PR #${row.pr.number}` : 'PR';
+      const state = row.pr.live && row.pr.state ? ` ${row.pr.state}` : '';
+      console.log(`  ${dim(`${label}${state}`)} ${row.pr.url}`);
+    }
   }
   nmState.close();
 }

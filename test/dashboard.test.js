@@ -9,6 +9,8 @@ import {
   sortRows,
   disambiguateTitles,
   shortestUniqueTitles,
+  matchPullRequest,
+  transcriptPullRequest,
 } from '../src/dashboard.js';
 
 const run = (over = {}) => ({
@@ -447,4 +449,153 @@ test('waiting time is measured from when the session became blocked', () => {
     now: 10_000,
   });
   assert.equal(rows[0].waitingForMs, 6000);
+});
+
+// ------------------------------------------------------------- pull requests
+
+const pr = (over = {}) => ({
+  url: 'https://example.com/pull/7',
+  number: 7,
+  state: 'open',
+  observedAt: 1000,
+  branch: 'feat/x',
+  repoPath: '/Users/x/work/repo',
+  live: false,
+  ...over,
+});
+
+test('matchPullRequest finds the one open on this branch', () => {
+  assert.equal(matchPullRequest('/Users/x/work/repo/src', 'feat/x', [pr()])?.number, 7);
+});
+
+test('a pull request on another branch is not this row"s', () => {
+  // Sending someone to the wrong review is worse than sending them to none.
+  // A repo accumulates one PR per branch, so path alone cannot be the match.
+  assert.equal(matchPullRequest('/Users/x/work/repo', 'feat/other', [pr()]), null);
+});
+
+test('a row with no branch gets no pull request rather than a guess', () => {
+  assert.equal(matchPullRequest('/Users/x/work/repo', null, [pr()]), null);
+});
+
+test('matchPullRequest does not match a sibling directory with a shared prefix', () => {
+  assert.equal(matchPullRequest('/Users/x/work/repo-other', 'feat/x', [pr()]), null);
+});
+
+test('matchPullRequest prefers the most specific repo for nested worktrees', () => {
+  const prs = [
+    pr({ number: 1, repoPath: '/Users/x/work/repo' }),
+    pr({ number: 2, repoPath: '/Users/x/work/repo/projects/thing' }),
+  ];
+  assert.equal(matchPullRequest('/Users/x/work/repo/projects/thing/src', 'feat/x', prs)?.number, 2);
+});
+
+test('a session keeps its pull request after the run that opened it has gone', () => {
+  // The whole point: a run is interesting for half an hour, and the review it
+  // opened is what you are waiting on for the rest of the day.
+  const rows = buildRows({
+    sessions: [session({ cwd: '/Users/x/work/repo' })],
+    runs: [],
+    branches: new Map([['s1', 'feat/x']]),
+    pullRequests: [pr()],
+  });
+  assert.equal(rows[0].pr.number, 7);
+  assert.equal(rows[0].pr.live, false, 'and it is honest that the state is a past reading');
+});
+
+test('the branch comes from the checkout, not from whichever run happened to match', () => {
+  // A run's branch belongs to a pipeline that may have finished on a branch
+  // since left behind. The checkout is the truth about where the session is.
+  const rows = buildRows({
+    sessions: [session()],
+    runs: [run({ branch: 'old-branch' })],
+    branches: new Map([['s1', 'feat/current']]),
+  });
+  assert.equal(rows[0].branch, 'feat/current');
+});
+
+test('the run"s branch is the fallback when .git could not be read', () => {
+  const rows = buildRows({ sessions: [session()], runs: [run({ branch: 'from-run' })] });
+  assert.equal(rows[0].branch, 'from-run');
+});
+
+test('a live run"s own pull request wins, and is reported as current', () => {
+  const rows = buildRows({
+    sessions: [session()],
+    runs: [run({ active: true, prUrl: 'https://example.com/pull/9', prState: 'open' })],
+    branches: new Map([['s1', 'main']]),
+  });
+  assert.equal(rows[0].pr.number, 9);
+  assert.equal(rows[0].pr.live, true);
+});
+
+test('lastActivityAt reaches the row from the transcript', () => {
+  const rows = buildRows({
+    sessions: [session()],
+    runs: [],
+    summaries: new Map([['s1', { title: 't', mode: null, activity: null, lavishFile: null, lastActivityAt: 4242 }]]),
+  });
+  assert.equal(rows[0].lastActivityAt, 4242);
+});
+
+test('a run with no session behind it reports its own clock', () => {
+  const rows = buildRows({ sessions: [], runs: [run({ updatedAt: 777 })] });
+  assert.equal(rows[0].lastActivityAt, 777);
+});
+
+const seen = (over = {}) => ({
+  pullRequest: {
+    url: 'https://bitbucket.org/mattw_watson/repo/pull-requests/40',
+    number: 40,
+    slug: 'repo',
+    state: 'open',
+    observedAt: 5000,
+    ...over,
+  },
+});
+
+test('a pull request the transcript reported is attributed to its own checkout', () => {
+  // The case the database cannot cover: opened by hand, or on a branch
+  // no-mistakes has never run. The session printed the URL itself.
+  const pr = transcriptPullRequest(seen(), '/Users/x/work/repo', 'feat/x');
+  assert.equal(pr.number, 40);
+  assert.equal(pr.branch, 'feat/x');
+  assert.equal(pr.live, false, 'nothing is watching it, so the state is not current');
+});
+
+test("a pull request in some other project is not this row's", () => {
+  // A session reviewing or reading about another repo's PR mentions URLs that
+  // have nothing to do with the branch in front of it.
+  assert.equal(transcriptPullRequest(seen(), '/Users/x/work/something-else', 'feat/x'), null);
+  assert.equal(transcriptPullRequest(seen({ slug: null }), '/Users/x/work/repo', 'feat/x'), null);
+  assert.equal(transcriptPullRequest(null, '/Users/x/work/repo', 'feat/x'), null);
+});
+
+test('the repository match ignores case but nothing else', () => {
+  assert.ok(transcriptPullRequest(seen({ slug: 'REPO' }), '/Users/x/work/repo', 'main'));
+  assert.equal(transcriptPullRequest(seen({ slug: 'repo-two' }), '/Users/x/work/repo', 'main'), null);
+});
+
+test('the database beats the transcript when it has a branch-matched answer', () => {
+  // The database entry is verified against the branch; the transcript sighting
+  // is only verified against the repo. Both being present should be rare.
+  const rows = buildRows({
+    sessions: [session({ cwd: '/Users/x/work/repo' })],
+    runs: [],
+    branches: new Map([['s1', 'feat/x']]),
+    pullRequests: [pr({ number: 7 })],
+    summaries: new Map([['s1', seen()]]),
+  });
+  assert.equal(rows[0].pr.number, 7);
+});
+
+test('the transcript fills the gap when the database has nothing for this branch', () => {
+  const rows = buildRows({
+    sessions: [session({ cwd: '/Users/x/work/repo' })],
+    runs: [],
+    branches: new Map([['s1', 'feat/unrun']]),
+    pullRequests: [],
+    summaries: new Map([['s1', seen()]]),
+  });
+  assert.equal(rows[0].pr.number, 40);
 });

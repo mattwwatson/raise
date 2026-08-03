@@ -106,3 +106,71 @@ test('prune forgets transcripts whose sessions have ended', () => {
   reader.read('/a.jsonl');
   assert.equal(files.reads.count, 2, 'pruned entry should have been re-read');
 });
+
+test('events are not computed until something asks for them', () => {
+  // Every session is summarised on every poll; only an expanded card is ever
+  // read back in full. The hot path must not pay for a list nobody asked for.
+  const files = fakeFiles();
+  files.set(
+    '/t.jsonl',
+    line({ type: 'assistant', message: { content: [{ type: 'text', text: 'hello' }] } }),
+    100,
+  );
+  const reader = new TranscriptReader({ files: files.access });
+
+  reader.read('/t.jsonl');
+  assert.equal(files.reads.count, 1);
+
+  const events = reader.events('/t.jsonl');
+  assert.deepEqual(
+    events.map((e) => e.text),
+    ['hello'],
+  );
+  assert.equal(files.reads.count, 2, 'the first ask for events had to parse');
+
+  reader.events('/t.jsonl');
+  reader.events('/t.jsonl');
+  assert.equal(files.reads.count, 2, 'and then they are cached like the summary');
+});
+
+test('an expanded card refreshing itself fills the summary from the same parse', () => {
+  const files = fakeFiles();
+  files.set('/t.jsonl', line({ type: 'ai-title', aiTitle: 'first' }), 100);
+  const reader = new TranscriptReader({ files: files.access });
+  reader.events('/t.jsonl');
+  assert.equal(files.reads.count, 1);
+
+  assert.equal(reader.read('/t.jsonl').title, 'first');
+  assert.equal(files.reads.count, 1, 'no second read for the summary');
+});
+
+test('events are re-read when the transcript moves', () => {
+  const files = fakeFiles();
+  files.set(
+    '/t.jsonl',
+    line({ type: 'assistant', message: { content: [{ type: 'text', text: 'first' }] } }),
+    100,
+  );
+  const reader = new TranscriptReader({ files: files.access });
+  assert.deepEqual(
+    reader.events('/t.jsonl').map((e) => e.text),
+    ['first'],
+  );
+
+  files.set(
+    '/t.jsonl',
+    line({ type: 'assistant', message: { content: [{ type: 'text', text: 'second' }] } }),
+    200,
+  );
+  assert.deepEqual(
+    reader.events('/t.jsonl').map((e) => e.text),
+    ['second'],
+  );
+});
+
+test('a transcript that cannot be read has no events rather than a false empty history', () => {
+  const files = fakeFiles();
+  const reader = new TranscriptReader({ files: files.access });
+  assert.deepEqual(reader.events('/gone.jsonl'), []);
+  assert.deepEqual(reader.events(null), []);
+});

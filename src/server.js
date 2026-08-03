@@ -15,6 +15,7 @@ import { dirname, join } from 'node:path';
 import { NoMistakesState } from './nm-state.js';
 import { SessionRegistry } from './registry.js';
 import { TranscriptReader, defaultFileAccess } from './transcript-reader.js';
+import { GitBranch, defaultGitAccess } from './git-branch.js';
 import { LavishState } from './lavish.js';
 import { PollWatch } from './poll-watch.js';
 import { buildRows, summarise } from './dashboard.js';
@@ -87,10 +88,12 @@ export function createMonitorServer({
   sessionsPath = sessionsDir(),
   keepaliveMs = KEEPALIVE_MS,
   transcriptFiles = defaultFileAccess,
+  gitFiles = defaultGitAccess,
 } = {}) {
   const registry = new SessionRegistry({ dir: sessionsPath });
   const nmState = new NoMistakesState({ dbPath, exec, execAsync });
   const transcripts = new TranscriptReader({ files: transcriptFiles });
+  const branches = new GitBranch({ files: gitFiles });
   const lavish = new LavishState({ execAsync });
   const polls = new PollWatch({ execAsync });
   const probe = nmState.probe();
@@ -105,13 +108,20 @@ export function createMonitorServer({
   function snapshot() {
     const sessions = registry.list();
     const candidateDirs = [...new Set(sessions.map((s) => s.cwd).filter(Boolean))];
-    const { runs, source, warning } = nmState.read({ candidateDirs });
+    const { runs, pullRequests, source, warning } = nmState.read({ candidateDirs });
 
     const agentPids = new Set(sessions.map((s) => s.host?.pid).filter(Boolean));
     const summaries = new Map();
     const reviewUrls = new Map();
+    const sessionBranches = new Map();
     for (const session of sessions) {
-      const read = transcripts.read(session.transcriptPath);
+      // Resolved before the transcript is read, because the branch is what
+      // decides which pull request in the tail belongs to this session. One
+      // stat per session on the happy path, and never a subprocess: nothing
+      // reachable from here may block the poll loop.
+      const branch = branches.branchFor(session.cwd);
+      sessionBranches.set(session.sessionId, branch);
+      const read = transcripts.read(session.transcriptPath, branch);
       // The process table is the authority on whether a poll is still running.
       // A transcript can say the poll returned when only the tool call did -
       // Claude Code backgrounds anything past its own timeout, and a review
@@ -127,8 +137,16 @@ export function createMonitorServer({
       }
     }
     transcripts.prune(new Set(sessions.map((s) => s.transcriptPath).filter(Boolean)));
+    branches.prune(new Set(candidateDirs));
 
-    const rows = buildRows({ sessions, runs, summaries, reviewUrls });
+    const rows = buildRows({
+      sessions,
+      runs,
+      summaries,
+      reviewUrls,
+      branches: sessionBranches,
+      pullRequests,
+    });
     return {
       rows,
       summary: summarise(rows),
@@ -219,6 +237,10 @@ export function createMonitorServer({
       handleFocus(req, res).catch(() => endQuietly(res));
       return;
     }
+    if (req.method === 'GET' && url.pathname === '/recent') {
+      serveRecent(res, url.searchParams.get('session'));
+      return;
+    }
     if (req.method === 'GET' && url.pathname === '/state') {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify(snapshot()));
@@ -270,6 +292,34 @@ export function createMonitorServer({
       'cache-control': 'no-store',
     });
     res.end(source);
+  }
+
+  /**
+   * The recent history of one session, for a card someone has expanded.
+   *
+   * Pulled rather than pushed, and one session at a time. Putting this in the
+   * state frame would mean every session's history in every frame, to every
+   * open page, once a second - and a full DOM rebuild each time - to render
+   * something that is collapsed on all of them nearly all of the time.
+   *
+   * The transcript path comes from the registry, keyed by session id, so no
+   * request can ask this server to read a path of its own choosing.
+   */
+  function serveRecent(res, sessionId) {
+    const record = sessionId ? registry.get(sessionId) : null;
+    if (!record) {
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, reason: 'that session is no longer registered' }));
+      return;
+    }
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+    res.end(
+      JSON.stringify({
+        ok: true,
+        sessionId: record.sessionId,
+        events: transcripts.events(record.transcriptPath),
+      }),
+    );
   }
 
   function openStream(req, res) {

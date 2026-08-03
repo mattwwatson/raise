@@ -49,7 +49,7 @@ Two sources of truth, joined into one list:
 | --- | --- | --- |
 | no-mistakes SQLite DB (polled, 1s) | `src/nm-state.js` | is a pipeline run parked, working, failed? |
 | Claude Code hooks (pushed) | `src/registry.js` | is Claude blocked waiting for a human? |
-| the session's own transcript (tail, on change) | `src/transcript.js` | what is it working on, and what is it doing right now? |
+| the session's own transcript (tail, on change) | `src/transcript.js` | what is it working on, what is it doing right now, and did it open a pull request? |
 
 | Path | What |
 | --- | --- |
@@ -59,7 +59,8 @@ Two sources of truth, joined into one list:
 | `src/nm-state.js` | reads the no-mistakes database, with schema probe and fallback |
 | `src/registry.js` | live Claude sessions, fed by hooks |
 | `src/transcript.js` | what a session is doing, parsed from its transcript (pure) |
-| `src/transcript-reader.js` | the tail read behind that, cached on mtime |
+| `src/transcript-reader.js` | the tail read behind that, cached on mtime and branch |
+| `src/git-branch.js` | the branch a checkout is on, read from `.git/HEAD` |
 | `src/lavish.js` | resolving a Lavish artifact to the page waiting on you |
 | `src/dashboard.js` | joins the two into ranked rows (pure) |
 | `src/focus/` | tmux resolution and per-terminal adapters |
@@ -174,6 +175,36 @@ edge one. `src/poll-watch.js` scans the process table and attributes each poll t
 walking up to the `host.pid` the registry already records for focusing, so nothing new has to
 be captured. The path there comes from argv, already expanded.
 
+**A pull request has three possible sources, and they are ranked by how much they know.**
+A live no-mistakes run is being watched right now, so its `pr_state` is real. The database's
+history is branch-verified but frozen. The transcript is neither, and is the only one that
+sees a pull request no-mistakes never opened.
+
+*The frozen part is the trap.* no-mistakes stops observing a pull request the moment its run
+reaches a terminal state - `pr_state_observed_at` never advances past `updated_at` - so every
+cancelled run in a real database still says `open`, days later. **The link survives the run;
+the state word does not.** `PullRequest.live` is what enforces that, and the page shows the
+state as a chip only when it is true, otherwise as "was open, last checked 3d ago" in the
+tooltip. The runs query deliberately does *not* bound pull requests by the thirty-minute
+window it uses for runs: a run is interesting for half an hour, and the review it opened is
+what you are waiting on for the rest of the day.
+
+*The transcript part is the sharp edge.* A session mentions plenty of pull requests that are
+not its own, and the failure is not a missing link but a confident link to the wrong review.
+Two guards, both learned the hard way: the repository in the URL must match the checkout, and
+**a record listing several pull requests is not a sighting of any of them**. The no-mistakes
+skill injects a table of the last ten runs, every row a different branch and a different PR;
+taking the first URL out of it put an unrelated review on the card. A URL on a line naming
+our branch is ours; failing that, a record mentioning exactly one is reporting it; a record
+mentioning several and none of them ours is worth nothing. This is why `summariseTranscript`
+takes a branch, and why `TranscriptReader` caches on it as well as on mtime.
+
+**The branch comes from `.git/HEAD`, not from a matched run.** Borrowing it from no-mistakes
+meant a session had a branch only while its pipeline run was recent, which is backwards - the
+branch belongs to the checkout. It is also load-bearing for the above, since a pull request is
+matched on it. `src/git-branch.js` reads the file directly (handling a worktree's `.git` file)
+and caches on mtime; it never shells out, because nothing reachable from the poll loop may.
+
 **The host terminal for a tmux session is deliberately not stored.** A tmux session can be
 detached and reattached in a different terminal entirely, so it is resolved fresh on every
 click.
@@ -239,7 +270,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 199 tests, no network, no dependencies, ~1s
+npm test          # 278 tests, no network, no dependencies, ~1s
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
 
@@ -277,11 +308,21 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
   Claude's own notification message, and window identity. Never prompt text, transcript
   content or file contents. Do not widen it.
 - **Reading a transcript is not the same as sending one, and the difference is the rule.**
-  The server reads the tail of a local file and shows a title and a tool name on the user's
-  own dashboard. Nothing leaves the machine, and the conversation itself never crosses a
-  process boundary. What is derived from a transcript stays at that altitude: a generated
-  title, a mode, a tool name. Do not start putting prompt or message text on the page, and do
-  not move any of this into the hook payload.
+  The server reads the tail of a local file and renders it on the user's own dashboard, in
+  the browser, on that same machine. Nothing leaves the machine, and the conversation never
+  crosses a process boundary it did not already cross.
+
+  The card itself stays at a glanceable altitude - a title, a mode, a tool name - because
+  that is what a list you leave pinned is for. **The expanded panel is the one place
+  conversation text appears**, and it is deliberate: pulled per session from `/recent` only
+  when a human clicks the chevron, never pushed, never in the state frame, and never in the
+  hook payload. Widening the *card* is a design change; widening the *hook payload* is
+  forbidden outright, and the boundary that matters is the process one, not the altitude.
+
+  > This rule used to read "do not start putting prompt or message text on the page" full
+  > stop. It was relaxed on purpose, for the expando, once it was clear the two halves it
+  > collapsed are separable: what the page may show and what may leave the machine. The
+  > second half has not moved an inch.
 - **Do not weaken `src/security.js`.** Token, `Host` allowlist and `Origin` allowlist are all
   three load-bearing - this server ends up running `osascript` and `tmux`, and localhost is
   not a boundary. `/health` is the only unauthenticated route and returns liveness only.
@@ -295,7 +336,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 ## Commands
 
 ```sh
-npm test                       # 199 tests, ~1s
+npm test                       # 278 tests, ~1s
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
 nmmon serve                    # start the monitor, print the URL

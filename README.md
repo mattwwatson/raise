@@ -60,8 +60,38 @@ WORKING
 ```
 
 That comes from the transcript Claude Code already writes, so it is quoted rather than
-guessed at. Nothing leaves your machine: the server reads a local file and puts a title and a
-tool name on your own dashboard. Prompts and message text stay out of it.
+guessed at. Nothing leaves your machine: the server reads a local file and renders it on your
+own dashboard, in your own browser.
+
+**Expand a row to see the last few things it did.** The chevron on the right of any session
+row opens a panel with what you asked, what Claude said back, and every tool it ran with how
+each turned out - enough to decide whether to go and look without switching to the terminal.
+
+```
+alpha  feat/live-pr                                    PR #41 OPEN   51m  tab  Focus ↗  ⌃
+  14:39:21  YOU     can you wire up the settlement ledger and make it idempotent
+  14:39:31  CLAUDE  Looking at the existing job first - it retries on failure, so…
+  14:39:41  Read    Reading reconcile.js                                        ✓
+  14:40:11  Bash    Run the reconciliation tests                                ✗
+  14:42:41  Bash    Re-run the reconciliation tests                             …
+```
+
+It is fetched only when you open it, one session at a time, and it refreshes while it is
+open. Subagent side-conversations and the boilerplate Claude Code injects into the user role
+are filtered out, so what you see is what actually passed between you and Claude.
+
+**A row links its pull request.** If a branch has one open, the row shows `PR #41` and takes
+you to it. The state is only shown as a badge while a no-mistakes run is actually watching
+the PR - once the run ends, no-mistakes stops checking, so a stored "open" can be days out of
+date. After that the link stays and the state moves into the tooltip as *"was open, last
+checked 3d ago"*. The link outlives the run on purpose: the run is over in minutes, and the
+review is what you are waiting on for the rest of the day.
+
+Pull requests opened outside a no-mistakes run are picked up from the session's own
+transcript, so a plain `gh pr create` still gets a link.
+
+**The branch is always shown**, next to the repo name, read straight from `.git/HEAD` - so it
+is right for worktrees and for sessions that have never run the pipeline.
 
 **A session waiting on a Lavish review says so, and gives you the link back.** An agent
 sitting in a `lavish-axi poll` has stopped and is waiting for you to open a page you opened a
@@ -185,6 +215,11 @@ The hook never sends prompts, transcripts or file contents. It sends the session
 working directory, the event name, a notification message where Claude supplies one, and the
 window identity needed to focus the tab.
 
+Expanding a row shows conversation text, and that is the only place it appears. It is read
+from a local file by a local server and rendered in your own browser - it is not in the
+event stream, not in the hook payload, and not sent anywhere. The token guards that route
+like every other one, which is exactly why localhost alone is not treated as a boundary.
+
 ## Troubleshooting
 
 **Nothing appears.** Run `nmmon doctor`. The usual cause is hooks installed but sessions not
@@ -205,7 +240,7 @@ updated.
 ## Development
 
 ```sh
-npm test          # 199 tests, no network, no build step, ~1s
+npm test          # 278 tests, no network, no build step, ~1s
 npm run typecheck
 ```
 
