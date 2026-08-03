@@ -14,6 +14,78 @@ import { DatabaseSync } from 'node:sqlite';
 import { basename } from 'node:path';
 
 /**
+ * A joined row of the no-mistakes `runs` and `repos` tables, exactly as it comes
+ * out of SQLite. Snake-cased and in unix *seconds*, unlike everything downstream
+ * of `normaliseRun`. Every field is loosely typed because this schema belongs to
+ * no-mistakes, not to us - see the probe above.
+ *
+ * @typedef {object} RunRow
+ * @property {string} run_id
+ * @property {string} repo_path
+ * @property {string|null} branch
+ * @property {string} status
+ * @property {number|null} awaiting_agent_since
+ * @property {string|null} pr_url
+ * @property {string|null} pr_state
+ * @property {string|null} head_sha
+ * @property {string|null} error
+ * @property {number|null} updated_at
+ * @property {number|null} created_at
+ */
+
+/**
+ * A row of `step_results`, same caveats as `RunRow`.
+ *
+ * @typedef {object} StepRow
+ * @property {string} run_id
+ * @property {string} step_name
+ * @property {string} status
+ * @property {string|null} [findings_json]
+ * @property {string|null} [last_activity]
+ * @property {number|null} [last_activity_at]
+ * @property {string|null} [log_path]
+ */
+
+/**
+ * The step a run is currently on, or was last on.
+ *
+ * @typedef {object} RunStep
+ * @property {string} name
+ * @property {string} status
+ * @property {number} findings how many the step reported, 0 when it reported none
+ * @property {string|null} lastActivity
+ * @property {number|null} lastActivityAt epoch ms
+ * @property {string|null} logPath
+ */
+
+/**
+ * One no-mistakes pipeline run, normalised out of the database (or, in degraded
+ * mode, out of `no-mistakes axi status`).
+ *
+ * Timestamps are epoch **milliseconds** here; no-mistakes stores seconds, and
+ * the conversion happens once, in `normaliseRun`.
+ *
+ * @typedef {object} Run
+ * @property {string} runId
+ * @property {string} repoPath
+ * @property {string} repoName the basename of `repoPath`
+ * @property {string|null} branch
+ * @property {string} status the raw no-mistakes status
+ * @property {boolean} active whether `status` is one of ACTIVE_STATUSES
+ * @property {boolean} parked stopped at a gate, waiting to be answered
+ * @property {number|null} parkedSince epoch ms
+ * @property {number|null} parkedForMs
+ * @property {string|null} prUrl
+ * @property {string|null} prState
+ * @property {string|null} headSha abbreviated to 8 characters
+ * @property {string|null} error
+ * @property {number|null} updatedAt epoch ms
+ * @property {number|null} createdAt epoch ms
+ * @property {RunStep|null} step
+ * @property {boolean} [degraded] set only on the `axi status` fallback path
+ */
+
+/**
  * Every column the queries below touch. The probe and the queries have to stay
  * in step: a column that is selected but not probed degrades late, as a query
  * error reported as "lost the database", rather than at startup with the
@@ -175,7 +247,7 @@ export class NoMistakesState {
    * @param {boolean} [options.blocking] allow the degraded path to shell out
    *   inline. Only ever true for one-shot commands; a long-lived server must
    *   leave this alone so a hung CLI cannot stall the poll loop.
-   * @returns {{runs: object[], source: string, warning: string|null}}
+   * @returns {{runs: Run[], source: string, warning: string|null}}
    */
   read({ candidateDirs = [], now = Date.now(), blocking = false } = {}) {
     if (this.#mode === 'unknown') this.probe();
@@ -307,8 +379,12 @@ export class NoMistakesState {
   }
 }
 
-/** @returns {Map<string, object[]>} steps in order, keyed by run id */
+/**
+ * @param {StepRow[]} steps
+ * @returns {Map<string, StepRow[]>} steps in order, keyed by run id
+ */
 export function groupSteps(steps) {
+  /** @type {Map<string, StepRow[]>} */
   const byRun = new Map();
   for (const step of steps) {
     if (!byRun.has(step.run_id)) byRun.set(step.run_id, []);
@@ -320,6 +396,9 @@ export function groupSteps(steps) {
 /**
  * Pick the step that best describes where a run is right now: the running one,
  * else the last one that did anything.
+ *
+ * @param {StepRow[]} [steps]
+ * @returns {StepRow|null}
  */
 export function currentStep(steps = []) {
   if (steps.length === 0) return null;
@@ -341,7 +420,14 @@ export function countFindings(findingsJson) {
   }
 }
 
-/** Shape one database row into the record the rest of the app speaks. */
+/**
+ * Shape one database row into the record the rest of the app speaks.
+ *
+ * @param {RunRow} row
+ * @param {StepRow[]} steps that run's steps, in order
+ * @param {number} [now]
+ * @returns {Run}
+ */
 export function normaliseRun(row, steps, now = Date.now()) {
   const step = currentStep(steps);
   // no-mistakes stores unix seconds. A non-null awaiting_agent_since is the
@@ -383,6 +469,10 @@ export function normaliseRun(row, steps, now = Date.now()) {
  * Deliberately narrow: it reads only the handful of fields the dashboard needs
  * and treats anything it cannot find as absent. This path exists so an
  * unexpected no-mistakes version degrades instead of breaking.
+ *
+ * @param {string} out
+ * @param {string} repoPath
+ * @returns {Run|null}
  */
 export function parseAxiStatus(out, repoPath) {
   if (!out || !/^\s*run:/m.test(out)) return null;

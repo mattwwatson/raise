@@ -22,6 +22,11 @@ export function escapeAppleScript(value) {
  *
  * `tty of s` is `missing value` for restored-but-dead sessions, so the
  * comparison must tolerate that rather than erroring out of the loop.
+ *
+ * One identifier is enough, and callers pass one or the other: the UUID is
+ * preferred where it exists, because a tty can be recycled by a later process.
+ *
+ * @param {{sessionUuid?: string|null, tty?: string|null}} target
  */
 export function itermFocusScript({ sessionUuid, tty }) {
   const matcher = sessionUuid

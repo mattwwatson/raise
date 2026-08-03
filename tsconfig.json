@@ -1,0 +1,25 @@
+{
+  // Typechecking only - nothing here is ever compiled. The codebase is plain
+  // ESM JavaScript; the types come from the JSDoc that is already written, so
+  // `checkJs` turns those comments from documentation into a checked claim.
+  //
+  // `strict` is off deliberately. Turning it on is mostly `noImplicitAny`,
+  // which on an untyped JS codebase means annotating every callback parameter
+  // for no defect caught - 455 complaints instead of 49, almost all noise.
+  // What is left still catches the thing worth catching: JSDoc that no longer
+  // describes what the function actually takes or returns.
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "target": "es2023",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    // `dom` is for public/, `node` for everything else. One project, both.
+    "lib": ["es2023", "dom"],
+    "types": ["node"],
+    "strict": false,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*.js", "bin/**/*.js", "hooks/**/*.js", "public/**/*.js"]
+}

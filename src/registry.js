@@ -20,6 +20,63 @@ import {
 import { join } from 'node:path';
 
 /**
+ * The window identity a hook captures at session start - everything needed to
+ * find this session's tab again later. Every field is optional: a session
+ * started before the hooks were installed reports none of them.
+ *
+ * @typedef {object} Host
+ * @property {string|null} [term_program] TERM_PROGRAM, which names the terminal
+ * @property {string|null} [iterm_session_id] iTerm2's per-tab UUID, the best
+ *   identifier available - it survives the tab moving to another window
+ * @property {string|null} [term_session_id] set by the terminal itself, so it is
+ *   present when shell integration is not
+ * @property {string|null} [tmux] the TMUX socket, when running under tmux
+ * @property {string|null} [tmux_pane] the pane, when running under tmux
+ * @property {string|null} [tty] the controlling terminal, walked up from the hook
+ * @property {number|null} [pid] the agent process, used only for liveness pruning
+ * @property {string|null} [hostname]
+ */
+
+/**
+ * A Claude Code hook payload, with the `host` the hook adds before posting.
+ *
+ * Snake-cased because the field names are Claude Code's, not ours, and it
+ * arrives over a socket - so nothing here can be assumed present or well formed.
+ *
+ * @typedef {object} HookPayload
+ * @property {string} session_id
+ * @property {string} hook_event_name
+ * @property {string} [cwd]
+ * @property {string} [transcript_path]
+ * @property {string} [message] why Claude wants you, on a Notification
+ * @property {Host} [host]
+ */
+
+/**
+ * What Claude is doing, as far as the hooks can tell.
+ *
+ * `ended` never reaches a stored record - it is the signal to delete one.
+ *
+ * @typedef {'idle'|'working'|'blocked'|'ended'} SessionState
+ */
+
+/**
+ * One live Claude Code session, as stored on disk.
+ *
+ * @typedef {object} Session
+ * @property {string} sessionId
+ * @property {string|null} cwd
+ * @property {string|null} transcriptPath
+ * @property {string} event the hook event that last touched this record
+ * @property {SessionState} state
+ * @property {string|null} message why Claude wants you; only set while blocked
+ * @property {Host} host
+ * @property {number} startedAt
+ * @property {number} updatedAt
+ * @property {number} stateSince when `state` last changed, for "waiting 2m"
+ */
+
+/**
  * How a Claude Code hook event maps to a session state.
  *
  * - blocked: Claude wants something from the human right now (permission
@@ -37,6 +94,10 @@ const EVENT_STATES = {
   SessionEnd: 'ended',
 };
 
+/**
+ * @param {string} event
+ * @returns {SessionState}
+ */
 export function stateForEvent(event) {
   return EVENT_STATES[event] || 'working';
 }
@@ -72,7 +133,9 @@ export class SessionRegistry {
    * rather than replaced. Losing the window identity on a later Stop event
    * would silently break focusing.
    *
-   * @returns {object|null} the stored record, or null if the session ended
+   * @param {HookPayload} payload
+   * @param {number} [now]
+   * @returns {Session|null} the stored record, or null if the session ended
    */
   record(payload, now = Date.now()) {
     const sessionId = payload.session_id;
@@ -85,7 +148,7 @@ export class SessionRegistry {
       return null;
     }
 
-    const previous = this.get(sessionId) || {};
+    const previous = this.get(sessionId) || /** @type {Partial<Session>} */ ({});
     const record = {
       sessionId,
       cwd: payload.cwd || previous.cwd || null,
@@ -105,6 +168,10 @@ export class SessionRegistry {
     return record;
   }
 
+  /**
+   * @param {string} sessionId
+   * @returns {Session|null}
+   */
   get(sessionId) {
     if (!isSafeSessionId(sessionId)) return null;
     try {
@@ -116,9 +183,10 @@ export class SessionRegistry {
 
   /**
    * @param {object} [options]
-   * @param {Function} [options.isAlive] pid liveness probe, injected for tests
+   * @param {(pid: number) => boolean} [options.isAlive] pid liveness probe,
+   *   injected so tests never probe the machine running them
    * @param {number} [options.now]
-   * @returns {object[]}
+   * @returns {Session[]}
    */
   list({ isAlive = defaultIsAlive, now = Date.now() } = {}) {
     let names;
@@ -127,6 +195,7 @@ export class SessionRegistry {
     } catch {
       return [];
     }
+    /** @type {Session[]} */
     const records = [];
     for (const name of names) {
       if (!name.endsWith('.json')) continue;
@@ -154,6 +223,7 @@ export class SessionRegistry {
     return records.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   }
 
+  /** @param {string} sessionId */
   remove(sessionId) {
     if (!isSafeSessionId(sessionId)) return;
     try {

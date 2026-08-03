@@ -20,6 +20,31 @@ import {
   appRunningScript,
 } from './applescript.js';
 
+/**
+ * What a terminal is asked to find. Both are optional and an adapter may support
+ * only one of them - Terminal.app exposes no session identifier, so it is
+ * tty-only. An adapter given nothing it can use returns false rather than
+ * guessing.
+ *
+ * @typedef {{sessionUuid?: string|null, tty?: string|null}} FocusTarget
+ */
+
+/**
+ * One terminal emulator. This is the whole interface; adding a terminal means
+ * adding an object of this shape to ALL_TERMINALS and nothing else.
+ *
+ * @typedef {object} Terminal
+ * @property {string} name machine-readable, reported back as the adapter used
+ * @property {string} label how to name it to a human
+ * @property {string} [termProgram] the TERM_PROGRAM value that means "this one",
+ *   used only to decide the order adapters are tried in
+ * @property {(exec: Function) => Promise<boolean>} isAvailable
+ * @property {(exec: Function, target: FocusTarget) => Promise<boolean>} focus
+ * @property {(exec: Function, target: {title: string|null}) =>
+ *   Promise<'ok'|'notfound'|'ambiguous'>} [focusByTitle] optional, and only
+ *   iTerm2 implements it - see below
+ */
+
 const OSASCRIPT = 'osascript';
 
 function runScript(exec, script) {
@@ -34,6 +59,7 @@ async function isAppRunning(exec, processName) {
   }
 }
 
+/** @type {Terminal} */
 export const iterm2 = {
   name: 'iterm2',
   label: 'iTerm2',
@@ -42,10 +68,7 @@ export const iterm2 = {
   async isAvailable(exec) {
     return process.platform === 'darwin' && (await isAppRunning(exec, 'iTerm2'));
   },
-  /**
-   * @param {{sessionUuid?: string|null, tty?: string|null}} target
-   * @returns {Promise<boolean>} whether a matching tab was found and focused
-   */
+  /** @returns {Promise<boolean>} whether a matching tab was found and focused */
   async focus(exec, { sessionUuid = null, tty = null }) {
     if (!sessionUuid && !tty) return false;
     // Prefer the session UUID: it survives the tab moving between windows,
@@ -71,6 +94,7 @@ export const iterm2 = {
   },
 };
 
+/** @type {Terminal} */
 export const terminalApp = {
   name: 'terminal-app',
   label: 'Terminal.app',
@@ -98,6 +122,10 @@ export const ALL_TERMINALS = [iterm2, terminalApp];
  * For a plain tab that is always correct. For a tmux pane the reported
  * TERM_PROGRAM comes from whenever the tmux server started and may be stale, so
  * the other adapters are still tried afterwards rather than trusted away.
+ *
+ * @param {string|null} termProgram
+ * @param {Terminal[]} [terminals]
+ * @returns {Terminal[]}
  */
 export function orderedTerminals(termProgram, terminals = ALL_TERMINALS) {
   if (!termProgram) return terminals;
