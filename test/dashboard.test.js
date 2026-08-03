@@ -283,6 +283,24 @@ test('buildRows tags a tmux-hosted session', () => {
   assert.equal(rows[0].hostKind, 'tmux');
 });
 
+test('buildRows tags a Claude Desktop session and keeps it focusable', () => {
+  // The card this exists for: no tty, no terminal, and until now not focusable
+  // either - so opening an old session in the desktop app put a row on the page
+  // that you could see wanting you and could not click through to.
+  const rows = buildRows({
+    sessions: [
+      session({
+        sessionId: '2205e739-08bc-4ee6-a8d4-b15204bab998',
+        host: { app: 'claude-desktop', tty: null, term_program: null },
+      }),
+    ],
+    runs: [],
+    now: 5000,
+  });
+  assert.equal(rows[0].hostKind, 'app');
+  assert.equal(rows[0].focusable, true);
+});
+
 test('buildRows shows an unattached run but never offers to focus it', () => {
   const rows = buildRows({ sessions: [], runs: [run({ repoPath: '/elsewhere' })], now: 5000 });
   assert.equal(rows.length, 1);

@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { planFocus, itermUuid, focusSession, titleNeedle } from '../src/focus/index.js';
+import { resumeUrl } from '../src/focus/claude-desktop.js';
 import { orderedTerminals, ALL_TERMINALS } from '../src/focus/terminals.js';
 import { socketArgs, resolveTmuxTarget, parseClients } from '../src/focus/tmux.js';
 import {
@@ -56,6 +57,75 @@ test('planFocus prefers tmux even when terminal identifiers are also present', (
     host: { tmux_pane: '%3', iterm_session_id: 'w0t0p0:57A1A161-0489-48BD-8C6E-A540C57DD9DE' },
   });
   assert.equal(plan.kind, 'tmux');
+});
+
+test('planFocus routes a Claude Desktop session to the app path', () => {
+  // A desktop session reports none of the terminal identifiers, so before this
+  // branch existed it planned as unfocusable and rendered as a dead card.
+  const plan = planFocus({
+    sessionId: '2205e739-08bc-4ee6-a8d4-b15204bab998',
+    host: { app: 'claude-desktop', tty: null, term_program: null },
+  });
+  assert.equal(plan.kind, 'app');
+  assert.equal(plan.sessionId, '2205e739-08bc-4ee6-a8d4-b15204bab998');
+});
+
+test('planFocus prefers the desktop app over any terminal identity on the record', () => {
+  // Host fields are merged across events and never cleared, so a stale tty can
+  // outlive the terminal that owned it. The app knows where its own session is;
+  // a recycled tty names whatever window has it now.
+  const plan = planFocus({
+    sessionId: '2205e739-08bc-4ee6-a8d4-b15204bab998',
+    host: { app: 'claude-desktop', tty: '/dev/ttys004', tmux_pane: '%3' },
+  });
+  assert.equal(plan.kind, 'app');
+});
+
+test('resumeUrl only builds a link for an id the app can resolve', () => {
+  assert.equal(
+    resumeUrl('2205e739-08bc-4ee6-a8d4-b15204bab998'),
+    'claude://resume?session=2205e739-08bc-4ee6-a8d4-b15204bab998',
+  );
+  assert.equal(resumeUrl('not-a-uuid'), null);
+  assert.equal(resumeUrl(null), null);
+});
+
+test('focusing a desktop session hands it to the app by deep link', async () => {
+  const exec = fakeExec({ open: '' });
+  const result = await focusSession(
+    {
+      sessionId: '2205e739-08bc-4ee6-a8d4-b15204bab998',
+      host: { app: 'claude-desktop' },
+    },
+    { exec },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.adapter, 'claude-desktop');
+  assert.deepEqual(exec.calls, ['open claude://resume?session=2205e739-08bc-4ee6-a8d4-b15204bab998']);
+});
+
+test('a desktop session with an id the app cannot resolve is refused, not guessed at', async () => {
+  // The deep link imports a session the app has never seen, so a wrong or
+  // malformed id is not a harmless miss. Nothing is run at all.
+  const exec = fakeExec({});
+  const result = await focusSession(
+    { sessionId: 'run-42', host: { app: 'claude-desktop' } },
+    { exec },
+  );
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /did not report an id/);
+  assert.deepEqual(exec.calls, []);
+});
+
+test('a desktop deep link that will not open reports why, with the command to try', async () => {
+  const exec = fakeExec({ open: new Error('LSOpenURLsWithRole() failed') });
+  const result = await focusSession(
+    { sessionId: '2205e739-08bc-4ee6-a8d4-b15204bab998', host: { app: 'claude-desktop' } },
+    { exec },
+  );
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /Claude Desktop/);
+  assert.equal(result.hint, "open 'claude://resume?session=2205e739-08bc-4ee6-a8d4-b15204bab998'");
 });
 
 test('planFocus routes a plain tab to the tab path', () => {

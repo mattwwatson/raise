@@ -26,6 +26,9 @@ import { join } from 'node:path';
  *
  * @typedef {object} Host
  * @property {string|null} [term_program] TERM_PROGRAM, which names the terminal
+ * @property {'claude-desktop'|null} [app] the application hosting the session
+ *   when it is not a terminal, walked up from the hook. A session with this set
+ *   has no tty and no terminal UUID by nature, so it is the only handle there is
  * @property {string|null} [iterm_session_id] iTerm2's per-tab UUID, the best
  *   identifier available - it survives the tab moving to another window
  * @property {string|null} [term_session_id] set by the terminal itself, so it is
