@@ -23,6 +23,8 @@ import {
 } from '../src/hooks.js';
 import { NoMistakesState } from '../src/nm-state.js';
 import { SessionRegistry } from '../src/registry.js';
+import { TranscriptReader } from '../src/transcript-reader.js';
+import { LavishState } from '../src/lavish.js';
 import { focusSession } from '../src/focus/index.js';
 import { ALL_TERMINALS } from '../src/focus/terminals.js';
 import { exec, execAsync, tryExec, tryExecAsync } from '../src/exec.js';
@@ -235,7 +237,7 @@ async function cmdOpen() {
   if (process.platform === 'darwin') tryExec(exec, 'open', [url]);
 }
 
-function cmdStatus() {
+async function cmdStatus() {
   const registry = new SessionRegistry({ dir: sessionsDir() });
   const sessions = registry.list();
   const nmState = new NoMistakesState({ dbPath: statePath(), exec });
@@ -245,8 +247,23 @@ function cmdStatus() {
   // for the degraded path rather than reporting an empty cache.
   const { runs, warning } = nmState.read({ candidateDirs, blocking: true });
 
+  const transcripts = new TranscriptReader();
+  const summaries = new Map(sessions.map((s) => [s.sessionId, transcripts.read(s.transcriptPath)]));
+
+  // Asking Lavish costs a second or two, so it is only worth it when something
+  // is actually waiting on a review.
+  const reviewUrls = new Map();
+  const awaitingReview = [...summaries].filter(([, summary]) => summary.lavishFile);
+  if (awaitingReview.length > 0) {
+    const lavish = new LavishState({ execAsync });
+    await lavish.load();
+    for (const [sessionId, summary] of awaitingReview) {
+      reviewUrls.set(sessionId, lavish.urlFor(summary.lavishFile));
+    }
+  }
+
   // Reuse the dashboard projection so the CLI and the page can never disagree.
-  const rows = buildRows({ sessions, runs });
+  const rows = buildRows({ sessions, runs, summaries, reviewUrls });
 
   if (warning) console.log(`${yellow('Note')} ${warning}\n`);
   if (rows.length === 0) {
@@ -255,12 +272,23 @@ function cmdStatus() {
     return;
   }
   for (const row of rows) {
-    const colour = row.attention === 'blocked' ? red : row.attention === 'parked' ? yellow : dim;
+    const colour =
+      row.attention === 'blocked' || row.attention === 'review'
+        ? red
+        : row.attention === 'parked'
+          ? yellow
+          : dim;
     const step = row.run?.step ? ` ${dim(`step ${row.run.step.name}`)}` : '';
     console.log(
       `${colour(row.attentionLabel.padEnd(26))} ${bold(row.title)} ${dim(row.branch || '')}${step}`,
     );
     if (row.message) console.log(`  ${dim(row.message)}`);
+    // The summary is what the step line already says when there is a pipeline.
+    if (row.summary && !row.run?.step) console.log(`  ${dim(row.summary)}`);
+    if (row.activity && row.attention !== 'idle' && row.attention !== 'done') {
+      console.log(`  ${dim(row.activity)}`);
+    }
+    if (row.reviewUrl) console.log(`  ${row.reviewUrl}`);
   }
   nmState.close();
 }
@@ -475,7 +503,7 @@ async function main() {
       await cmdOpen();
       break;
     case 'status':
-      cmdStatus();
+      await cmdStatus();
       break;
     case 'focus':
       await cmdFocus(positional);

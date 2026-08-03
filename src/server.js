@@ -14,6 +14,8 @@ import { dirname, join } from 'node:path';
 
 import { NoMistakesState } from './nm-state.js';
 import { SessionRegistry } from './registry.js';
+import { TranscriptReader, defaultFileAccess } from './transcript-reader.js';
+import { LavishState } from './lavish.js';
 import { buildRows, summarise } from './dashboard.js';
 import { focusSession } from './focus/index.js';
 import { checkRequest } from './security.js';
@@ -83,9 +85,12 @@ export function createMonitorServer({
   dbPath = statePath(),
   sessionsPath = sessionsDir(),
   keepaliveMs = KEEPALIVE_MS,
+  transcriptFiles = defaultFileAccess,
 } = {}) {
   const registry = new SessionRegistry({ dir: sessionsPath });
   const nmState = new NoMistakesState({ dbPath, exec, execAsync });
+  const transcripts = new TranscriptReader({ files: transcriptFiles });
+  const lavish = new LavishState({ execAsync });
   const probe = nmState.probe();
 
   /** @type {Set<import('node:http').ServerResponse>} */
@@ -99,7 +104,22 @@ export function createMonitorServer({
     const sessions = registry.list();
     const candidateDirs = [...new Set(sessions.map((s) => s.cwd).filter(Boolean))];
     const { runs, source, warning } = nmState.read({ candidateDirs });
-    const rows = buildRows({ sessions, runs });
+
+    const summaries = new Map();
+    const reviewUrls = new Map();
+    for (const session of sessions) {
+      const summary = transcripts.read(session.transcriptPath);
+      summaries.set(session.sessionId, summary);
+      // Only ask Lavish about sessions that say they are polling it. Asking is
+      // what schedules the refresh, so a machine with no reviews in flight
+      // never runs the CLI at all.
+      if (summary.lavishFile) {
+        reviewUrls.set(session.sessionId, lavish.urlFor(summary.lavishFile));
+      }
+    }
+    transcripts.prune(new Set(sessions.map((s) => s.transcriptPath).filter(Boolean)));
+
+    const rows = buildRows({ sessions, runs, summaries, reviewUrls });
     return {
       rows,
       summary: summarise(rows),

@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>nmmon</title>
+    <link id="favicon" rel="icon" href="data:," />
     <style>
       :root {
         color-scheme: light dark;
@@ -15,6 +16,8 @@
         --faint: #9aa1ab;
         --blocked: #d92d20;
         --blocked-bg: #fef3f2;
+        --review: #7839ee;
+        --review-bg: #f9f5ff;
         --parked: #b54708;
         --parked-bg: #fffaeb;
         --failed: #7a271a;
@@ -33,6 +36,8 @@
           --faint: #6b7280;
           --blocked: #ff6b5e;
           --blocked-bg: #2a1614;
+          --review: #b692f6;
+          --review-bg: #1e1830;
           --parked: #fdb022;
           --parked-bg: #2a2114;
           --failed: #ff8a7a;
@@ -93,6 +98,15 @@
         color: var(--blocked);
         border-color: color-mix(in srgb, var(--blocked) 35%, transparent);
         background: var(--blocked-bg);
+      }
+      /*
+       * Its own colour rather than the red one. A pill that does not match the
+       * cards it is counting makes the colour coding mean nothing.
+       */
+      .pill.review {
+        color: var(--review);
+        border-color: color-mix(in srgb, var(--review) 35%, transparent);
+        background: var(--review-bg);
       }
       .spacer {
         flex: 1;
@@ -231,6 +245,10 @@
         border-color: color-mix(in srgb, var(--blocked) 45%, transparent);
         background: var(--blocked-bg);
       }
+      .card.review {
+        border-color: color-mix(in srgb, var(--review) 45%, transparent);
+        background: var(--review-bg);
+      }
       .card.parked {
         border-color: color-mix(in srgb, var(--parked) 40%, transparent);
       }
@@ -243,6 +261,9 @@
       }
       .bar.blocked {
         background: var(--blocked);
+      }
+      .bar.review {
+        background: var(--review);
       }
       .bar.parked {
         background: var(--parked);
@@ -295,6 +316,9 @@
       .state.blocked {
         color: var(--blocked);
       }
+      .state.review {
+        color: var(--review);
+      }
       .state.parked {
         color: var(--parked);
       }
@@ -312,6 +336,50 @@
         text-overflow: ellipsis;
         white-space: nowrap;
         min-width: 0;
+      }
+      /*
+       * What the session is about, in Claude's own words. Third line, and
+       * quieter than the state above it: it is what you read once you have
+       * found the row you want, not what you scan for.
+       */
+      .summary {
+        margin-top: 2px;
+        font-size: 12px;
+        color: var(--faint);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+      }
+      /* The tool running right now, set apart from the state it qualifies. */
+      .activity {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 11.5px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+      }
+      .mode {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--parked);
+        border: 1px solid color-mix(in srgb, var(--parked) 35%, transparent);
+        border-radius: 4px;
+        padding: 0 4px;
+        flex: none;
+      }
+      a.review-link {
+        color: var(--review);
+        text-decoration: none;
+        font-size: 12px;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      a.review-link:hover {
+        text-decoration: underline;
       }
       .meta {
         display: flex;
@@ -409,18 +477,69 @@
       const connTextEl = document.getElementById('connText');
       const toastEl = document.getElementById('toast');
       const notifyBtn = document.getElementById('notify');
+      const faviconEl = document.getElementById('favicon');
 
       let lastBlocked = new Set();
       let latest = null;
+      let connectionTone = 'wait';
 
       const GROUPS = [
         ['blocked', 'Waiting for you'],
+        ['review', 'Waiting on your review'],
         ['parked', 'Pipeline parked'],
         ['failed', 'Failed'],
         ['working', 'Working'],
         ['idle', 'Idle'],
         ['done', 'Recently finished'],
       ];
+
+      /*
+       * The favicon carries the one thing worth knowing from a background tab:
+       * whether anything wants you. This page is meant to be left pinned, where
+       * the tab strip shows an icon and little else, so a static logo would be
+       * the one place the state is not.
+       *
+       * Drawn rather than fetched - an inline SVG data URI keeps the page
+       * self-contained and needs no build step or binary in the repo.
+       */
+      const FAVICON_COLOURS = {
+        blocked: '#d92d20',
+        review: '#7839ee',
+        parked: '#b54708',
+        failed: '#7a271a',
+        working: '#175cd3',
+        idle: '#98a2b3',
+        done: '#067647',
+      };
+
+      /**
+       * A filled dot in the most urgent colour on the page, or a hollow ring
+       * when the page has gone stale - the same honesty the header dot owes
+       * you. A solid icon over state we can no longer vouch for would be a
+       * confident green light on a dead feed.
+       */
+      function faviconFor(attention, live) {
+        const colour = FAVICON_COLOURS[attention] || FAVICON_COLOURS.idle;
+        const shape = live
+          ? '<circle cx="16" cy="16" r="13" fill="' + colour + '"/>'
+          : '<circle cx="16" cy="16" r="11" fill="none" stroke="#98a2b3" stroke-width="4"/>';
+        const svg =
+          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' + shape + '</svg>';
+        return 'data:image/svg+xml,' + encodeURIComponent(svg);
+      }
+
+      let faviconHref = '';
+      function showFavicon() {
+        const rows = (latest && latest.rows) || [];
+        // ATTENTION_ORDER is most-urgent-first and the server sorts on it, so
+        // the top row is by definition the most urgent thing on the page.
+        const attention = rows.length ? rows[0].attention : 'idle';
+        const href = faviconFor(attention, connectionTone !== 'bad');
+        // Reassigning an unchanged href makes some browsers refetch and flicker.
+        if (href === faviconHref) return;
+        faviconHref = href;
+        faviconEl.href = href;
+      }
 
       function ago(ms) {
         if (ms == null) return '';
@@ -527,11 +646,47 @@
           msg.textContent = detail.join(' ');
           line2.appendChild(msg);
         }
+        // What it is doing this second, which only means anything while it is
+        // still doing it. A finished row's last tool is history, not status.
+        if (row.activity && row.attention !== 'done' && row.attention !== 'idle') {
+          const activity = document.createElement('span');
+          activity.className = 'activity';
+          activity.textContent = row.activity;
+          line2.appendChild(activity);
+        }
+        if (row.mode) {
+          const mode = document.createElement('span');
+          mode.className = 'mode';
+          mode.textContent = row.mode;
+          line2.appendChild(mode);
+        }
         body.appendChild(line2);
+
+        // The step is already on line2 with its findings, so a summary line is
+        // only added when it says something new - which is exactly the case
+        // this was built for: a plain Claude session with no pipeline at all.
+        if (row.summary && !(row.run && row.run.step)) {
+          const summary = document.createElement('div');
+          summary.className = 'summary';
+          summary.textContent = row.summary;
+          body.appendChild(summary);
+        }
         el.appendChild(body);
 
         const meta = document.createElement('div');
         meta.className = 'meta';
+        // The whole point of the review state: the page it is waiting on is one
+        // you opened a while ago and have since lost. Give it back.
+        if (row.reviewUrl) {
+          const a = document.createElement('a');
+          a.className = 'review-link';
+          a.href = row.reviewUrl;
+          a.target = '_blank';
+          a.rel = 'noreferrer';
+          a.textContent = 'Review ↗';
+          a.addEventListener('click', (e) => e.stopPropagation());
+          meta.appendChild(a);
+        }
         if (row.run && webUrl(row.run.prUrl)) {
           const a = document.createElement('a');
           a.className = 'pr';
@@ -544,8 +699,11 @@
         }
         // Computed from absolute timestamps, not the server's elapsed values, so
         // the ticking re-render below stays accurate between pushes.
+        // How long it has been waiting on you, which is the number that decides
+        // which row to deal with first. A review waits exactly as visibly as a
+        // permission prompt does.
         const since =
-          row.attention === 'blocked'
+          row.attention === 'blocked' || row.attention === 'review'
             ? row.sessionStateSince
             : row.run && row.run.parked
               ? row.run.parkedSince
@@ -586,16 +744,21 @@
         const s = payload.summary || {};
         countsEl.innerHTML = '';
         const pills = [];
-        if (s.blocked) pills.push([s.blocked + ' waiting for you', true]);
-        if (s.parked) pills.push([s.parked + ' parked', false]);
-        if (s.failed) pills.push([s.failed + ' failed', false]);
-        for (const [text, alert] of pills) {
+        if (s.blocked) pills.push([s.blocked + ' waiting for you', 'alert']);
+        if (s.review) pills.push([s.review + ' awaiting review', 'review']);
+        if (s.parked) pills.push([s.parked + ' parked', '']);
+        if (s.failed) pills.push([s.failed + ' failed', '']);
+        for (const [text, tone] of pills) {
           const p = document.createElement('span');
-          p.className = 'pill' + (alert ? ' alert' : '');
+          p.className = tone ? 'pill ' + tone : 'pill';
           p.textContent = text;
           countsEl.appendChild(p);
         }
-        document.title = s.blocked ? '(' + s.blocked + ') nmmon' : 'nmmon';
+        // Both states mean a person is the blocker, so both belong in the count
+        // you see from another tab.
+        const wantsYou = (s.blocked || 0) + (s.review || 0);
+        document.title = wantsYou ? '(' + wantsYou + ') nmmon' : 'nmmon';
+        showFavicon();
 
         rowsEl.innerHTML = '';
         if (rows.length === 0) {
@@ -620,22 +783,39 @@
         notifyOnNewlyBlocked(rows);
       }
 
+      /*
+       * Both states mean the agent has stopped and only a person can restart
+       * it, so both are worth a notification. They differ in where they send
+       * you: a blocked session wants its terminal, a review wants the browser
+       * page it is waiting on.
+       */
+      function wantsYou(row) {
+        return row.attention === 'blocked' || row.attention === 'review';
+      }
+
       function notifyOnNewlyBlocked(rows) {
-        const blocked = new Set(rows.filter((r) => r.attention === 'blocked').map((r) => r.id));
+        const waiting = new Set(rows.filter(wantsYou).map((r) => r.id));
         if (hasNotifications() && Notification.permission === 'granted') {
           for (const row of rows) {
-            if (row.attention !== 'blocked' || lastBlocked.has(row.id)) continue;
-            const n = new Notification(row.title + ' needs you', {
-              body: row.message || 'Claude is waiting for input',
-              tag: row.id,
-            });
+            if (!wantsYou(row) || lastBlocked.has(row.id)) continue;
+            const review = row.attention === 'review';
+            const n = new Notification(
+              row.title + (review ? ' wants your review' : ' needs you'),
+              {
+                body: review
+                  ? row.summary || 'A review page is waiting for you'
+                  : row.message || 'Claude is waiting for input',
+                tag: row.id,
+              },
+            );
             n.onclick = () => {
               window.focus();
-              focusRow(row);
+              if (review && row.reviewUrl) window.open(row.reviewUrl, '_blank', 'noreferrer');
+              else focusRow(row);
             };
           }
         }
-        lastBlocked = blocked;
+        lastBlocked = waiting;
       }
 
       function hasNotifications() {
@@ -668,12 +848,14 @@
 
       function showConnection() {
         const { text, tone } = connectionLabel(watch.status(), watch.quietForMs());
+        connectionTone = tone;
         connTextEl.textContent = text;
         dotEl.className = 'dot' + (tone === 'bad' ? ' off' : tone === 'wait' ? ' wait' : '');
         connEl.className = 'conn' + (tone === 'bad' ? ' off' : '');
         // Dim what we can no longer vouch for. A blocked session that cleared
         // ten minutes ago must not keep sitting there looking current.
         document.body.classList.toggle('unconfirmed', tone === 'bad');
+        showFavicon();
       }
 
       function connect() {

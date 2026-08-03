@@ -83,6 +83,103 @@ test('attentionFor covers the remaining states', () => {
   );
 });
 
+test('a session waiting on a Lavish review outranks a parked pipeline', () => {
+  // The hooks see a busy session, because the waiting happens inside a
+  // subprocess. It is really a human gate, so it has to outrank one that the
+  // agent will usually answer for itself.
+  assert.equal(
+    attentionFor({
+      session: { state: 'working' },
+      run: run({ parked: true }),
+      summary: { lavishFile: '/repo/.lavish/plan.html' },
+    }),
+    'review',
+  );
+});
+
+test('an outright permission prompt still beats a pending review', () => {
+  assert.equal(
+    attentionFor({
+      session: { state: 'blocked' },
+      run: null,
+      summary: { lavishFile: '/repo/.lavish/plan.html' },
+    }),
+    'blocked',
+  );
+});
+
+test('a run with no session is never a review, whatever the summary says', () => {
+  // Reviews belong to sessions. A run-only row has no transcript behind it.
+  assert.equal(
+    attentionFor({ session: null, run: run(), summary: { lavishFile: '/x.html' } }),
+    'working',
+  );
+});
+
+test('buildRows carries the transcript summary onto a working row', () => {
+  const rows = buildRows({
+    sessions: [session({ state: 'working' })],
+    runs: [],
+    now: 5000,
+    summaries: new Map([
+      ['s1', { title: 'favicon-and-summaries', mode: 'plan', activity: 'Running npm', lavishFile: null }],
+    ]),
+  });
+  assert.equal(rows[0].summary, 'favicon-and-summaries');
+  assert.equal(rows[0].activity, 'Running npm');
+  assert.equal(rows[0].mode, 'plan');
+  assert.equal(rows[0].attention, 'working');
+});
+
+test('a review row carries the link and drops the tool it is blocked in', () => {
+  // "Running lavish-axi" beside "Waiting on your review" reads as work in
+  // progress, which is the exact impression this state exists to correct.
+  const rows = buildRows({
+    sessions: [session({ state: 'working' })],
+    runs: [],
+    now: 5000,
+    summaries: new Map([
+      ['s1', { title: 'terrain-sea-ramp', mode: null, activity: 'Running lavish-axi', lavishFile: '/p.html' }],
+    ]),
+    reviewUrls: new Map([['s1', 'http://127.0.0.1:4387/session/abc']]),
+  });
+  assert.equal(rows[0].attention, 'review');
+  assert.equal(rows[0].summary, 'terrain-sea-ramp');
+  assert.equal(rows[0].reviewUrl, 'http://127.0.0.1:4387/session/abc');
+  assert.equal(rows[0].activity, null);
+});
+
+test('the pipeline step wins over the transcript title as the summary', () => {
+  // The step says what is being done to the repo; the title says what the
+  // conversation is about. When there is a pipeline, the step is the answer.
+  const rows = buildRows({
+    sessions: [session()],
+    runs: [run({ step: { name: 'test' } })],
+    now: 5000,
+    summaries: new Map([['s1', { title: 'some-conversation', mode: null, activity: null, lavishFile: null }]]),
+  });
+  assert.equal(rows[0].summary, 'step test');
+});
+
+test('normal mode is not worth saying, so it is not carried', () => {
+  const rows = buildRows({
+    sessions: [session()],
+    runs: [],
+    now: 5000,
+    summaries: new Map([['s1', { title: 't', mode: 'normal', activity: null, lavishFile: null }]]),
+  });
+  assert.equal(rows[0].mode, null);
+});
+
+test('buildRows works with no summaries at all', () => {
+  // Transcripts are best-effort: a session started before the hooks, or one
+  // whose transcript has been cleaned up, must still produce a row.
+  const rows = buildRows({ sessions: [session()], runs: [], now: 5000 });
+  assert.equal(rows[0].summary, null);
+  assert.equal(rows[0].activity, null);
+  assert.equal(rows[0].reviewUrl, null);
+});
+
 test('buildRows joins sessions to runs and marks focusability', () => {
   const rows = buildRows({
     sessions: [session()],
@@ -156,10 +253,11 @@ test('summarise counts what the tab title and alerts need', () => {
   const rows = [
     { attention: 'blocked' },
     { attention: 'blocked' },
+    { attention: 'review' },
     { attention: 'parked' },
     { attention: 'idle' },
   ];
-  assert.deepEqual(summarise(rows), { blocked: 2, parked: 1, failed: 0, total: 4 });
+  assert.deepEqual(summarise(rows), { blocked: 2, review: 1, parked: 1, failed: 0, total: 5 });
 });
 
 test('a lone repo keeps its bare name', () => {

@@ -16,14 +16,70 @@
 import { basename } from 'node:path';
 import { planFocus } from './focus/index.js';
 
+/** @typedef {import('./registry.js').Session} Session */
+/** @typedef {import('./nm-state.js').Run} Run */
+
+/**
+ * How much a row wants a human, most urgent first.
+ *
+ * `review` sits directly under `blocked` because it is the same thing wearing a
+ * disguise: the agent has stopped and is waiting on a person. It only looks
+ * like work because the waiting happens inside a subprocess, so the hooks see a
+ * busy session rather than a blocked one.
+ *
+ * @typedef {'blocked'|'review'|'parked'|'failed'|'idle'|'working'|'done'} Attention
+ */
+
+/**
+ * One line on the dashboard: a session, a run, or a session with its run
+ * attached. This is the whole contract between `buildRows` and everything that
+ * renders - the page, the CLI's `status`, and the SSE frames between them.
+ *
+ * @typedef {object} Row
+ * @property {string} id stable across polls, so the page can diff on it
+ * @property {'session'|'run'} kind
+ * @property {string|null} sessionId null for a run with no session attached
+ * @property {string|null} cwd
+ * @property {string} title the repo name, grown into a path only on collision
+ * @property {string|null} titlePath the path `title` was derived from, which is
+ *   what disambiguation grows
+ * @property {string|null} branch
+ * @property {Attention} attention
+ * @property {string} attentionLabel `attention`, in words
+ * @property {string|null} message why Claude wants you; only set while blocked
+ * @property {import('./registry.js').SessionState|null} sessionState
+ * @property {number|null} sessionStateSince
+ * @property {number|null} waitingForMs how long blocked, for the "2m" column
+ * @property {boolean} focusable whether clicking this row can do anything
+ * @property {'tmux'|'tab'|null} hostKind
+ * @property {Run|null} run
+ * @property {number|null} updatedAt
+ * @property {string|null} summary what the session is working on, in Claude's
+ *   own words, or the pipeline step when no-mistakes is driving
+ * @property {string|null} activity the tool it is running right now
+ * @property {string|null} mode 'plan' and the like; null for an ordinary turn
+ * @property {string|null} reviewUrl the Lavish page this row is waiting on
+ */
+
 /**
  * Attention levels, most urgent first. The dashboard sorts on this, and the
  * page colours on it.
+ *
+ * @type {Attention[]}
  */
-export const ATTENTION_ORDER = ['blocked', 'parked', 'failed', 'idle', 'working', 'done'];
+export const ATTENTION_ORDER = [
+  'blocked',
+  'review',
+  'parked',
+  'failed',
+  'idle',
+  'working',
+  'done',
+];
 
 const ATTENTION_LABELS = {
   blocked: 'Waiting for you',
+  review: 'Waiting on your review',
   parked: 'Pipeline parked at a gate',
   failed: 'Failed',
   idle: 'Idle',
@@ -31,6 +87,7 @@ const ATTENTION_LABELS = {
   done: 'Done',
 };
 
+/** @param {Attention} attention */
 export function attentionLabel(attention) {
   return ATTENTION_LABELS[attention] || attention;
 }
@@ -41,6 +98,10 @@ export function attentionLabel(attention) {
  * Sessions frequently run in worktrees nested under, or alongside, the path
  * no-mistakes registered. Longest matching prefix wins so a worktree inside a
  * repo is attributed to the worktree's own registration when it has one.
+ *
+ * @param {string|null} cwd
+ * @param {Run[]} runs
+ * @returns {Run|null}
  */
 export function matchRunForCwd(cwd, runs) {
   if (!cwd) return null;
@@ -63,6 +124,7 @@ export function matchRunForCwd(cwd, runs) {
   return best;
 }
 
+/** @param {Run|null} run */
 function rankRun(run) {
   if (!run) return -1;
   if (run.parked) return 3;
@@ -70,9 +132,21 @@ function rankRun(run) {
   return (run.updatedAt || 0) / 1e13;
 }
 
-/** Decide the single attention level for a row. */
-export function attentionFor({ session, run }) {
+/**
+ * Decide the single attention level for a row.
+ *
+ * A session polling a Lavish artifact outranks everything except an outright
+ * permission prompt: it has stopped, and only a human can restart it. It is
+ * checked before `run.parked` for the same reason `blocked` is - a parked
+ * pipeline usually answers itself, and a person waiting on a review does not.
+ *
+ * @param {{session: Session|{state: string}|null, run: Run|null,
+ *          summary?: import('./transcript.js').TranscriptSummary|null}} input
+ * @returns {Attention}
+ */
+export function attentionFor({ session, run, summary = null }) {
   if (session?.state === 'blocked') return 'blocked';
+  if (session && summary?.lavishFile) return 'review';
   if (run?.parked) return 'parked';
   if (run && !run.active && (run.status === 'failed' || run.error)) return 'failed';
   if (run?.active) return 'working';
@@ -85,17 +159,31 @@ export function attentionFor({ session, run }) {
 /**
  * Build the rows the page renders.
  *
- * @param {{sessions: object[], runs: object[], now?: number}} input
- * @returns {object[]}
+ * `summaries` and `reviewUrls` are looked up rather than passed in per session
+ * so that reading transcripts and asking Lavish for links stay outside this
+ * file - it is pure, and both of those touch the filesystem and a subprocess.
+ *
+ * @param {{sessions: Session[], runs: Run[], now?: number,
+ *          summaries?: Map<string, import('./transcript.js').TranscriptSummary>,
+ *          reviewUrls?: Map<string, string|null>}} input
+ * @returns {Row[]}
  */
-export function buildRows({ sessions, runs, now = Date.now() }) {
+export function buildRows({
+  sessions,
+  runs,
+  now = Date.now(),
+  summaries = new Map(),
+  reviewUrls = new Map(),
+}) {
+  /** @type {Row[]} */
   const rows = [];
   const claimedRuns = new Set();
 
   for (const session of sessions) {
     const run = matchRunForCwd(session.cwd, runs);
     if (run) claimedRuns.add(run.runId);
-    const attention = attentionFor({ session, run });
+    const summary = summaries.get(session.sessionId) || null;
+    const attention = attentionFor({ session, run, summary });
     const plan = planFocus(session);
     rows.push({
       id: `session:${session.sessionId}`,
@@ -118,6 +206,18 @@ export function buildRows({ sessions, runs, now = Date.now() }) {
       hostKind: plan.kind === 'tmux' ? 'tmux' : 'tab',
       run: run || null,
       updatedAt: session.updatedAt || null,
+      // The pipeline step is the better summary when there is one: it says what
+      // is being done to the repo, where the transcript title says what the
+      // conversation is about.
+      summary: run?.step?.name ? `step ${run.step.name}` : summary?.title || null,
+      // On a review row the running tool *is* the waiting - "Running lavish-axi"
+      // next to "Waiting on your review" reads as work in progress, which is
+      // the one impression this state exists to correct.
+      activity: attention === 'review' ? null : summary?.activity || null,
+      // 'normal' is the absence of a mode, and saying so on every card would be
+      // noise on the one thing this page has to keep scannable.
+      mode: summary?.mode && summary.mode !== 'normal' ? summary.mode : null,
+      reviewUrl: reviewUrls.get(session.sessionId) || null,
     });
   }
 
@@ -146,12 +246,17 @@ export function buildRows({ sessions, runs, now = Date.now() }) {
       hostKind: null,
       run,
       updatedAt: run.updatedAt || null,
+      summary: run.step?.name ? `step ${run.step.name}` : null,
+      activity: null,
+      mode: null,
+      reviewUrl: null,
     });
   }
 
   return sortRows(disambiguateTitles(rows));
 }
 
+/** @param {Run} run */
 function isRecent(run, now, windowMs = 30 * 60 * 1000) {
   return run.updatedAt != null && now - run.updatedAt < windowMs;
 }
@@ -233,10 +338,14 @@ export function shortestUniqueTitles(paths) {
  * Rows sharing that path are genuinely the same place and keep the same title;
  * extending the path could not separate them and only adds noise - branch and
  * state already do. Only distinct paths are disambiguated.
+ *
+ * @param {Row[]} rows
+ * @returns {Row[]}
  */
 export function disambiguateTitles(rows) {
+  /** @param {Row} row */
   const anchor = (row) => row.titlePath || row.cwd;
-  /** @type {Map<string, object[]>} */
+  /** @type {Map<string, Row[]>} */
   const groups = new Map();
   for (const row of rows) {
     if (!anchor(row)) continue;
@@ -257,6 +366,10 @@ export function disambiguateTitles(rows) {
   return rows.map((row) => (overrides.has(row.id) ? { ...row, title: overrides.get(row.id) } : row));
 }
 
+/**
+ * @param {Row[]} rows
+ * @returns {Row[]}
+ */
 export function sortRows(rows) {
   return [...rows].sort((a, b) => {
     const byAttention =
@@ -266,10 +379,15 @@ export function sortRows(rows) {
   });
 }
 
-/** A one-line summary for the browser tab title and notifications. */
+/**
+ * A one-line summary for the browser tab title and notifications.
+ *
+ * @param {Row[]} rows
+ */
 export function summarise(rows) {
   const blocked = rows.filter((r) => r.attention === 'blocked').length;
+  const review = rows.filter((r) => r.attention === 'review').length;
   const parked = rows.filter((r) => r.attention === 'parked').length;
   const failed = rows.filter((r) => r.attention === 'failed').length;
-  return { blocked, parked, failed, total: rows.length };
+  return { blocked, review, parked, failed, total: rows.length };
 }
