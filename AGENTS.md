@@ -424,14 +424,10 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 npm test                       # 304 tests, ~1s
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
-nmmon serve                    # start the monitor, print the URL
-nmmon status                   # one-shot text summary, no server needed
-nmmon doctor                   # check the setup, explain what is missing
-nmmon focus <session>          # raise a session's window from the terminal
-nmmon install-hooks            # merge hooks into ~/.claude/settings.json
-nmmon uninstall-hooks
 ```
 
-Flags: `--port`, `--settings <path>`, `--dry-run`, `--yes`. `NMMON_PORT` sets the default
-port. `NMMON_HOME` and `NM_HOME` relocate state - use them when testing by hand so you do not
-disturb the running installation.
+The `nmmon` commands themselves, and their flags, are documented in
+[README.md](README.md#commands) and only there - a second copy is what drifts.
+
+When exercising them by hand, set `NMMON_HOME` and `NM_HOME` so you do not disturb the
+running installation.
