@@ -15,6 +15,8 @@
  * more than a poll loop that stalls.
  */
 
+import { basename } from 'node:path';
+
 /** How long an answer stays good enough. The URLs are stable for a session's life. */
 export const REFRESH_MS = 15000;
 
@@ -116,8 +118,23 @@ export class LavishState {
   urlFor(file, now = Date.now()) {
     this.refresh(now);
     if (!file) return null;
-    const match = this.#sessions.find((s) => s.file === file && s.status === 'open');
-    return match ? match.url : null;
+    const open = this.#sessions.filter((s) => s.status === 'open');
+    const exact = open.find((s) => s.file === file);
+    if (exact) return exact.url;
+
+    // The transcript records the command as it was typed, and Lavish reports a
+    // resolved absolute path, so the two often do not match as strings: an
+    // agent may well have written `$DIR/plan.html`, `./.lavish/plan.html` or a
+    // `~`. A row that says "waiting on your review" with no link to the review
+    // is the one outcome this feature exists to prevent, so fall back to the
+    // part of the path that survives all three.
+    //
+    // Only when it is unambiguous. Two repos each polling a `plan.html` is
+    // entirely plausible, and sending someone to the wrong review is worse
+    // than sending them to none - the same rule the tmux title match follows.
+    const target = basename(file);
+    const named = open.filter((s) => basename(s.file) === target);
+    return named.length === 1 ? named[0].url : null;
   }
 
   /**

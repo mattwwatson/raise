@@ -102,6 +102,51 @@ test('a lavish that is absent or broken yields no links and no throw', async () 
   assert.deepEqual(lavish.sessions, []);
 });
 
+test('an unexpanded variable or relative path still finds its review', async () => {
+  // The transcript records the command as typed, so the path is frequently not
+  // the resolved one Lavish reports - `lavish-axi poll $S/plan.html` is a real
+  // case, caught the first time this ran against a live session.
+  const out = `sessions[1]{file,status,url,pending_prompts}:
+  /Users/x/work/repo/.lavish/plan.html,open,"http://127.0.0.1:4387/session/abc",0
+`;
+  const lavish = new LavishState({ execAsync: execReturning(out) });
+  lavish.urlFor('x', 1000);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  for (const written of ['$S/plan.html', './.lavish/plan.html', '~/work/repo/.lavish/plan.html']) {
+    assert.equal(lavish.urlFor(written, 1000), 'http://127.0.0.1:4387/session/abc', written);
+  }
+});
+
+test('an ambiguous filename yields no link rather than the wrong one', async () => {
+  // Two repos each reviewing a plan.html is entirely plausible, and sending
+  // someone to the wrong review is worse than sending them to none.
+  const out = `sessions[2]{file,status,url,pending_prompts}:
+  /Users/x/work/a/.lavish/plan.html,open,"http://127.0.0.1:4387/session/aaa",0
+  /Users/x/work/b/.lavish/plan.html,open,"http://127.0.0.1:4387/session/bbb",0
+`;
+  const lavish = new LavishState({ execAsync: execReturning(out) });
+  lavish.urlFor('x', 1000);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(lavish.urlFor('$S/plan.html', 1000), null);
+  // An exact path is never ambiguous, so it still resolves.
+  assert.equal(
+    lavish.urlFor('/Users/x/work/b/.lavish/plan.html', 1000),
+    'http://127.0.0.1:4387/session/bbb',
+  );
+});
+
+test('the basename fallback ignores closed sessions', async () => {
+  const out = `sessions[1]{file,status,url,pending_prompts}:
+  /Users/x/work/repo/.lavish/plan.html,closed,"http://127.0.0.1:4387/session/abc",0
+`;
+  const lavish = new LavishState({ execAsync: execReturning(out) });
+  lavish.urlFor('x', 1000);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(lavish.urlFor('$S/plan.html', 1000), null);
+});
+
 test('a closed lavish session is not offered as a link', async () => {
   const out = `sessions[1]{file,status,url,pending_prompts}:
   /repo/.lavish/done.html,closed,"http://127.0.0.1:4387/session/abc",0
