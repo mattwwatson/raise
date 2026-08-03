@@ -302,9 +302,8 @@ async function cmdStatus() {
       console.log(`  ${dim(row.activity)}`);
     }
     // The pipeline's own agent, on the repo's line rather than a row of its own.
-    const agentWhat = row.agent && (row.agent.activity || row.agent.summary);
-    if (agentWhat && row.attention !== 'done') {
-      console.log(`  ${dim(`no-mistakes  ${agentWhat}`)}`);
+    if (row.agent && row.attention !== 'done') {
+      console.log(`  ${dim(`no-mistakes  ${row.agent.what}`)}`);
     }
     if (row.reviewUrl) console.log(`  ${row.reviewUrl}`);
     // The state word only while the run is live: no-mistakes stops observing a

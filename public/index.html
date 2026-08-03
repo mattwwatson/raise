@@ -1015,10 +1015,11 @@
           body.appendChild(summary);
         }
         // What no-mistakes' own agent is doing, on the row of the repo it is
-        // working on rather than as a second card nobody can act on. Only while
-        // it is still doing it - a finished agent's last tool is history.
-        const what = row.agent && (row.agent.activity || row.agent.summary);
-        if (what && row.attention !== 'done') {
+        // working on rather than as a second card nobody can act on. Presence
+        // follows the agent existing, never `activity` - that goes null between
+        // every pair of tool calls, and rendering on it blinked the marker in
+        // and out several times a minute.
+        if (row.agent && row.attention !== 'done') {
           const agent = document.createElement('div');
           agent.className = 'agent';
           const tag = document.createElement('span');
@@ -1027,7 +1028,7 @@
           agent.appendChild(tag);
           const text = document.createElement('span');
           text.className = 'agent-what';
-          text.textContent = what;
+          text.textContent = row.agent.what;
           agent.appendChild(text);
           body.appendChild(agent);
         }

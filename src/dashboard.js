@@ -71,8 +71,16 @@ import { pullRequestNumber } from './nm-state.js';
  * What no-mistakes' own agent is doing, shown on the row of the repo it is
  * working on rather than as a row of its own.
  *
+ * `what` is never null, and that is the point. `activity` is the tool with no
+ * result yet, so it goes null every time one call finishes and before the next
+ * begins - which on a busy agent is most seconds. Rendering on `activity`
+ * blinked the marker in and out several times a minute, which on a page you
+ * leave pinned reads as the pipeline starting and stopping. Presence is decided
+ * by the agent existing; only the words change.
+ *
  * @typedef {object} Agent
- * @property {string|null} activity the tool it is running right now
+ * @property {string} what the best description available, always something
+ * @property {string|null} activity the tool it is running right now, if any
  * @property {string|null} summary what it is working on, in its own words
  * @property {import('./registry.js').SessionState|null} state
  * @property {string|null} message why it wants you, if it is blocked
@@ -398,9 +406,14 @@ export function buildRows({
       continue;
     }
     const summary = summaries.get(session.sessionId) || null;
+    const activity = summary?.activity || null;
+    const title = summary?.title || null;
     agents.set(owning.runId, {
-      activity: summary?.activity || null,
-      summary: summary?.title || null,
+      // Falls through to a bare word rather than nothing, so the marker cannot
+      // blink out between one tool call and the next.
+      what: activity || title || 'working',
+      activity,
+      summary: title,
       state: /** @type {import('./registry.js').SessionState|null} */ (session.state ?? null),
       message: session.state === 'blocked' ? session.message || null : null,
       lastActivityAt: summary?.lastActivityAt ?? null,

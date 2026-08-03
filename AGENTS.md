@@ -191,6 +191,14 @@ One row per repo, never two. But folding must not swallow the one signal this to
 give, so **a blocked agent still makes the row blocked and carries its message** - an agent
 sitting on a permission prompt has stalled the pipeline, and only a human can free it.
 
+**The marker's presence follows the agent existing, never `Agent.activity`.** `activity` is
+the tool with no result yet, so it is null between every pair of tool calls - most seconds, on
+a busy agent - and rendering on it blinked the marker in and out several times a minute, which
+on a pinned page reads as the pipeline starting and stopping. There is no second string to
+fall back on either: **a no-mistakes agent transcript carries no `ai-title`** (Claude Code
+writes those for interactive sessions only), so `Agent.summary` is always null for one of
+these. Hence `Agent.what`, which is never null. Do not re-derive the marker from `activity`.
+
 **A pull request has three possible sources, and they are ranked by how much they know.**
 A live no-mistakes run is being watched right now, so its `pr_state` is real. The database's
 history is branch-verified but frozen. The transcript is neither, and is the only one that
@@ -286,7 +294,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 284 tests, no network, no dependencies, ~1s
+npm test          # 286 tests, no network, no dependencies, ~1s
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
 
@@ -352,7 +360,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 ## Commands
 
 ```sh
-npm test                       # 284 tests, ~1s
+npm test                       # 286 tests, ~1s
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
 nmmon serve                    # start the monitor, print the URL

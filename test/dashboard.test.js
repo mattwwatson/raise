@@ -676,3 +676,37 @@ test('an ordinary session is never mistaken for a pipeline agent', () => {
   assert.equal(rows[0].sessionId, 'human');
   assert.equal(rows[0].agent, null);
 });
+
+test('the agent marker does not blink out between two tool calls', () => {
+  // `activity` is the tool with no result yet, so it is null every time one
+  // call finishes before the next begins - most seconds, on a busy agent.
+  // Rendering on it made the marker flash in and out several times a minute,
+  // which on a pinned page reads as the pipeline starting and stopping.
+  const between = new Map([
+    ['agent', { title: null, activity: null, mode: null, lavishFile: null, lastActivityAt: 9000, pullRequest: null }],
+  ]);
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'human', cwd: '/Users/x/work/repo' }),
+      session({ sessionId: 'agent', cwd: AGENT_CWD }),
+    ],
+    runs: [agentRun()],
+    summaries: between,
+  });
+  assert.ok(rows[0].agent, 'the agent is still there between tools');
+  assert.equal(rows[0].agent.what, 'working', 'and still has something to say');
+});
+
+test('the agent marker prefers the live tool, then the title', () => {
+  const build = (summary) =>
+    buildRows({
+      sessions: [session({ sessionId: 'agent', cwd: AGENT_CWD })],
+      runs: [agentRun()],
+      summaries: new Map([['agent', summary]]),
+    })[0].agent.what;
+
+  const base = { mode: null, lavishFile: null, lastActivityAt: 1, pullRequest: null };
+  assert.equal(build({ ...base, activity: 'Reading terrain.ts', title: 'Review the change' }), 'Reading terrain.ts');
+  assert.equal(build({ ...base, activity: null, title: 'Review the change' }), 'Review the change');
+  assert.equal(build({ ...base, activity: null, title: null }), 'working');
+});
