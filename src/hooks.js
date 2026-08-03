@@ -16,7 +16,14 @@ import { dirname } from 'node:path';
  * Which events we listen to, and why.
  *
  * PreToolUse/PostToolUse are deliberately not included: they fire constantly
- * and would add a process spawn to every tool call for no extra signal.
+ * and would add a process spawn to every tool call.
+ *
+ * They would not be *no* signal, though - `Notification` is the last event of
+ * a turn until `Stop`, so nothing here reports that a permission prompt was
+ * granted, and the session reads as blocked until the turn ends. That is
+ * settled by reading the transcript instead; `registry.js` already maps both
+ * events to `working` should this ever be reconsidered. See the "recorded
+ * block is disbelieved" note in AGENTS.md for the trade-off.
  */
 export const HOOK_EVENTS = [
   'SessionStart', // register the session and capture its window identity

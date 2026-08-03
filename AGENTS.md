@@ -142,9 +142,22 @@ assumed:
   against a 3s margin
 
 The transcript may only ever *clear* a block, never assert one. A transcript that cannot be
-read leaves the hooks' answer standing. The alternative - a `PostToolUse` hook - would be
-precise but costs a POST per tool call and, worse, needs every existing session restarted
-before it takes effect.
+read leaves the hooks' answer standing.
+
+> **Option not taken: a `PostToolUse` hook.** The direct fix is to have Claude Code report
+> the state change itself rather than infer it. It is a one-line change - add `PostToolUse`
+> to `HOOK_EVENTS` in `src/hooks.js`; `EVENT_STATES` in `registry.js` already maps it (and
+> `PreToolUse`) to `working`, so nothing else moves.
+>
+> Not chosen because it costs a hook process and a localhost POST **per tool call**, inside
+> the user's editing loop, and because hooks are read at session start: it fixes nothing
+> until `nmmon install-hooks` is re-run *and* every open session is restarted, which is
+> exactly when a stale block is most annoying. The transcript approach fixes sessions that
+> are already running, for free.
+>
+> Worth revisiting if the transcript ever stops being readable or the 3s margin proves wrong
+> in practice - in which case prefer it outright rather than stacking both, since a reported
+> state beats an inferred one whenever you can have it.
 
 **A `lavish-axi poll` is a human gate wearing work clothes.** It blocks until someone opens
 the artifact and responds, so the hooks see a busy session while the actual blocker is a
