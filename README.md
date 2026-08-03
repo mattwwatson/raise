@@ -196,8 +196,8 @@ do. So the page never infers that it is live; it waits to be told.
 
 ## How focusing works
 
-Both hosting styles collapse to the same final step - bring the terminal tab with a given tty
-to the front - which is why a machine mixing plain tabs and tmux needs no configuration.
+Every terminal style collapses to the same final step - bring the tab with a given tty to the
+front - which is why a machine mixing plain tabs and tmux needs no configuration.
 
 - **Plain terminal tab.** The session's own identifiers are captured at session start.
   iTerm2 tabs are matched by their session UUID, which survives the tab being dragged to
@@ -213,6 +213,19 @@ there is no window to focus, and nmmon tells you the `tmux attach` command inste
 silently.
 
 Supported terminals today: **iTerm2** and **Terminal.app**, plus **tmux** inside either.
+
+### Claude Desktop sessions
+
+Opening a session in the Claude Desktop app puts it on the dashboard too - the app runs the
+same Claude Code underneath, so it fires the same hooks. Those rows are marked `desktop`
+rather than `tab`, and everything else about them is ordinary: the repo, the branch, what it
+is working on, its pull request, and any no-mistakes run in that checkout all appear exactly
+as they do for a terminal session.
+
+Focusing one brings the app to the front **with that session open**, rather than just
+activating it - nmmon hands the session to the app's own `claude://resume` link. Claude
+Desktop handles that asynchronously, so if it cannot open the session (a lapsed sign-in, say)
+the reason appears in the app rather than on the dashboard.
 
 ## Security
 
@@ -241,7 +254,9 @@ like every other one, which is exactly why localhost alone is not treated as a b
 restarted.
 
 **A session shows but is not clickable.** It started before the hooks were installed, so it
-never reported a window identity. Restart it.
+never reported a window identity. Restart it. A Claude Desktop session that predates this
+feature is the one exception - it needs no restart, and becomes clickable the next time you
+send it anything.
 
 **"tmux session X is not attached to any window."** Exactly what it says - attach it with the
 command shown and it becomes focusable.
@@ -255,7 +270,7 @@ updated.
 ## Development
 
 ```sh
-npm test          # 304 tests, no network, no build step, ~1s
+npm test          # 315 tests, no network, no build step, ~1s
 npm run typecheck
 ```
 

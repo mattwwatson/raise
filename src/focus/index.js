@@ -1,7 +1,7 @@
 /**
  * Focusing the window that wants you.
  *
- * Both hosting styles collapse to the same final step - bring the terminal tab
+ * Both terminal hosting styles collapse to the same final step - bring the tab
  * with a given tty (or iTerm2 session UUID) to the front:
  *
  *   plain tab  ->  the session's own identifiers, captured at session start
@@ -9,10 +9,14 @@
  *
  * Everything terminal-specific lives in ./terminals.js, so supporting another
  * terminal never touches this file.
+ *
+ * Claude Desktop is the one host that does not collapse into that, because it
+ * has no window a tty can name. It gets its own branch and ./claude-desktop.js.
  */
 
 import { resolveTmuxTarget, selectPane } from './tmux.js';
 import { orderedTerminals, ALL_TERMINALS } from './terminals.js';
+import { focusClaudeDesktop } from './claude-desktop.js';
 
 /** @typedef {import('./terminals.js').Terminal} Terminal */
 /** @typedef {import('../registry.js').Session} Session */
@@ -26,12 +30,14 @@ import { orderedTerminals, ALL_TERMINALS } from './terminals.js';
  * carries only the reason to show the user.
  *
  * @typedef {object} FocusPlan
- * @property {'tmux'|'tab'|'unfocusable'} kind
+ * @property {'tmux'|'tab'|'app'|'unfocusable'} kind
  * @property {string} [pane] tmux only
  * @property {string|null} [tmuxEnv] tmux only, the TMUX socket
  * @property {string|null} [sessionUuid] tab only
  * @property {string|null} [tty] tab only
  * @property {string|null} [termProgram] which adapter to try first
+ * @property {'claude-desktop'} [app] app only, which application hosts it
+ * @property {string|null} [sessionId] app only, the handle the app resolves
  * @property {string} [reason] unfocusable only, phrased for the user
  */
 
@@ -109,6 +115,12 @@ export function terminalSessionUuid(host = {}) {
  */
 export function planFocus(record) {
   const host = record?.host || {};
+  // First, and on its own evidence. A desktop session reports no tty and no
+  // terminal UUID, so every branch below it would fall through to
+  // "unfocusable" - which is exactly the dead card this branch exists to fix.
+  if (host.app === 'claude-desktop') {
+    return { kind: 'app', app: 'claude-desktop', sessionId: record?.sessionId || null };
+  }
   if (host.tmux_pane) {
     return {
       kind: 'tmux',
@@ -190,6 +202,10 @@ export async function focusSession(record, { exec, terminals = ALL_TERMINALS }) 
 
   if (plan.kind === 'unfocusable') {
     return { ok: false, reason: plan.reason };
+  }
+
+  if (plan.kind === 'app') {
+    return focusClaudeDesktop(exec, { sessionId: plan.sessionId ?? null });
   }
 
   if (plan.kind === 'tab') {

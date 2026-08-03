@@ -65,8 +65,8 @@ Four sources of truth, joined into one list:
 | `src/lavish.js` | resolving a Lavish artifact to the page waiting on you |
 | `src/poll-watch.js` | which sessions are in a `lavish-axi poll`, and which have a pipeline running |
 | `src/dashboard.js` | joins them all into ranked rows (pure) |
-| `src/focus/` | tmux resolution and per-terminal adapters |
-| `src/process-tree.js` | which terminal and which agent process a hook is running under |
+| `src/focus/` | tmux resolution, per-terminal adapters, and the Claude Desktop deep link |
+| `src/process-tree.js` | which terminal or app, and which agent process, a hook is running under |
 | `src/security.js` | token, Host and Origin checks (pure) |
 | `src/health.js` | probing a port to find out whether nmmon is behind it |
 | `src/exec.js` | the one place that runs external commands |
@@ -289,6 +289,31 @@ branch belongs to the checkout. It is also load-bearing for the above, since a p
 matched on it. `src/git-branch.js` reads the file directly (handling a worktree's `.git` file)
 and caches on mtime; it never shells out, because nothing reachable from the poll loop may.
 
+**A Claude Desktop session is identified by evidence, never by what it is missing.** The
+desktop app hosts a session by spawning its own bundled Claude Code with no controlling
+terminal, so it registers through the same hooks as any other session and everything that
+keys off `cwd`, `transcriptPath` or `host.pid` - the run match, the branch, the pull request,
+the Lavish gate, the pipeline scan - already works on it unchanged. The one thing it has
+none of is a window: no tty, no `TERM_PROGRAM`, no terminal UUID. So `planFocus` had nothing
+to plan with and the row rendered as a dead card, which is the worst kind on this page - it
+tells you a session wants you and offers no way to get there.
+
+`hostApp` in `process-tree.js` settles it from the ancestor walk the hook already does, on
+paths only the app can occupy: the Electron binary above the session, or the Claude Code it
+bundles under `Application Support/Claude/claude-code/`. **Never inferred from the absence of
+a terminal**, even though that absence is what makes the session distinctive - a no-mistakes
+agent under the daemon looks identical by that measure, and acting on the guess is not a
+harmless miss. `claude://resume?session=<uuid>` *imports* a session the app has not seen, so
+a misidentified terminal session would have its conversation dragged into an app the user
+never involved. Matching a path rather than the word "Claude" is the whole guard.
+
+Focusing is a branch of its own in `focus/index.js` and a sibling module, not an entry in
+`terminals.js`, because the `Terminal` interface is `{sessionUuid, tty}` and this host has
+neither. Checked before every other branch, since all of them would fall through. The
+adapter's honest limit is that `open` returns once Launch Services accepts the URL: the app
+handles it afterwards and its own failures (expired sign-in, deleted transcript) surface as a
+toast that never reaches us, so `ok` here means *handed over*, not *raised*.
+
 **The host terminal for a tmux session is deliberately not stored.** A tmux session can be
 detached and reattached in a different terminal entirely, so it is resolved fresh on every
 click.
@@ -355,7 +380,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 304 tests, no network, no dependencies, ~1s
+npm test          # 315 tests, no network, no dependencies, ~1s
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
 
@@ -421,7 +446,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 ## Commands
 
 ```sh
-npm test                       # 304 tests, ~1s
+npm test                       # 315 tests, ~1s
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
 ```

@@ -712,6 +712,13 @@
       ];
 
       /*
+       * Where the session lives. "desktop" is the Claude Desktop app, which has
+       * no tab and no tty - naming it a tab would be the one label on this page
+       * that tells you to go looking somewhere it is not.
+       */
+      const HOST_LABELS = { tmux: 'tmux', tab: 'tab', app: 'desktop' };
+
+      /*
        * The favicon carries the one thing worth knowing from a background tab:
        * whether anything wants you. This page is meant to be left pinned, where
        * the tab strip shows an icon and little else, so a static logo would be
@@ -1099,7 +1106,7 @@
         if (row.hostKind) {
           const host = document.createElement('span');
           host.className = 'host';
-          host.textContent = row.hostKind === 'tmux' ? 'tmux' : 'tab';
+          host.textContent = HOST_LABELS[row.hostKind] || 'tab';
           meta.appendChild(host);
         }
         if (row.focusable) {

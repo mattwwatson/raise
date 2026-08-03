@@ -60,9 +60,14 @@ function readProcess(pid) {
 }
 
 function collectHost() {
-  const { tty, agentPid } = inspectHost(process.ppid, { readProcess });
+  const { tty, agentPid, app } = inspectHost(process.ppid, { readProcess });
   return {
     term_program: process.env.TERM_PROGRAM || null,
+    // Which application is hosting this session, when it is not a terminal.
+    // Read from the process tree rather than the environment because Claude
+    // Desktop sets none of the variables below - that absence is the whole
+    // problem, and it is not something a session can be identified by.
+    app,
     // iTerm2 gives every split and tab a stable UUID, which survives the tab
     // being dragged to another window. Best identifier available.
     iterm_session_id: process.env.ITERM_SESSION_ID || null,
