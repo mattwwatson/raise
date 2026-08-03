@@ -8,6 +8,9 @@ import { join } from 'node:path';
 import {
   NoMistakesState,
   normaliseRun,
+  normalisePullRequest,
+  newestPullRequests,
+  pullRequestNumber,
   currentStep,
   countFindings,
   parseAxiStatus,
@@ -156,6 +159,68 @@ test('the degraded parser returns null for output it does not understand', () =>
   assert.equal(parseAxiStatus('error: not a repo', '/repo'), null);
 });
 
+test('pullRequestNumber reads the number off both hosts', () => {
+  assert.equal(
+    pullRequestNumber('https://bitbucket.org/mattw_watson/hexbattle/pull-requests/39'),
+    39,
+  );
+  assert.equal(pullRequestNumber('https://github.com/mattwwatson/firstmate/pull/22'), 22);
+  assert.equal(pullRequestNumber('https://example.com/pr/7/'), 7);
+});
+
+test('a URL with no number is still linkable, just unnumbered', () => {
+  assert.equal(pullRequestNumber('https://example.com/pulls'), null);
+  assert.equal(pullRequestNumber(null), null);
+});
+
+test('a pull request is only "live" while the run that owns it is', () => {
+  // no-mistakes stops observing a pull request when its run ends, so the state
+  // freezes at that moment - every cancelled run in a real database still says
+  // "open" days later. `live` is what stops the page presenting that as now.
+  const row = {
+    pr_url: 'https://example.com/pull/3',
+    pr_state: 'open',
+    pr_state_observed_at: 1700,
+    branch: 'feat/x',
+    repo_path: '/repo',
+  };
+  assert.equal(normalisePullRequest({ ...row, status: 'running' }).live, true);
+  assert.equal(normalisePullRequest({ ...row, status: 'cancelled' }).live, false);
+  assert.equal(normalisePullRequest({ ...row, status: 'completed' }).live, false);
+  // The state itself is reported either way - it is the caller's job to say
+  // whether it is current, and the observation time is what lets it.
+  assert.equal(normalisePullRequest({ ...row, status: 'cancelled' }).state, 'open');
+  assert.equal(normalisePullRequest({ ...row, status: 'cancelled' }).observedAt, 1_700_000);
+});
+
+test('newestPullRequests keeps one per branch, the most recent', () => {
+  // A branch run through the pipeline repeatedly carries the same PR on every
+  // run after the first. The newest sighting has the least stale state.
+  const rows = [
+    { pr_url: 'https://e.com/pull/9', pr_state: 'open', branch: 'b', repo_path: '/repo', status: 'running' },
+    { pr_url: 'https://e.com/pull/9', pr_state: 'none', branch: 'b', repo_path: '/repo', status: 'failed' },
+    { pr_url: 'https://e.com/pull/4', pr_state: 'merged', branch: 'a', repo_path: '/repo', status: 'completed' },
+  ];
+  const prs = newestPullRequests(rows);
+  assert.equal(prs.length, 2);
+  assert.equal(prs[0].branch, 'b');
+  assert.equal(prs[0].state, 'open', 'the newest row won');
+  assert.equal(prs[0].live, true);
+  assert.equal(prs[1].number, 4);
+});
+
+test('newestPullRequests separates branches that share a repo, and repos that share a branch', () => {
+  const prs = newestPullRequests([
+    { pr_url: 'https://e.com/pull/1', branch: 'main', repo_path: '/one', status: 'completed' },
+    { pr_url: 'https://e.com/pull/2', branch: 'main', repo_path: '/two', status: 'completed' },
+  ]);
+  assert.equal(prs.length, 2);
+});
+
+test('newestPullRequests skips rows with nothing to link to', () => {
+  assert.deepEqual(newestPullRequests([{ pr_url: null, repo_path: '/r' }, { pr_url: 'u' }]), []);
+});
+
 test('a schema with every column the queries read takes the fast path', () => {
   const { dir, cleanup } = scratch();
   try {
@@ -171,7 +236,13 @@ test('the probe covers every column the queries select, not just the obvious one
   // A column that is selected but not probed degrades late and misleadingly,
   // as "Lost the no-mistakes database (no such column: pr_url)" rather than the
   // startup warning that says which build of no-mistakes you are running.
-  for (const column of ['runs.pr_url', 'runs.head_sha', 'runs.created_at', 'repos.working_path']) {
+  for (const column of [
+    'runs.pr_url',
+    'runs.pr_state_observed_at',
+    'runs.head_sha',
+    'runs.created_at',
+    'repos.working_path',
+  ]) {
     const { dir, cleanup } = scratch();
     try {
       const state = new NoMistakesState({ dbPath: makeDb(dir, { omit: [column] }) });
