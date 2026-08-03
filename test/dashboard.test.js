@@ -83,6 +83,77 @@ test('attentionFor covers the remaining states', () => {
   );
 });
 
+test('a block is cleared once the transcript has carried on past it', () => {
+  // Notification fires and then nothing does until Stop, so granting a
+  // permission prompt leaves "Waiting for you" showing for the rest of the
+  // turn. Observed live: blocked for 185s while the transcript was 3s old.
+  assert.equal(
+    attentionFor({
+      session: { state: 'blocked', stateSince: 1000 },
+      run: null,
+      summary: { lastActivityAt: 60000 },
+    }),
+    'working',
+  );
+});
+
+test('a genuine permission prompt is not cleared by its own arrival', () => {
+  // The Notification hook and the tool call that triggered it are written at
+  // almost the same moment, in no guaranteed order.
+  for (const lastActivityAt of [999, 1000, 1001, 3999]) {
+    assert.equal(
+      attentionFor({
+        session: { state: 'blocked', stateSince: 1000 },
+        run: null,
+        summary: { lastActivityAt },
+      }),
+      'blocked',
+      `lastActivityAt ${lastActivityAt}`,
+    );
+  }
+});
+
+test('an unreadable transcript leaves the hooks answer standing', () => {
+  // The transcript may only ever clear a block, never assert one. A session
+  // with no readable transcript keeps whatever the hooks last said.
+  assert.equal(
+    attentionFor({ session: { state: 'blocked', stateSince: 1000 }, run: null, summary: null }),
+    'blocked',
+  );
+  assert.equal(
+    attentionFor({
+      session: { state: 'blocked', stateSince: 1000 },
+      run: null,
+      summary: { lastActivityAt: null },
+    }),
+    'blocked',
+  );
+});
+
+test('a disproved block still yields to a live review', () => {
+  assert.equal(
+    attentionFor({
+      session: { state: 'blocked', stateSince: 1000 },
+      run: null,
+      summary: { lastActivityAt: 60000, lavishFile: '/p.html' },
+    }),
+    'review',
+  );
+});
+
+test('a disproved block drops the stale permission message and timer', () => {
+  const rows = buildRows({
+    sessions: [session({ state: 'blocked', stateSince: 1000, message: 'Claude needs your permission' })],
+    runs: [],
+    now: 90000,
+    summaries: new Map([['s1', { lastActivityAt: 60000 }]]),
+  });
+  assert.equal(rows[0].attention, 'working');
+  assert.equal(rows[0].message, null, 'a granted prompt must not keep asking');
+  assert.equal(rows[0].sessionState, 'working');
+  assert.equal(rows[0].waitingForMs, null);
+});
+
 test('a session waiting on a Lavish review outranks a parked pipeline', () => {
   // The hooks see a busy session, because the waiting happens inside a
   // subprocess. It is really a human gate, so it has to outrank one that the

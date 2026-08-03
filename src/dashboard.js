@@ -133,6 +133,56 @@ function rankRun(run) {
 }
 
 /**
+ * How far past a recorded block the transcript must run before the block is
+ * disbelieved.
+ *
+ * The `Notification` hook and the tool call that triggered it are written at
+ * almost the same moment, in no guaranteed order, so a couple of seconds of
+ * slack keeps a real permission prompt from being cleared by its own arrival.
+ */
+const BLOCK_DISPROVED_AFTER_MS = 3000;
+
+/**
+ * Whether a session recorded as blocked has demonstrably carried on since.
+ *
+ * The hooks announce that Claude wants permission and then go quiet until the
+ * turn ends - `Notification` fires, and the next event is `Stop`, which may be
+ * many minutes later. So granting permission leaves the session reading
+ * "Waiting for you" for the whole rest of the turn, and the one signal this
+ * tool exists to give is wrong for most of the time it is displayed. A false
+ * "waiting for you" is worse than a missing one: it is what teaches you to
+ * stop believing the page.
+ *
+ * A session writing records is self-evidently not sitting waiting for a human,
+ * so the transcript settles it. Only ever used to *clear* a block, never to
+ * assert one - a transcript that cannot be read leaves the hooks' answer
+ * standing.
+ */
+function blockDisproved(session, summary) {
+  const since = session?.stateSince;
+  const last = summary?.lastActivityAt;
+  if (!since || !last) return false;
+  return last - since > BLOCK_DISPROVED_AFTER_MS;
+}
+
+/**
+ * The session's state once the transcript has had its say.
+ *
+ * A disproved block becomes `working` rather than falling through to `idle`:
+ * a session that is writing records is running, and calling that idle would
+ * trade one wrong answer for another.
+ *
+ * @param {Session|{state: string, stateSince?: number}|null} session
+ * @param {import('./transcript.js').TranscriptSummary|null} summary
+ * @returns {import('./registry.js').SessionState|null}
+ */
+function effectiveSessionState(session, summary) {
+  if (!session) return null;
+  if (session.state === 'blocked' && blockDisproved(session, summary)) return 'working';
+  return /** @type {import('./registry.js').SessionState|null} */ (session.state ?? null);
+}
+
+/**
  * Decide the single attention level for a row.
  *
  * A session polling a Lavish artifact outranks everything except an outright
@@ -145,13 +195,14 @@ function rankRun(run) {
  * @returns {Attention}
  */
 export function attentionFor({ session, run, summary = null }) {
-  if (session?.state === 'blocked') return 'blocked';
+  const state = effectiveSessionState(session, summary);
+  if (state === 'blocked') return 'blocked';
   if (session && summary?.lavishFile) return 'review';
   if (run?.parked) return 'parked';
   if (run && !run.active && (run.status === 'failed' || run.error)) return 'failed';
   if (run?.active) return 'working';
-  if (session?.state === 'working') return 'working';
-  if (session?.state === 'idle') return 'idle';
+  if (state === 'working') return 'working';
+  if (state === 'idle') return 'idle';
   if (run && !run.active) return 'done';
   return 'idle';
 }
@@ -198,10 +249,16 @@ export function buildRows({
       branch: run?.branch || null,
       attention,
       attentionLabel: attentionLabel(attention),
-      message: session.message || null,
-      sessionState: session.state,
+      // Everything below follows `attention`, not the raw hook state, so a
+      // block the transcript has disproved cannot leave a stale "needs your
+      // permission" or a waiting timer running behind a Working row.
+      message: attention === 'blocked' ? session.message || null : null,
+      sessionState: effectiveSessionState(session, summary),
       sessionStateSince: session.stateSince || null,
-      waitingForMs: session.state === 'blocked' ? now - (session.stateSince || now) : null,
+      waitingForMs:
+        attention === 'blocked' || attention === 'review'
+          ? now - (session.stateSince || now)
+          : null,
       focusable: plan.kind !== 'unfocusable',
       hostKind: plan.kind === 'tmux' ? 'tmux' : 'tab',
       run: run || null,

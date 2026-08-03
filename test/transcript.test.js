@@ -144,5 +144,6 @@ test('summariseTranscript claims nothing about an empty transcript', () => {
     mode: null,
     activity: null,
     lavishFile: null,
+    lastActivityAt: null,
   });
 });

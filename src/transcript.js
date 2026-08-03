@@ -41,6 +41,8 @@
  *   null when it is between tools - thinking, or writing a reply
  * @property {string|null} lavishFile the artifact it is blocked on, when the
  *   running tool is a `lavish-axi poll`
+ * @property {number|null} lastActivityAt epoch ms of the newest record, which
+ *   is when this session last did anything at all
  */
 
 /**
@@ -199,6 +201,27 @@ function firstWord(command) {
 }
 
 /**
+ * When the session last did anything, from the newest timestamped record.
+ *
+ * This is what lets a stale "waiting for you" be disproved. The hooks announce
+ * that Claude wants permission and then say nothing more until the turn ends,
+ * so a granted prompt leaves the session reading as blocked for as long as the
+ * rest of the turn takes. The transcript, meanwhile, carries straight on - and
+ * a session writing records is self-evidently not sitting waiting for a human.
+ *
+ * @param {object[]} records
+ * @returns {number|null}
+ */
+export function lastActivityAt(records) {
+  for (let i = records.length - 1; i >= 0; i -= 1) {
+    const record = /** @type {{timestamp?: string}} */ (records[i]);
+    const stamp = Date.parse(record?.timestamp ?? '');
+    if (Number.isFinite(stamp)) return stamp;
+  }
+  return null;
+}
+
+/**
  * Summarise a parsed transcript tail.
  *
  * @param {object[]} records
@@ -213,6 +236,7 @@ export function summariseTranscript(records) {
     mode: lastOf(records, 'mode', 'mode'),
     activity: describeToolUse(running),
     lavishFile,
+    lastActivityAt: lastActivityAt(records),
   };
 }
 
@@ -222,4 +246,5 @@ export const EMPTY_SUMMARY = Object.freeze({
   mode: null,
   activity: null,
   lavishFile: null,
+  lastActivityAt: null,
 });

@@ -125,12 +125,41 @@ every single tool call, to learn something already on disk.
 now", and it is what separates *is sitting in a Bash command* from *used Bash at some point*.
 Results arrive out of order when tools run in parallel, so match on ids, never on position.
 
+**A recorded block is disbelieved once the transcript runs past it.** The installed hooks are
+`SessionStart`, `UserPromptSubmit`, `Notification`, `Stop`, `SessionEnd` - so after
+`Notification` fires, nothing fires again until the turn ends. Granting a permission prompt
+therefore leaves the session reading "Waiting for you" for the whole rest of the turn.
+Observed live at 185 seconds stale while the transcript was 3 seconds old. A false "waiting
+for you" is worse than a missing one: it is what teaches you to stop believing the page.
+
+The transcript settles it, because a session writing records is self-evidently not sitting
+waiting for a human. Two properties make this safe, and both were measured rather than
+assumed:
+
+- the post-turn metadata records (`ai-title`, `mode`, `last-prompt`) carry **no timestamp**,
+  so they cannot move `lastActivityAt` - a genuinely idle session goes quiet immediately
+- across real idle periods the last timestamped write lands within **0.3s** of the block,
+  against a 3s margin
+
+The transcript may only ever *clear* a block, never assert one. A transcript that cannot be
+read leaves the hooks' answer standing. The alternative - a `PostToolUse` hook - would be
+precise but costs a POST per tool call and, worse, needs every existing session restarted
+before it takes effect.
+
 **A `lavish-axi poll` is a human gate wearing work clothes.** It blocks until someone opens
 the artifact and responds, so the hooks see a busy session while the actual blocker is a
 person who has lost the browser tab. That is why `review` outranks `parked`, and why the row
 drops its activity text - "Running lavish-axi" beside "Waiting on your review" reads as
 progress. `lavish-axi` takes about 1.7 seconds, so it is never on the poll path: the lookup is
 fired at most once every `REFRESH_MS` and the page uses the last answer.
+
+**A live poll process is what settles whether a review is still open**, not the transcript.
+Claude Code backgrounds any tool past its own ten-minute timeout and writes a `tool_result`,
+so the transcript reads as though the poll returned while the process runs on and the gate is
+still open - and a review taking a person more than ten minutes is the normal case, not an
+edge one. `src/poll-watch.js` scans the process table and attributes each poll to a session by
+walking up to the `host.pid` the registry already records for focusing, so nothing new has to
+be captured. The path there comes from argv, already expanded.
 
 **The host terminal for a tmux session is deliberately not stored.** A tmux session can be
 detached and reattached in a different terminal entirely, so it is resolved fresh on every
