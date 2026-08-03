@@ -93,6 +93,21 @@ transcript, so a plain `gh pr create` still gets a link.
 **The branch is always shown**, next to the repo name, read straight from `.git/HEAD` - so it
 is right for worktrees and for sessions that have never run the pipeline.
 
+**One row per repo, even while no-mistakes is running.** no-mistakes does its pipeline work in
+its own Claude sessions, in worktrees of their own. Those show up to the hooks like any other
+session, so they used to arrive as extra cards titled with a run id - an unrelated-looking
+repo you could not click. They are now folded onto the row of the repo they are working on:
+
+```
+PIPELINE PARKED
+  hexbattle  HXB-63-review                                    2m  tmux  Focus ↗
+  Pipeline parked at a gate - step review
+  NO-MISTAKES  Reviewing terrain.ts
+```
+
+If one of those agents ever stops for a permission prompt, the repo's row goes red and says so
+- the pipeline has stalled and only you can free it.
+
 **A session waiting on a Lavish review says so, and gives you the link back.** An agent
 sitting in a `lavish-axi poll` has stopped and is waiting for you to open a page you opened a
 while ago and have since buried under thirty tabs. The hooks see a busy session, so this used
@@ -240,7 +255,7 @@ updated.
 ## Development
 
 ```sh
-npm test          # 278 tests, no network, no build step, ~1s
+npm test          # 284 tests, no network, no build step, ~1s
 npm run typecheck
 ```
 

@@ -175,6 +175,22 @@ edge one. `src/poll-watch.js` scans the process table and attributes each poll t
 walking up to the `host.pid` the registry already records for focusing, so nothing new has to
 be captured. The path there comes from argv, already expanded.
 
+**no-mistakes' own agent sessions are folded into the repo's row, never given one.**
+no-mistakes runs its pipeline steps as Claude sessions in a worktree at
+`~/.no-mistakes/worktrees/<repo-hash>/<run-id>`. They carry the same hooks, so they register
+themselves - and the worktree is nowhere near the repo, so `matchRunForCwd` cannot place them.
+They arrived as a card titled with the bare run id, looking like an unrelated repo, and one
+you could never focus, because a daemon-spawned agent has no terminal.
+
+The tie is `matchRunForAgentCwd`: **the run id is a path segment of the agent's cwd.**
+(`runs.intent_session_id` looks like the obvious link and is empty on every row.) Matched as a
+whole segment against ids we already hold, never as a pattern - guessing at the shape of a
+ULID would eventually claim somebody's real directory.
+
+One row per repo, never two. But folding must not swallow the one signal this tool exists to
+give, so **a blocked agent still makes the row blocked and carries its message** - an agent
+sitting on a permission prompt has stalled the pipeline, and only a human can free it.
+
 **A pull request has three possible sources, and they are ranked by how much they know.**
 A live no-mistakes run is being watched right now, so its `pr_state` is real. The database's
 history is branch-verified but frozen. The transcript is neither, and is the only one that
@@ -270,7 +286,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 278 tests, no network, no dependencies, ~1s
+npm test          # 284 tests, no network, no dependencies, ~1s
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
 
@@ -336,7 +352,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 ## Commands
 
 ```sh
-npm test                       # 278 tests, ~1s
+npm test                       # 284 tests, ~1s
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
 nmmon serve                    # start the monitor, print the URL
