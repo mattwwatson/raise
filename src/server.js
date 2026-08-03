@@ -114,6 +114,8 @@ export function createMonitorServer({
     const summaries = new Map();
     const reviewUrls = new Map();
     const sessionBranches = new Map();
+    /** Sessions with a no-mistakes run still going underneath them. */
+    const pipelines = new Set();
     for (const session of sessions) {
       // Resolved before the transcript is read, because the branch is what
       // decides which pull request in the tail belongs to this session. One
@@ -127,6 +129,9 @@ export function createMonitorServer({
       // Claude Code backgrounds anything past its own timeout, and a review
       // that takes a person more than ten minutes is the normal case.
       const polledFile = polls.fileFor(session.host?.pid, agentPids);
+      // Same scan, second question: a backgrounded pipeline is what makes
+      // Claude Code's "waiting for your input" a lie.
+      if (polls.pipelineFor(session.host?.pid, agentPids)) pipelines.add(session.sessionId);
       const summary = polledFile ? { ...read, lavishFile: polledFile } : read;
       summaries.set(session.sessionId, summary);
       // Only ask Lavish about sessions that say they are polling it. Asking is
@@ -146,6 +151,7 @@ export function createMonitorServer({
       reviewUrls,
       branches: sessionBranches,
       pullRequests,
+      pipelines,
     });
     return {
       rows,

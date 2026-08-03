@@ -1,7 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseProcessTable, pollsBySession, PollWatch } from '../src/poll-watch.js';
+import {
+  parseProcessTable,
+  pollsBySession,
+  PollWatch,
+  isPipelineCommand,
+  pipelinesBySession,
+} from '../src/poll-watch.js';
 
 // The real chain, taken from a live session: the poll, the shell Claude Code
 // spawned to run it, and the agent itself - which is the pid the registry
@@ -132,4 +138,43 @@ test('load scans once and waits, for one-shot commands', async () => {
 test('no exec runner at all is a supported configuration', () => {
   const watch = new PollWatch({});
   assert.equal(watch.fileFor(73146, new Set([73146]), 1000), null);
+});
+
+test('isPipelineCommand matches no-mistakes itself, not talk about it', () => {
+  assert.equal(isPipelineCommand('/usr/local/bin/no-mistakes axi respond --action fix'), true);
+  assert.equal(isPipelineCommand('no-mistakes gate'), true);
+
+  // The trap: the session most likely to be wrongly marked is the one working
+  // ON no-mistakes, which says the word constantly.
+  assert.equal(isPipelineCommand('grep -rn "no-mistakes" src/'), false);
+  assert.equal(isPipelineCommand('npm test --prefix /Users/x/work/no-mistakes-monitor'), false);
+  assert.equal(isPipelineCommand('node /Users/x/work/no-mistakes-monitor/bin/nmmon.js status'), false);
+  assert.equal(
+    isPipelineCommand('/bin/zsh -c eval \'no-mistakes axi respond --instructions "..."\''),
+    false,
+    'the wrapper is not the pipeline; its child is, and both walk to one session',
+  );
+});
+
+test('the always-on daemon is never mistaken for a run', () => {
+  assert.equal(isPipelineCommand('/usr/local/bin/no-mistakes daemon run --root /Users/x/.no-mistakes'), false);
+  assert.equal(isPipelineCommand('/usr/local/bin/no-mistakes daemon log-sink --root /Users/x/.no-mistakes'), false);
+});
+
+test('a pipeline is attributed to the session that launched it', () => {
+  const table = parseProcessTable(
+    [
+      '  100     1 /Applications/iTerm.app/Contents/MacOS/iTerm2',
+      '  200   100 claude',
+      '  300   200 /bin/zsh -c eval no-mistakes axi respond',
+      '  400   300 /usr/local/bin/no-mistakes axi respond --action fix',
+    ].join('\n'),
+  );
+  assert.deepEqual([...pipelinesBySession(table, new Set([200]))], [200]);
+});
+
+test('a pipeline under nobody we know is nobody"s', () => {
+  const table = parseProcessTable('  400     1 /usr/local/bin/no-mistakes axi respond');
+  assert.deepEqual([...pipelinesBySession(table, new Set([200]))], []);
+  assert.deepEqual([...pipelinesBySession(table, new Set())], []);
 });

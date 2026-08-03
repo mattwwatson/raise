@@ -262,6 +262,9 @@ async function cmdStatus() {
       return [s.sessionId, polledFile ? { ...read, lavishFile: polledFile } : read];
     }),
   );
+  const pipelines = new Set(
+    sessions.filter((s) => polls.pipelineFor(s.host?.pid, agentPids)).map((s) => s.sessionId),
+  );
 
   // Asking Lavish costs a second or two, so it is only worth it when something
   // is actually waiting on a review.
@@ -276,7 +279,15 @@ async function cmdStatus() {
   }
 
   // Reuse the dashboard projection so the CLI and the page can never disagree.
-  const rows = buildRows({ sessions, runs, summaries, reviewUrls, branches, pullRequests });
+  const rows = buildRows({
+    sessions,
+    runs,
+    summaries,
+    reviewUrls,
+    branches,
+    pullRequests,
+    pipelines,
+  });
 
   if (warning) console.log(`${yellow('Note')} ${warning}\n`);
   if (rows.length === 0) {

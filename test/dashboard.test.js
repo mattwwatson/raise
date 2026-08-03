@@ -12,6 +12,7 @@ import {
   matchPullRequest,
   transcriptPullRequest,
   matchRunForAgentCwd,
+  isIdleNudge,
 } from '../src/dashboard.js';
 
 const run = (over = {}) => ({
@@ -709,4 +710,65 @@ test('the agent marker prefers the live tool, then the title', () => {
   assert.equal(build({ ...base, activity: 'Reading terrain.ts', title: 'Review the change' }), 'Reading terrain.ts');
   assert.equal(build({ ...base, activity: null, title: 'Review the change' }), 'Review the change');
   assert.equal(build({ ...base, activity: null, title: null }), 'working');
+});
+
+// -------------------------------------------- a running pipeline is not idle
+
+test('isIdleNudge tells the sixty-second nudge from a permission prompt', () => {
+  assert.equal(isIdleNudge('Claude is waiting for your input'), true);
+  assert.equal(isIdleNudge('Claude needs your permission to use Bash'), false);
+  // Fails closed: anything unrecognised stays a hard block, so a reworded
+  // notification costs a stale row rather than a swallowed permission prompt.
+  assert.equal(isIdleNudge(null), false);
+  assert.equal(isIdleNudge(''), false);
+});
+
+test('a running pipeline disproves "Claude is waiting for your input"', () => {
+  // Claude Code backgrounds the command past its ten minute timeout, the turn
+  // ends, and sixty seconds later it fires the idle notification - so the page
+  // summoned you to a session whose work was very much still going. Observed
+  // live for two minutes while `no-mistakes axi respond` was running.
+  const blocked = session({
+    state: 'blocked',
+    stateSince: 5000,
+    message: 'Claude is waiting for your input',
+  });
+  const [row] = buildRows({
+    sessions: [blocked],
+    runs: [],
+    now: 6000,
+    pipelines: new Set(['s1']),
+  });
+  assert.equal(row.attention, 'working');
+  assert.equal(row.message, null, 'and it stops asking for you');
+  assert.equal(row.waitingForMs, null, 'and the waiting timer stops');
+});
+
+test('a running pipeline does NOT clear a real permission prompt', () => {
+  // A permission prompt stops everything until a human answers, whether or not
+  // something else is churning in the background. Clearing it would swallow
+  // the one signal this tool exists to give.
+  const [row] = buildRows({
+    sessions: [
+      session({ state: 'blocked', stateSince: 5000, message: 'Claude needs your permission to use Bash' }),
+    ],
+    runs: [],
+    now: 6000,
+    pipelines: new Set(['s1']),
+  });
+  assert.equal(row.attention, 'blocked');
+  assert.equal(row.message, 'Claude needs your permission to use Bash');
+});
+
+test('with no pipeline running, the idle nudge still means you', () => {
+  // The escalation from a quiet Stop to a loud "waiting for you" is deliberate:
+  // it is how a finished session asks for its next instruction.
+  const [row] = buildRows({
+    sessions: [
+      session({ state: 'blocked', stateSince: 5000, message: 'Claude is waiting for your input' }),
+    ],
+    runs: [],
+    now: 6000,
+  });
+  assert.equal(row.attention, 'blocked');
 });

@@ -292,6 +292,31 @@ function rankRun(run) {
 const BLOCK_DISPROVED_AFTER_MS = 3000;
 
 /**
+ * Claude Code's sixty-second nudge, as opposed to a permission prompt.
+ *
+ * The `Notification` hook fires for two different things, and the registry
+ * cannot tell them apart because they arrive as the same event: Claude wanting
+ * permission for a tool, and Claude having finished its turn and waiting for
+ * you to say something next. Only the message distinguishes them.
+ *
+ * The distinction is load-bearing. A running pipeline is grounds for
+ * disbelieving the second - the session is not free, it is mid-run - and is no
+ * grounds at all for disbelieving the first, because a permission prompt stops
+ * everything until a human answers whether or not something else is churning
+ * in the background.
+ *
+ * Matched narrowly and failing closed: anything unrecognised, including no
+ * message at all, stays a hard block. If Claude Code rewords this, the cost is
+ * the stale "waiting for you" we had before, not a swallowed permission prompt.
+ *
+ * @param {string|null|undefined} message
+ * @returns {boolean}
+ */
+export function isIdleNudge(message) {
+  return /waiting for your input/i.test(String(message || ''));
+}
+
+/**
  * Whether a session recorded as blocked has demonstrably carried on since.
  *
  * The hooks announce that Claude wants permission and then go quiet until the
@@ -321,13 +346,21 @@ function blockDisproved(session, summary) {
  * a session that is writing records is running, and calling that idle would
  * trade one wrong answer for another.
  *
- * @param {Session|{state: string, stateSince?: number}|null} session
+ * A running pipeline disproves a block the same way, and for a stricter reason:
+ * the transcript is silent evidence, whereas a live process is the work itself.
+ * It only ever answers the idle nudge - see `isIdleNudge`.
+ *
+ * @param {Session|{state: string, stateSince?: number, message?: string|null}|null} session
  * @param {import('./transcript.js').TranscriptSummary|null} summary
+ * @param {boolean} [pipelineRunning]
  * @returns {import('./registry.js').SessionState|null}
  */
-function effectiveSessionState(session, summary) {
+function effectiveSessionState(session, summary, pipelineRunning = false) {
   if (!session) return null;
-  if (session.state === 'blocked' && blockDisproved(session, summary)) return 'working';
+  if (session.state === 'blocked') {
+    if (blockDisproved(session, summary)) return 'working';
+    if (pipelineRunning && isIdleNudge(session.message)) return 'working';
+  }
   return /** @type {import('./registry.js').SessionState|null} */ (session.state ?? null);
 }
 
@@ -346,11 +379,17 @@ function effectiveSessionState(session, summary) {
  *
  * @param {{session: Session|{state: string}|null, run: Run|null,
  *          summary?: import('./transcript.js').TranscriptSummary|null,
- *          agent?: Agent|null}} input
+ *          agent?: Agent|null, pipelineRunning?: boolean}} input
  * @returns {Attention}
  */
-export function attentionFor({ session, run, summary = null, agent = null }) {
-  const state = effectiveSessionState(session, summary);
+export function attentionFor({
+  session,
+  run,
+  summary = null,
+  agent = null,
+  pipelineRunning = false,
+}) {
+  const state = effectiveSessionState(session, summary, pipelineRunning);
   if (state === 'blocked') return 'blocked';
   if (agent?.state === 'blocked') return 'blocked';
   if (session && summary?.lavishFile) return 'review';
@@ -375,7 +414,8 @@ export function attentionFor({ session, run, summary = null, agent = null }) {
  *          summaries?: Map<string, import('./transcript.js').TranscriptSummary>,
  *          reviewUrls?: Map<string, string|null>,
  *          branches?: Map<string, string|null>,
- *          pullRequests?: PullRequest[]}} input
+ *          pullRequests?: PullRequest[],
+ *          pipelines?: Set<string>}} input
  * @returns {Row[]}
  */
 export function buildRows({
@@ -386,6 +426,7 @@ export function buildRows({
   reviewUrls = new Map(),
   branches = new Map(),
   pullRequests = [],
+  pipelines = new Set(),
 }) {
   /** @type {Row[]} */
   const rows = [];
@@ -424,7 +465,8 @@ export function buildRows({
     if (run) claimedRuns.add(run.runId);
     const summary = summaries.get(session.sessionId) || null;
     const agent = (run && agents.get(run.runId)) || null;
-    const attention = attentionFor({ session, run, summary, agent });
+    const pipelineRunning = pipelines.has(session.sessionId);
+    const attention = attentionFor({ session, run, summary, agent, pipelineRunning });
     const plan = planFocus(session);
     // The checkout's own branch is the truth about where this session is. The
     // run's is a second choice: it belongs to a pipeline that may have finished
@@ -448,7 +490,7 @@ export function buildRows({
       // permission" or a waiting timer running behind a Working row.
       message:
         attention === 'blocked' ? session.message || agent?.message || null : null,
-      sessionState: effectiveSessionState(session, summary),
+      sessionState: effectiveSessionState(session, summary, pipelineRunning),
       sessionStateSince: session.stateSince || null,
       waitingForMs:
         attention === 'blocked' || attention === 'review'

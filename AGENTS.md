@@ -167,13 +167,41 @@ drops its activity text - "Running lavish-axi" beside "Waiting on your review" r
 progress. `lavish-axi` takes about 1.7 seconds, so it is never on the poll path: the lookup is
 fired at most once every `REFRESH_MS` and the page uses the last answer.
 
+**Claude Code's `Notification` hook means two different things, and only the message tells
+them apart.** It fires both when Claude wants permission for a tool and when a turn has ended
+and Claude has been idle for sixty seconds - and `registry.js` maps both to `blocked`, because
+at that layer they are the same event.
+
+The escalation is deliberate for the second case and worth keeping: a quiet `Stop` becoming a
+loud "waiting for you" a minute later is how a finished session asks for its next instruction.
+What is wrong is applying it to a session whose pipeline is still running. Claude Code
+backgrounds a command past its own ten-minute timeout, the turn ends, the nudge fires, and the
+page summons you to a session doing plenty of work - observed live for two minutes with
+`no-mistakes axi respond` running the whole time.
+
+So a live pipeline disproves the nudge, and **only the nudge**. `isIdleNudge` matches narrowly
+and fails closed: an unrecognised or absent message stays a hard block, because a permission
+prompt stops everything until a human answers whether or not something churns in the
+background. If Claude Code rewords the string, the cost is the stale row we had before, never
+a swallowed permission prompt.
+
 **A live poll process is what settles whether a review is still open**, not the transcript.
 Claude Code backgrounds any tool past its own ten-minute timeout and writes a `tool_result`,
 so the transcript reads as though the poll returned while the process runs on and the gate is
 still open - and a review taking a person more than ten minutes is the normal case, not an
 edge one. `src/poll-watch.js` scans the process table and attributes each poll to a session by
 walking up to the `host.pid` the registry already records for focusing, so nothing new has to
-be captured. The path there comes from argv, already expanded.
+be captured. The path there comes from argv, already expanded. One `ps` answers both questions
+it is asked - which sessions are polling, and which have a pipeline still running.
+
+**A pipeline is matched on the executable, never on the word appearing in argv.** The session
+most likely to be wrongly marked is the one working *on* no-mistakes, which greps for the
+string, runs tests in a directory named after it, and passes it inside `--instructions` text.
+Verified against a real run: the shell wrapper (`zsh -c eval 'no-mistakes axi status'`) is not
+matched and does not need to be, because the actual `no-mistakes axi status` child is, and both
+walk up to the same session. The permanently running `daemon` is excluded explicitly as well -
+the ancestor walk already drops it, but a rule that depends on the walk alone is one refactor
+away from claiming every session on the machine.
 
 **no-mistakes' own agent sessions are folded into the repo's row, never given one.**
 no-mistakes runs its pipeline steps as Claude sessions in a worktree at
@@ -294,7 +322,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 286 tests, no network, no dependencies, ~1s
+npm test          # 294 tests, no network, no dependencies, ~1s
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
 
@@ -360,7 +388,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 ## Commands
 
 ```sh
-npm test                       # 286 tests, ~1s
+npm test                       # 294 tests, ~1s
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
 nmmon serve                    # start the monitor, print the URL
