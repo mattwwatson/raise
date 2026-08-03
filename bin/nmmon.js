@@ -25,6 +25,7 @@ import { NoMistakesState } from '../src/nm-state.js';
 import { SessionRegistry } from '../src/registry.js';
 import { TranscriptReader } from '../src/transcript-reader.js';
 import { LavishState } from '../src/lavish.js';
+import { PollWatch } from '../src/poll-watch.js';
 import { focusSession } from '../src/focus/index.js';
 import { ALL_TERMINALS } from '../src/focus/terminals.js';
 import { exec, execAsync, tryExec, tryExecAsync } from '../src/exec.js';
@@ -248,7 +249,16 @@ async function cmdStatus() {
   const { runs, warning } = nmState.read({ candidateDirs, blocking: true });
 
   const transcripts = new TranscriptReader();
-  const summaries = new Map(sessions.map((s) => [s.sessionId, transcripts.read(s.transcriptPath)]));
+  const agentPids = new Set(sessions.map((s) => s.host?.pid).filter(Boolean));
+  const polls = new PollWatch({ execAsync });
+  await polls.load(agentPids);
+  const summaries = new Map(
+    sessions.map((s) => {
+      const read = transcripts.read(s.transcriptPath);
+      const polledFile = polls.fileFor(s.host?.pid, agentPids);
+      return [s.sessionId, polledFile ? { ...read, lavishFile: polledFile } : read];
+    }),
+  );
 
   // Asking Lavish costs a second or two, so it is only worth it when something
   // is actually waiting on a review.

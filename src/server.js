@@ -16,6 +16,7 @@ import { NoMistakesState } from './nm-state.js';
 import { SessionRegistry } from './registry.js';
 import { TranscriptReader, defaultFileAccess } from './transcript-reader.js';
 import { LavishState } from './lavish.js';
+import { PollWatch } from './poll-watch.js';
 import { buildRows, summarise } from './dashboard.js';
 import { focusSession } from './focus/index.js';
 import { checkRequest } from './security.js';
@@ -91,6 +92,7 @@ export function createMonitorServer({
   const nmState = new NoMistakesState({ dbPath, exec, execAsync });
   const transcripts = new TranscriptReader({ files: transcriptFiles });
   const lavish = new LavishState({ execAsync });
+  const polls = new PollWatch({ execAsync });
   const probe = nmState.probe();
 
   /** @type {Set<import('node:http').ServerResponse>} */
@@ -105,10 +107,17 @@ export function createMonitorServer({
     const candidateDirs = [...new Set(sessions.map((s) => s.cwd).filter(Boolean))];
     const { runs, source, warning } = nmState.read({ candidateDirs });
 
+    const agentPids = new Set(sessions.map((s) => s.host?.pid).filter(Boolean));
     const summaries = new Map();
     const reviewUrls = new Map();
     for (const session of sessions) {
-      const summary = transcripts.read(session.transcriptPath);
+      const read = transcripts.read(session.transcriptPath);
+      // The process table is the authority on whether a poll is still running.
+      // A transcript can say the poll returned when only the tool call did -
+      // Claude Code backgrounds anything past its own timeout, and a review
+      // that takes a person more than ten minutes is the normal case.
+      const polledFile = polls.fileFor(session.host?.pid, agentPids);
+      const summary = polledFile ? { ...read, lavishFile: polledFile } : read;
       summaries.set(session.sessionId, summary);
       // Only ask Lavish about sessions that say they are polling it. Asking is
       // what schedules the refresh, so a machine with no reviews in flight
