@@ -139,6 +139,16 @@ assumed:
 
 - the post-turn metadata records (`ai-title`, `mode`, `last-prompt`) carry **no timestamp**,
   so they cannot move `lastActivityAt` - a genuinely idle session goes quiet immediately
+
+  > **This was true when measured and is no longer the whole story.** Claude Code has since
+  > added timestamped records that are not the conversation, and one of them -
+  > `system`/`away_summary` - is written *because* the human is away. Counting it moved
+  > `lastActivityAt` forward on an idle session, disproved a real block, and rendered the row
+  > as "Working": this tool's one signal exactly inverted. Seen at 199s and 191s into a quiet
+  > stretch. `lastActivityAt` now counts `assistant` and `user` records only - a whitelist,
+  > because the conversation is the stable shape of a transcript while the ancillary types
+  > keep arriving (`attachment`, `file-history-delta`, `permission-mode` are all newer than
+  > this paragraph). **Do not widen it back to "any record with a timestamp".**
 - across real idle periods the last timestamped write lands within **0.3s** of the block,
   against a 3s margin
 
@@ -322,7 +332,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 294 tests, no network, no dependencies, ~1s
+npm test          # 297 tests, no network, no dependencies, ~1s
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
 
@@ -388,7 +398,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 ## Commands
 
 ```sh
-npm test                       # 294 tests, ~1s
+npm test                       # 297 tests, ~1s
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
 nmmon serve                    # start the monitor, print the URL

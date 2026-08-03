@@ -10,6 +10,7 @@ import {
   recentEvents,
   EVENT_TEXT_CHARS,
   pullRequestFromRecords,
+  lastActivityAt,
 } from '../src/transcript.js';
 
 const jsonl = (...records) => records.map((r) => JSON.stringify(r)).join('\n');
@@ -414,4 +415,41 @@ test('a lone pull request in a record is taken even with no branch named', () =>
   );
   assert.equal(found.number, 40);
   assert.equal(found.state, 'open');
+});
+
+test('an away summary is not evidence that a session is working', () => {
+  // Claude Code writes `system`/`away_summary` records precisely BECAUSE the
+  // human is away, and they carry a timestamp. Counting them moved
+  // lastActivityAt forward on a session doing nothing, which then disproved a
+  // real block and rendered an idle session as "Working" - the one signal this
+  // tool exists to give, inverted. Observed live at 199s and 191s into a quiet
+  // stretch.
+  const records = [
+    { type: 'assistant', timestamp: '2026-08-03T06:26:30.000Z', message: { content: [{ type: 'text', text: 'done' }] } },
+    { type: 'system', subtype: 'away_summary', timestamp: '2026-08-03T06:29:49.000Z' },
+  ];
+  assert.equal(lastActivityAt(records), Date.parse('2026-08-03T06:26:30.000Z'));
+});
+
+test('lastActivityAt counts the conversation, and only the conversation', () => {
+  // A whitelist of assistant/user rather than a denylist of the metadata types,
+  // because the conversation is the stable shape of a transcript while the
+  // ancillary types keep being added - away_summary, file-history-delta,
+  // attachment and permission-mode all arrived after this code was written.
+  const at = '2026-08-03T07:00:00.000Z';
+  assert.equal(lastActivityAt([{ type: 'assistant', timestamp: at, message: { content: [] } }]), Date.parse(at));
+  assert.equal(lastActivityAt([{ type: 'user', timestamp: at, message: { content: [] } }]), Date.parse(at));
+  for (const type of ['system', 'file-history-delta', 'attachment', 'permission-mode']) {
+    assert.equal(lastActivityAt([{ type, timestamp: at }]), null, `${type} is not activity`);
+  }
+});
+
+test('a granted permission is still disproved by the work that follows', () => {
+  // The case blockDisproved exists for must keep working: Claude carries on
+  // writing assistant records after the prompt is answered.
+  const records = [
+    { type: 'assistant', timestamp: '2026-08-03T06:00:00.000Z', message: { content: [] } },
+    { type: 'assistant', timestamp: '2026-08-03T06:05:00.000Z', message: { content: [] } },
+  ];
+  assert.equal(lastActivityAt(records), Date.parse('2026-08-03T06:05:00.000Z'));
 });

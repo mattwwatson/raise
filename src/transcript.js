@@ -224,7 +224,20 @@ function firstWord(command) {
 }
 
 /**
- * When the session last did anything, from the newest timestamped record.
+ * The record types that are the conversation itself, and so are work.
+ *
+ * A whitelist rather than a denylist, and deliberately so. Claude Code keeps
+ * adding ancillary timestamped records around the conversation - `system`,
+ * `attachment`, `file-history-delta`, `permission-mode` all appeared after this
+ * module was first written - whereas the conversation being assistant turns and
+ * user turns is the stable shape of a transcript. A denylist has to be right
+ * about every type that will ever exist; this only has to be right about the
+ * two that always will.
+ */
+const ACTIVITY_TYPES = new Set(['assistant', 'user']);
+
+/**
+ * When the session last did anything, from the newest record that is work.
  *
  * This is what lets a stale "waiting for you" be disproved. The hooks announce
  * that Claude wants permission and then say nothing more until the turn ends,
@@ -232,12 +245,21 @@ function firstWord(command) {
  * rest of the turn takes. The transcript, meanwhile, carries straight on - and
  * a session writing records is self-evidently not sitting waiting for a human.
  *
+ * Which makes *what counts as a record* load-bearing, and it is narrower than
+ * "has a timestamp". Claude Code writes `system`/`away_summary` entries while
+ * the human is away - written *because* nothing is happening - and counting
+ * those moved this forward on an idle session, disproved a real block, and
+ * rendered the session as "Working". That is this tool's one signal inverted:
+ * the row that wanted you looked like the row that did not. Observed at 199s
+ * and 191s into a quiet stretch.
+ *
  * @param {object[]} records
  * @returns {number|null}
  */
 export function lastActivityAt(records) {
   for (let i = records.length - 1; i >= 0; i -= 1) {
-    const record = /** @type {{timestamp?: string}} */ (records[i]);
+    const record = /** @type {{timestamp?: string, type?: string}} */ (records[i]);
+    if (!ACTIVITY_TYPES.has(record?.type)) continue;
     const stamp = Date.parse(record?.timestamp ?? '');
     if (Number.isFinite(stamp)) return stamp;
   }
