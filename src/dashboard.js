@@ -64,6 +64,19 @@ import { pullRequestNumber } from './nm-state.js';
  * @property {PullRequest|null} pr the pull request open on this branch
  * @property {number|null} lastActivityAt epoch ms this session last wrote to
  *   its transcript, which is when it last actually did something
+ * @property {Agent|null} agent the pipeline's own Claude session, folded in
+ */
+
+/**
+ * What no-mistakes' own agent is doing, shown on the row of the repo it is
+ * working on rather than as a row of its own.
+ *
+ * @typedef {object} Agent
+ * @property {string|null} activity the tool it is running right now
+ * @property {string|null} summary what it is working on, in its own words
+ * @property {import('./registry.js').SessionState|null} state
+ * @property {string|null} message why it wants you, if it is blocked
+ * @property {number|null} lastActivityAt
  */
 
 /**
@@ -127,6 +140,34 @@ export function matchRunForCwd(cwd, runs) {
     }
   }
   return best;
+}
+
+/**
+ * The run whose worktree a directory sits in, or null.
+ *
+ * no-mistakes runs its own pipeline steps as Claude sessions, in a worktree at
+ * `~/.no-mistakes/worktrees/<repo-hash>/<run-id>`. Those sessions have the
+ * hooks installed like any other, so they register themselves - and because the
+ * worktree is nowhere near the repo, `matchRunForCwd` cannot place them. They
+ * arrived on the dashboard as their own row, titled with the bare run id,
+ * looking like an unrelated repo nobody had heard of.
+ *
+ * The run id is the last segment of that path, so the tie needs no new source:
+ * a directory sitting inside a known run's worktree belongs to that run. Exact
+ * segment matching against the ids we already have, never a pattern - guessing
+ * at what a ULID looks like would eventually claim somebody's real directory.
+ *
+ * @param {string|null} cwd
+ * @param {Run[]} runs
+ * @returns {Run|null}
+ */
+export function matchRunForAgentCwd(cwd, runs) {
+  if (!cwd) return null;
+  const segments = new Set(String(cwd).split('/').filter(Boolean));
+  for (const run of runs) {
+    if (run.runId && segments.has(run.runId)) return run;
+  }
+  return null;
 }
 
 /**
@@ -290,13 +331,20 @@ function effectiveSessionState(session, summary) {
  * checked before `run.parked` for the same reason `blocked` is - a parked
  * pipeline usually answers itself, and a person waiting on a review does not.
  *
+ * A blocked pipeline agent counts as blocked too. Folding those sessions into
+ * this row is what stops the dashboard growing a second card per repo, but it
+ * must not swallow the one signal the tool exists to give: an agent sitting on
+ * a permission prompt has stalled the pipeline and only a human can free it.
+ *
  * @param {{session: Session|{state: string}|null, run: Run|null,
- *          summary?: import('./transcript.js').TranscriptSummary|null}} input
+ *          summary?: import('./transcript.js').TranscriptSummary|null,
+ *          agent?: Agent|null}} input
  * @returns {Attention}
  */
-export function attentionFor({ session, run, summary = null }) {
+export function attentionFor({ session, run, summary = null, agent = null }) {
   const state = effectiveSessionState(session, summary);
   if (state === 'blocked') return 'blocked';
+  if (agent?.state === 'blocked') return 'blocked';
   if (session && summary?.lavishFile) return 'review';
   if (run?.parked) return 'parked';
   if (run && !run.active && (run.status === 'failed' || run.error)) return 'failed';
@@ -335,11 +383,35 @@ export function buildRows({
   const rows = [];
   const claimedRuns = new Set();
 
+  // The pipeline's own sessions are folded into the row of the repo they are
+  // working on, never given one of their own: two `hexbattle` rows, one of
+  // which you cannot act on, is worse than one row that says what the pipeline
+  // is up to. They are pulled out first so the loop below never sees them.
+  /** @type {Map<string, Agent>} */
+  const agents = new Map();
+  /** @type {Session[]} */
+  const human = [];
   for (const session of sessions) {
+    const owning = matchRunForAgentCwd(session.cwd, runs);
+    if (!owning) {
+      human.push(session);
+      continue;
+    }
+    const summary = summaries.get(session.sessionId) || null;
+    agents.set(owning.runId, {
+      activity: summary?.activity || null,
+      summary: summary?.title || null,
+      state: /** @type {import('./registry.js').SessionState|null} */ (session.state ?? null),
+      message: session.state === 'blocked' ? session.message || null : null,
+      lastActivityAt: summary?.lastActivityAt ?? null,
+    });
+  }
+  for (const session of human) {
     const run = matchRunForCwd(session.cwd, runs);
     if (run) claimedRuns.add(run.runId);
     const summary = summaries.get(session.sessionId) || null;
-    const attention = attentionFor({ session, run, summary });
+    const agent = (run && agents.get(run.runId)) || null;
+    const attention = attentionFor({ session, run, summary, agent });
     const plan = planFocus(session);
     // The checkout's own branch is the truth about where this session is. The
     // run's is a second choice: it belongs to a pipeline that may have finished
@@ -361,7 +433,8 @@ export function buildRows({
       // Everything below follows `attention`, not the raw hook state, so a
       // block the transcript has disproved cannot leave a stale "needs your
       // permission" or a waiting timer running behind a Working row.
-      message: attention === 'blocked' ? session.message || null : null,
+      message:
+        attention === 'blocked' ? session.message || agent?.message || null : null,
       sessionState: effectiveSessionState(session, summary),
       sessionStateSince: session.stateSince || null,
       waitingForMs:
@@ -394,6 +467,7 @@ export function buildRows({
         matchPullRequest(session.cwd, branch, pullRequests) ||
         transcriptPullRequest(summary, run?.repoPath || session.cwd, branch),
       lastActivityAt: summary?.lastActivityAt ?? null,
+      agent,
     });
   }
 
@@ -403,7 +477,8 @@ export function buildRows({
   for (const run of runs) {
     if (claimedRuns.has(run.runId)) continue;
     if (!run.active && !isRecent(run, now)) continue;
-    const attention = attentionFor({ session: null, run });
+    const agent = agents.get(run.runId) || null;
+    const attention = attentionFor({ session: null, run, agent });
     rows.push({
       id: `run:${run.runId}`,
       kind: 'run',
@@ -414,7 +489,7 @@ export function buildRows({
       branch: run.branch,
       attention,
       attentionLabel: attentionLabel(attention),
-      message: null,
+      message: attention === 'blocked' ? agent?.message || null : null,
       sessionState: null,
       sessionStateSince: null,
       waitingForMs: null,
@@ -427,9 +502,11 @@ export function buildRows({
       mode: null,
       reviewUrl: null,
       pr: pullRequestForRun(run) || matchPullRequest(run.repoPath, run.branch, pullRequests),
-      // No session means no transcript to have written anything, so the run's
-      // own clock is the only account of when this last moved.
-      lastActivityAt: run.updatedAt || null,
+      // The pipeline's agent has a transcript even when nobody else here does,
+      // so it is a better account of when this last moved than the run's own
+      // clock, which only ticks when a step changes.
+      lastActivityAt: agent?.lastActivityAt ?? run.updatedAt ?? null,
+      agent,
     });
   }
 

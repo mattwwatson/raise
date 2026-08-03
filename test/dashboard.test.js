@@ -11,6 +11,7 @@ import {
   shortestUniqueTitles,
   matchPullRequest,
   transcriptPullRequest,
+  matchRunForAgentCwd,
 } from '../src/dashboard.js';
 
 const run = (over = {}) => ({
@@ -598,4 +599,80 @@ test('the transcript fills the gap when the database has nothing for this branch
     summaries: new Map([['s1', seen()]]),
   });
   assert.equal(rows[0].pr.number, 40);
+});
+
+// ------------------------------------------------- the pipeline's own agent
+
+/** Where no-mistakes actually puts a run's worktree, verbatim in shape. */
+const AGENT_CWD = '/Users/mattw/.no-mistakes/worktrees/aa033f35a573/01KZ31SSP3F8GV2AH86S135JFW';
+const agentRun = (over = {}) =>
+  run({ runId: '01KZ31SSP3F8GV2AH86S135JFW', repoPath: '/Users/x/work/repo', ...over });
+
+test('matchRunForAgentCwd ties an agent worktree back to its run', () => {
+  assert.equal(matchRunForAgentCwd(AGENT_CWD, [agentRun()])?.runId, '01KZ31SSP3F8GV2AH86S135JFW');
+  assert.equal(matchRunForAgentCwd(`${AGENT_CWD}/src/game`, [agentRun()])?.runId, '01KZ31SSP3F8GV2AH86S135JFW');
+});
+
+test('the run id has to be a whole path segment, not a substring of one', () => {
+  // Matching loosely would eventually claim a real directory of someone's.
+  assert.equal(matchRunForAgentCwd('/Users/x/work/01KZ31SSP3F8GV2AH86S135JFW-notes', [agentRun()]), null);
+  assert.equal(matchRunForAgentCwd('/Users/x/work/repo', [agentRun()]), null);
+  assert.equal(matchRunForAgentCwd(null, [agentRun()]), null);
+});
+
+test("the pipeline's agent does not get a row of its own", () => {
+  // It used to arrive as a card titled with the bare run id, looking like an
+  // unrelated repo nobody had heard of - and one you could never act on.
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'human', cwd: '/Users/x/work/repo' }),
+      session({ sessionId: 'agent', cwd: AGENT_CWD }),
+    ],
+    runs: [agentRun()],
+    summaries: new Map([
+      ['agent', { title: 'Review the terrain change', activity: 'Reading terrain.ts', mode: null, lavishFile: null, lastActivityAt: 9000, pullRequest: null }],
+    ]),
+  });
+  assert.equal(rows.length, 1, 'one row per repo, never two');
+  assert.equal(rows[0].sessionId, 'human');
+  assert.equal(rows[0].agent.activity, 'Reading terrain.ts');
+});
+
+test('a blocked pipeline agent still reaches you, on the repo row', () => {
+  // Folding the agent in must not swallow the one signal the tool exists for:
+  // an agent on a permission prompt has stalled the pipeline, and only a human
+  // can free it.
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'human', cwd: '/Users/x/work/repo', state: 'working' }),
+      session({ sessionId: 'agent', cwd: AGENT_CWD, state: 'blocked', message: 'Needs permission to push' }),
+    ],
+    runs: [agentRun()],
+  });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].attention, 'blocked');
+  assert.equal(rows[0].message, 'Needs permission to push');
+});
+
+test('the agent lands on the run row when nobody else is in that repo', () => {
+  const rows = buildRows({
+    sessions: [session({ sessionId: 'agent', cwd: AGENT_CWD })],
+    runs: [agentRun()],
+    summaries: new Map([
+      ['agent', { title: null, activity: 'Running npm', mode: null, lavishFile: null, lastActivityAt: 9000, pullRequest: null }],
+    ]),
+  });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].kind, 'run');
+  assert.equal(rows[0].agent.activity, 'Running npm');
+  assert.equal(rows[0].lastActivityAt, 9000, "the agent's transcript beats the run's own clock");
+});
+
+test('an ordinary session is never mistaken for a pipeline agent', () => {
+  const rows = buildRows({
+    sessions: [session({ sessionId: 'human', cwd: '/Users/x/work/repo' })],
+    runs: [agentRun()],
+  });
+  assert.equal(rows[0].sessionId, 'human');
+  assert.equal(rows[0].agent, null);
 });
