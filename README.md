@@ -18,12 +18,12 @@ WORKING
 
 ## What it watches
 
-Two different things, because they answer two different questions.
+Three different things, because they answer three different questions.
 
 | Signal | Where it comes from | What it means |
 | --- | --- | --- |
 | **Waiting for you** | Claude Code hooks | Claude hit a permission prompt or is idle waiting for input. This is the one worth interrupting yourself for. |
-| **Waiting on your review** | the session's transcript | The agent is sitting in a `lavish-axi poll`, waiting for you to open a review page and respond. It looks busy from the outside; it is not. |
+| **Waiting on your review** | the running `lavish-axi poll` | The agent is sitting in a `lavish-axi poll`, waiting for you to open a review page and respond. It looks busy from the outside; it is not. |
 | **Pipeline parked** | the no-mistakes database | A run stopped at a gate. Usually the agent answers it itself within seconds, so it is informational. |
 
 `no-mistakes` keeps a single daemon and a single SQLite database for the whole machine, so

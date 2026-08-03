@@ -43,13 +43,14 @@ runtime.
 
 ## Architecture
 
-Two sources of truth, joined into one list:
+Four sources of truth, joined into one list:
 
 | Source | Module | Answers |
 | --- | --- | --- |
 | no-mistakes SQLite DB (polled, 1s) | `src/nm-state.js` | is a pipeline run parked, working, failed? |
 | Claude Code hooks (pushed) | `src/registry.js` | is Claude blocked waiting for a human? |
 | the session's own transcript (tail, on change) | `src/transcript.js` | what is it working on, what is it doing right now, and did it open a pull request? |
+| the process table (one `ps`, every 3s) | `src/poll-watch.js` | is a review still open, and is a pipeline still running? |
 
 | Path | What |
 | --- | --- |
@@ -62,13 +63,15 @@ Two sources of truth, joined into one list:
 | `src/transcript-reader.js` | the tail read behind that, cached on mtime and branch |
 | `src/git-branch.js` | the branch a checkout is on, read from `.git/HEAD` |
 | `src/lavish.js` | resolving a Lavish artifact to the page waiting on you |
-| `src/dashboard.js` | joins the two into ranked rows (pure) |
+| `src/poll-watch.js` | which sessions are in a `lavish-axi poll`, and which have a pipeline running |
+| `src/dashboard.js` | joins them all into ranked rows (pure) |
 | `src/focus/` | tmux resolution and per-terminal adapters |
 | `src/process-tree.js` | which terminal and which agent process a hook is running under |
 | `src/security.js` | token, Host and Origin checks (pure) |
 | `src/health.js` | probing a port to find out whether nmmon is behind it |
 | `src/exec.js` | the one place that runs external commands |
 | `src/server.js` | HTTP, server-sent events, the poll loop |
+| `src/hooks.js` | merging our hooks into the user's `~/.claude/settings.json` |
 | `hooks/nmmon-hook.js` | the Claude Code hook |
 | `public/index.html` | the page, self-contained |
 | `public/connection.js` | the liveness rule (pure, no DOM, injected clock) |
@@ -338,9 +341,10 @@ Keep it that way - it has no build step and must open as a file.
 
 - Colour comes from the CSS custom properties in `:root`, with a
   `@media (prefers-color-scheme: dark)` block. **Add a variable to both blocks or neither.**
-- Attention colour is semantic and ordered: `blocked` > `parked` > `failed` > `idle` >
-  `working` > `done`, matching `ATTENTION_ORDER` in `dashboard.js`. Do not introduce a colour
-  that competes with `blocked` red.
+- Attention colour is semantic and ordered: `blocked` > `review` > `parked` > `failed` >
+  `idle` > `working` > `done`, matching `ATTENTION_ORDER` in `dashboard.js`. Do not introduce
+  a colour that competes with `blocked` red - `review` sits under it because it is the same
+  thing wearing work clothes.
 - **Affordance must match capability.** A focusable row is a `<button>` and says `Focus ↗`; a
   row with no live session behind it is plain and does nothing. Never render a control that
   might not work.
