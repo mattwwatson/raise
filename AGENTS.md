@@ -229,6 +229,15 @@ One row per repo, never two. But folding must not swallow the one signal this to
 give, so **a blocked agent still makes the row blocked and carries its message** - an agent
 sitting on a permission prompt has stalled the pipeline, and only a human can free it.
 
+An agent's block is subject to every disproof a human session's is, and for a sharper reason:
+the hooks fall silent between the permission prompt and the end of the turn either way, but
+here a stale block pins the whole repo's row red rather than only its own. So the `Agent`
+record is built through `effectiveSessionState` - its own transcript clears it, and a live
+pipeline answers the idle nudge - and the message goes when the block does. **Only the newest
+agent of a run is kept**: a step's agent is still registered while the next one starts, and
+letting the later write win would let an older calm agent mask a newly blocked one, which is
+exactly the signal folding is not allowed to swallow.
+
 **The marker's presence follows the agent existing, never `Agent.activity`.** `activity` is
 the tool with no result yet, so it is null between every pair of tool calls - most seconds, on
 a busy agent - and rendering on it blinked the marker in and out several times a minute, which
@@ -260,6 +269,16 @@ taking the first URL out of it put an unrelated review on the card. A URL on a l
 our branch is ours; failing that, a record mentioning exactly one is reporting it; a record
 mentioning several and none of them ours is worth nothing. This is why `summariseTranscript`
 takes a branch, and why `TranscriptReader` caches on it as well as on mtime.
+
+A third guard closes the gap between those two, and it lives in `transcriptPullRequest` rather
+than in the parser: **the database is the negative authority on ownership.** A run table whose
+other rows have not opened a pull request yet carries exactly one URL, so it reads as a
+sighting and the exactly-one rule waves it through - which is how PR #1 landed on
+`feat/session-summaries-and-typecheck` while this very branch was being built. no-mistakes
+knows which branch it opened each pull request from, so a sighting it recognises on a
+*different* branch is rejected outright. A sighting it has never heard of is untouched, and
+must stay that way: that is the entire case this source exists for. `src/transcript.js`
+reports what it saw and deliberately does not decide whose it is.
 
 **The branch comes from `.git/HEAD`, not from a matched run.** Borrowing it from no-mistakes
 meant a session had a branch only while its pipeline run was recent, which is backwards - the
@@ -332,7 +351,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 297 tests, no network, no dependencies, ~1s
+npm test          # 304 tests, no network, no dependencies, ~1s
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
 
@@ -398,7 +417,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 ## Commands
 
 ```sh
-npm test                       # 297 tests, ~1s
+npm test                       # 304 tests, ~1s
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
 nmmon serve                    # start the monitor, print the URL

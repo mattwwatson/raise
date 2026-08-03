@@ -14,6 +14,7 @@ import {
   matchRunForAgentCwd,
   isIdleNudge,
 } from '../src/dashboard.js';
+import { pullRequestFromRecords } from '../src/transcript.js';
 
 const run = (over = {}) => ({
   runId: 'r1',
@@ -602,6 +603,64 @@ test('the transcript fills the gap when the database has nothing for this branch
   assert.equal(rows[0].pr.number, 40);
 });
 
+test('a pull request the database records on another branch is not ours', () => {
+  // The transcript only guesses which branch a URL belongs to. no-mistakes
+  // knows, because it opened it, so a sighting it recognises elsewhere is
+  // rejected rather than rendered.
+  const known = pr({
+    url: 'https://bitbucket.org/mattw_watson/repo/pull-requests/40',
+    number: 40,
+    branch: 'feat/other',
+  });
+  assert.equal(transcriptPullRequest(seen(), '/Users/x/work/repo', 'feat/x', [known]), null);
+  assert.equal(
+    transcriptPullRequest(seen(), '/Users/x/work/repo', 'feat/x', [pr({ number: 7 })])?.number,
+    40,
+    'a pull request the database has never heard of is what this source is for',
+  );
+});
+
+test('a trailing slash or a capital in the host does not smuggle a rejected one back', () => {
+  const known = pr({
+    url: 'https://Bitbucket.org/mattw_watson/repo/pull-requests/40/',
+    number: 40,
+    branch: 'feat/other',
+  });
+  assert.equal(transcriptPullRequest(seen(), '/Users/x/work/repo', 'feat/x', [known]), null);
+});
+
+test('the run table no-mistakes injects does not put its first PR on the card', () => {
+  // Verbatim shape of the `no-mistakes axi` home output, which is what got past
+  // the exactly-one-distinct-URL rule: two rows, one carrying a pull request
+  // and one an empty string, so the listing reads as a single sighting. The
+  // line naming our branch has no URL on it, so nothing ties the one URL to us.
+  const home = [
+    'runs[2]{id,branch,status,head,pr}:',
+    '  01KZ31SSP3F8GV2AH86S135JFW,feat/monitor-runs-and-sessions,completed,fab1881,"https://bitbucket.org/mattw_watson/repo/pull-requests/1"',
+    '  01KZ36ZR0MA0BDQ6DK12H6PSC8,feat/session-summaries-and-typecheck,running,d80b1c3,""',
+  ].join('\n');
+  const record = {
+    timestamp: '2026-08-03T01:00:00.000Z',
+    message: { content: [{ type: 'tool_result', content: home }] },
+  };
+  const sighting = pullRequestFromRecords([record], 'feat/session-summaries-and-typecheck');
+  assert.equal(sighting.number, 1, 'the transcript alone still reports it');
+
+  const known = pr({
+    url: 'https://bitbucket.org/mattw_watson/repo/pull-requests/1',
+    number: 1,
+    branch: 'feat/monitor-runs-and-sessions',
+  });
+  const rows = buildRows({
+    sessions: [session({ cwd: '/Users/x/work/repo' })],
+    runs: [],
+    branches: new Map([['s1', 'feat/session-summaries-and-typecheck']]),
+    pullRequests: [known],
+    summaries: new Map([['s1', { ...seen(), pullRequest: sighting }]]),
+  });
+  assert.equal(rows[0].pr, null, "and the database says it belongs to somebody else's branch");
+});
+
 // ------------------------------------------------- the pipeline's own agent
 
 /** Where no-mistakes actually puts a run's worktree, verbatim in shape. */
@@ -651,6 +710,85 @@ test('a blocked pipeline agent still reaches you, on the repo row', () => {
     runs: [agentRun()],
   });
   assert.equal(rows.length, 1);
+  assert.equal(rows[0].attention, 'blocked');
+  assert.equal(rows[0].message, 'Needs permission to push');
+});
+
+test("a granted agent prompt stops pinning the repo's row red", () => {
+  // The same hook silence as a human session: nothing fires between the
+  // permission prompt and the end of the turn, so only the agent's own
+  // transcript can say it carried on. Folding must not import the stale block
+  // this branch exists to get rid of.
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'human', cwd: '/Users/x/work/repo', state: 'working' }),
+      session({
+        sessionId: 'agent',
+        cwd: AGENT_CWD,
+        state: 'blocked',
+        stateSince: 1000,
+        message: 'Needs permission to push',
+      }),
+    ],
+    runs: [agentRun({ active: false, status: 'completed', updatedAt: 1000 })],
+    summaries: new Map([
+      ['agent', { title: null, activity: 'Running npm', mode: null, lavishFile: null, lastActivityAt: 9000, pullRequest: null }],
+    ]),
+  });
+  assert.notEqual(rows[0].attention, 'blocked');
+  assert.equal(rows[0].agent.state, 'working');
+  assert.equal(rows[0].message, null, 'and the reason for a block that is over goes with it');
+});
+
+test("a live pipeline answers the agent's idle nudge and nothing else", () => {
+  const build = (message) =>
+    buildRows({
+      sessions: [session({ sessionId: 'agent', cwd: AGENT_CWD, state: 'blocked', message })],
+      runs: [agentRun()],
+      pipelines: new Set(['agent']),
+    })[0];
+
+  assert.notEqual(build('Claude is waiting for your input').attention, 'blocked');
+  assert.equal(build('Claude needs your permission to use Bash').attention, 'blocked');
+});
+
+test('the newest agent of a run is the one shown, not whichever wrote last', () => {
+  // One step's agent is still registered while the next starts, and sessions
+  // arrive newest first. An older calm agent must not mask a new blocked one.
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'new-agent', cwd: AGENT_CWD, state: 'blocked', message: 'Needs permission to push' }),
+      session({ sessionId: 'old-agent', cwd: AGENT_CWD, state: 'working' }),
+    ],
+    runs: [agentRun()],
+    summaries: new Map([
+      ['new-agent', { title: null, activity: 'Running git push', mode: null, lavishFile: null, lastActivityAt: 9000, pullRequest: null }],
+      ['old-agent', { title: null, activity: 'Running npm test', mode: null, lavishFile: null, lastActivityAt: 8000, pullRequest: null }],
+    ]),
+  });
+  assert.equal(rows[0].agent.activity, 'Running git push');
+  assert.equal(rows[0].attention, 'blocked');
+});
+
+test("an agent's block is never captioned with the human's granted prompt", () => {
+  // The registry keeps a message for as long as it holds the block, so a
+  // session whose own prompt was granted still carries the text.
+  const rows = buildRows({
+    sessions: [
+      session({
+        sessionId: 'human',
+        cwd: '/Users/x/work/repo',
+        state: 'blocked',
+        stateSince: 1000,
+        message: 'Claude needs your permission to use Edit',
+      }),
+      session({ sessionId: 'agent', cwd: AGENT_CWD, state: 'blocked', message: 'Needs permission to push' }),
+    ],
+    runs: [agentRun()],
+    summaries: new Map([
+      ['human', { title: null, activity: null, mode: null, lavishFile: null, lastActivityAt: 9000, pullRequest: null }],
+    ]),
+  });
   assert.equal(rows[0].attention, 'blocked');
   assert.equal(rows[0].message, 'Needs permission to push');
 });

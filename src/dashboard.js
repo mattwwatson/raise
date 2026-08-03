@@ -252,16 +252,28 @@ function pullRequestForRun(run) {
  * watching this pull request - the reading is from whenever the session
  * happened to print it - so it survives only as the tooltip's "was open".
  *
+ * The database is the negative authority on ownership. no-mistakes recorded
+ * which branch it opened a pull request from; the transcript only inferred one
+ * from the text around a URL, and a listing that mentions exactly one - a run
+ * table whose other rows have no pull request yet - reads as a sighting. So a
+ * URL the database knows on another branch is rejected outright, while a URL it
+ * has never heard of stands, which is the entire case this source exists for.
+ *
  * @param {import('./transcript.js').TranscriptSummary|null} summary
  * @param {string|null} repoPath
  * @param {string|null} branch
+ * @param {PullRequest[]} [pullRequests] what no-mistakes has on record
  * @returns {PullRequest|null}
  */
-export function transcriptPullRequest(summary, repoPath, branch) {
+export function transcriptPullRequest(summary, repoPath, branch, pullRequests = []) {
   const seen = summary?.pullRequest;
   if (!seen?.url || !repoPath) return null;
   const repo = basename(repoPath);
   if (!seen.slug || !repo || seen.slug.toLowerCase() !== repo.toLowerCase()) return null;
+  for (const known of pullRequests) {
+    if (!known.branch || known.branch === branch) continue;
+    if (sameUrl(known.url, seen.url)) return null;
+  }
   return {
     url: seen.url,
     number: seen.number,
@@ -271,6 +283,21 @@ export function transcriptPullRequest(summary, repoPath, branch) {
     repoPath,
     live: false,
   };
+}
+
+/**
+ * Whether two pull request URLs are the same review.
+ *
+ * One side was printed by a CLI into a transcript and the other stored by
+ * no-mistakes, so they agree on everything that identifies the review and can
+ * still differ in a trailing slash or the case of the host.
+ *
+ * @param {string} a
+ * @param {string} b
+ */
+function sameUrl(a, b) {
+  const normalise = (url) => String(url).replace(/\/+$/, '').toLowerCase();
+  return normalise(a) === normalise(b);
 }
 
 /** @param {Run|null} run */
@@ -446,17 +473,27 @@ export function buildRows({
       human.push(session);
       continue;
     }
+    // Sessions arrive newest first, and one pipeline step's agent is still
+    // registered while the next one starts, so the first seen is the current
+    // one. Letting a later write win would show the outgoing agent's activity
+    // and, worse, could hide a newly blocked agent behind an older calm one.
+    if (agents.has(owning.runId)) continue;
     const summary = summaries.get(session.sessionId) || null;
     const activity = summary?.activity || null;
     const title = summary?.title || null;
+    // An agent's block is disproved exactly as a human session's is. It is the
+    // same hook silence - nothing fires between the permission prompt and the
+    // end of the turn - and here it pins the whole repo's row red rather than
+    // just its own.
+    const state = effectiveSessionState(session, summary, pipelines.has(session.sessionId));
     agents.set(owning.runId, {
       // Falls through to a bare word rather than nothing, so the marker cannot
       // blink out between one tool call and the next.
       what: activity || title || 'working',
       activity,
       summary: title,
-      state: /** @type {import('./registry.js').SessionState|null} */ (session.state ?? null),
-      message: session.state === 'blocked' ? session.message || null : null,
+      state,
+      message: state === 'blocked' ? session.message || null : null,
       lastActivityAt: summary?.lastActivityAt ?? null,
     });
   }
@@ -467,6 +504,7 @@ export function buildRows({
     const agent = (run && agents.get(run.runId)) || null;
     const pipelineRunning = pipelines.has(session.sessionId);
     const attention = attentionFor({ session, run, summary, agent, pipelineRunning });
+    const sessionState = effectiveSessionState(session, summary, pipelineRunning);
     const plan = planFocus(session);
     // The checkout's own branch is the truth about where this session is. The
     // run's is a second choice: it belongs to a pipeline that may have finished
@@ -485,12 +523,17 @@ export function buildRows({
       branch,
       attention,
       attentionLabel: attentionLabel(attention),
-      // Everything below follows `attention`, not the raw hook state, so a
-      // block the transcript has disproved cannot leave a stale "needs your
-      // permission" or a waiting timer running behind a Working row.
+      // Everything below follows the effective state, not the raw hook state,
+      // so a block the transcript has disproved cannot leave a stale "needs
+      // your permission" or a waiting timer running behind a Working row. The
+      // registry keeps a message for as long as it holds the block, so reading
+      // it off a row blocked by its *agent* would caption the agent's block
+      // with the human's granted prompt.
       message:
-        attention === 'blocked' ? session.message || agent?.message || null : null,
-      sessionState: effectiveSessionState(session, summary, pipelineRunning),
+        (sessionState === 'blocked' ? session.message : null) ||
+        (attention === 'blocked' ? agent?.message : null) ||
+        null,
+      sessionState,
       sessionStateSince: session.stateSince || null,
       waitingForMs:
         attention === 'blocked' || attention === 'review'
@@ -520,7 +563,7 @@ export function buildRows({
       pr:
         (run?.prUrl ? pullRequestForRun(run) : null) ||
         matchPullRequest(session.cwd, branch, pullRequests) ||
-        transcriptPullRequest(summary, run?.repoPath || session.cwd, branch),
+        transcriptPullRequest(summary, run?.repoPath || session.cwd, branch, pullRequests),
       lastActivityAt: summary?.lastActivityAt ?? null,
       agent,
     });
