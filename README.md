@@ -18,11 +18,12 @@ WORKING
 
 ## What it watches
 
-Two different things, because they answer two different questions.
+Three different things, because they answer three different questions.
 
 | Signal | Where it comes from | What it means |
 | --- | --- | --- |
 | **Waiting for you** | Claude Code hooks | Claude hit a permission prompt or is idle waiting for input. This is the one worth interrupting yourself for. |
+| **Waiting on your review** | the running `lavish-axi poll` | The agent is sitting in a `lavish-axi poll`, waiting for you to open a review page and respond. It looks busy from the outside; it is not. |
 | **Pipeline parked** | the no-mistakes database | A run stopped at a gate. Usually the agent answers it itself within seconds, so it is informational. |
 
 `no-mistakes` keeps a single daemon and a single SQLite database for the whole machine, so
@@ -43,9 +44,83 @@ no-mistakes-monitor     unique already, so left alone
 Rows for the *same* place keep one name - two sessions in one repo, say. No amount of path
 would separate them, so they are told apart by their branch and state instead.
 
+## Every row says what it is about
+
+"Working" across four repos tells you nothing about which one to look at. When no-mistakes is
+driving, the row shows the pipeline step. When it is just Claude - which is most of the time -
+the row shows Claude's own name for the session, and the tool it is running this second:
+
+```
+WAITING FOR YOU
+  hexbattle      Waiting for you - Claude needs your permission   Editing terrain.js   2m
+                 Design landing page with hex game visuals
+WORKING
+  money-webapp   Working                                          Running npm
+                 Build PR feedback automation
+```
+
+That comes from the transcript Claude Code already writes, so it is quoted rather than
+guessed at. Nothing leaves your machine: the server reads a local file and renders it on your
+own dashboard, in your own browser.
+
+**Expand a row to see the last few things it did.** The chevron on the right of any session
+row opens a panel with what you asked, what Claude said back, and every tool it ran with how
+each turned out - enough to decide whether to go and look without switching to the terminal.
+
+```
+alpha  feat/live-pr                                    PR #41 OPEN   51m  tab  Focus ↗  ⌃
+  14:39:21  YOU     can you wire up the settlement ledger and make it idempotent
+  14:39:31  CLAUDE  Looking at the existing job first - it retries on failure, so…
+  14:39:41  Read    Reading reconcile.js                                        ✓
+  14:40:11  Bash    Run the reconciliation tests                                ✗
+  14:42:41  Bash    Re-run the reconciliation tests                             …
+```
+
+It is fetched only when you open it, one session at a time, and it refreshes while it is
+open. Subagent side-conversations and the boilerplate Claude Code injects into the user role
+are filtered out, so what you see is what actually passed between you and Claude.
+
+**A row links its pull request.** If a branch has one open, the row shows `PR #41` and takes
+you to it. The state is only shown as a badge while a no-mistakes run is actually watching
+the PR - once the run ends, no-mistakes stops checking, so a stored "open" can be days out of
+date. After that the link stays and the state moves into the tooltip as *"was open, last
+checked 3d ago"*. The link outlives the run on purpose: the run is over in minutes, and the
+review is what you are waiting on for the rest of the day.
+
+Pull requests opened outside a no-mistakes run are picked up from the session's own
+transcript, so a plain `gh pr create` still gets a link.
+
+**The branch is always shown**, next to the repo name, read straight from `.git/HEAD` - so it
+is right for worktrees and for sessions that have never run the pipeline.
+
+**One row per repo, even while no-mistakes is running.** no-mistakes does its pipeline work in
+its own Claude sessions, in worktrees of their own. Those show up to the hooks like any other
+session, so they used to arrive as extra cards titled with a run id - an unrelated-looking
+repo you could not click. They are now folded onto the row of the repo they are working on:
+
+```
+PIPELINE PARKED
+  hexbattle  HXB-63-review                                    2m  tmux  Focus ↗
+  Pipeline parked at a gate - step review
+  NO-MISTAKES  Reviewing terrain.ts
+```
+
+If one of those agents ever stops for a permission prompt, the repo's row goes red and says so
+- the pipeline has stalled and only you can free it.
+
+**A session waiting on a Lavish review says so, and gives you the link back.** An agent
+sitting in a `lavish-axi poll` has stopped and is waiting for you to open a page you opened a
+while ago and have since buried under thirty tabs. The hooks see a busy session, so this used
+to be invisible. Now it gets its own group, ranked just under "waiting for you", with a
+`Review ↗` straight back to the page.
+
+The favicon carries the most urgent state on the page, so a pinned tab tells you whether
+anything wants you without being opened. It goes hollow when the page goes stale, for the same
+reason the header dot does.
+
 ## Requirements
 
-- Node 22.5 or newer (`node:sqlite` is used, and it is built in - **there are no npm dependencies**)
+- Node 22.5 or newer (`node:sqlite` is used, and it is built in - **there are no runtime dependencies**)
 - `no-mistakes` installed
 - Claude Code, for the "waiting for you" half
 - macOS for window focusing. Monitoring itself works anywhere.
@@ -97,11 +172,11 @@ trusting `~/.nmmon/server.json`, and answers with one of three things:
 | `Port N is held by another nmmon (pid P) that this installation has no record of` | a leftover started under a different `NMMON_HOME` - usually a test run or a stray agent shell | `kill P`, or `nmmon serve --port <n>` |
 | `Port N is in use, and whatever is listening is not nmmon` | something unrelated | `lsof -nP -iTCP:N -sTCP:LISTEN` |
 
-The middle case is the awkward one, and it is why `server.json` is not the source of truth
-here: a monitor started under another `NMMON_HOME` writes its record somewhere you will never
-look, so the file says "not running" while the port very much disagrees. `doctor` reports the
-same four states, and `open` refuses to print a URL when the recorded server has stopped
-answering - a record outlives a server that was killed rather than shut down.
+The middle case is the awkward one: a monitor started under another `NMMON_HOME` writes its
+record somewhere you will never look, so `~/.nmmon/server.json` says "not running" while the
+port very much disagrees. That is why `serve` asks the port rather than the file. `doctor`
+reports the same states, and `open` refuses to print a URL when the recorded server has
+stopped answering.
 
 ## The dashboard is honest about not knowing
 
@@ -114,12 +189,10 @@ a `ping` event every 20 seconds; if nothing arrives for 50 the dot goes red, the
 `no response for 2m`, and the whole page dims, because everything on it is now a snapshot of
 the past. The page then reopens the stream to find out which it is.
 
-This matters more than it sounds. `EventSource` only reports an error once the connection
-actually breaks, and a connection can stop carrying data long before that - a suspended
-laptop, a frozen server, a dropped NAT entry. The keepalive used to be an SSE *comment*, which
-the browser discards without telling the page, so in all of those the dashboard sat on a green
-"live" dot over state that had stopped updating. For a tool whose only job is telling you
-something needs you, quietly showing stale data is the worst thing it can do.
+This matters more than it sounds. A connection can stop carrying data long before it visibly
+breaks - a suspended laptop, a frozen server, a dropped NAT entry - and for a tool whose only
+job is telling you something needs you, quietly showing stale data is the worst thing it can
+do. So the page never infers that it is live; it waits to be told.
 
 ## How focusing works
 
@@ -130,29 +203,16 @@ to the front - which is why a machine mixing plain tabs and tmux needs no config
   iTerm2 tabs are matched by their session UUID, which survives the tab being dragged to
   another window. Terminal.app is matched by tty.
 - **tmux pane.** The pane is raised inside tmux first, then the host window is found by asking
-  tmux which client is currently attached and matching that client's tty.
+  tmux which client is currently attached.
+- **tmux control mode (`tmux -CC`)**, which is how iTerm2 hosts tmux, is a case of its own and
+  is matched on the pane title instead. It works the same way from your side.
 
-The host terminal for a tmux session is deliberately **not** stored. A tmux session can be
-detached and reattached in a different terminal entirely, so it is resolved fresh every time
-you click. If the session is detached there is no window to focus, and nmmon tells you the
-`tmux attach` command instead of failing silently.
-
-**tmux control mode (`tmux -CC`) is its own case.** It is how iTerm2 hosts tmux, and it breaks
-every assumption above: each tmux window becomes a native iTerm2 tab that the tmux client
-knows nothing about, iTerm2 reports `tty` as `missing value` for all of them, and the client's
-own tty belongs to the idle tab where you typed `tmux -CC`. Focusing that tty - the correct
-move for ordinary tmux - raises that one tab no matter which session you clicked.
-
-So a control mode pane is matched on its **title** instead, which is the one handle both sides
-share: iTerm2 names each tab after the tmux pane title. The leading status glyph is stripped
-first, because Claude Code animates a braille spinner through it and the two sides are read a
-moment apart. If two windows share a title nmmon says so rather than raising an arbitrary one,
-and nothing is selected inside tmux, since iTerm2 does not follow tmux's selection in control
-mode and doing it anyway would just move the user's active window for no visible reason.
+The host terminal for a tmux session is deliberately **not** stored, because a tmux session
+can be detached and reattached in a different terminal entirely. If the session is detached
+there is no window to focus, and nmmon tells you the `tmux attach` command instead of failing
+silently.
 
 Supported terminals today: **iTerm2** and **Terminal.app**, plus **tmux** inside either.
-Adding another is a single entry in `src/focus/terminals.js` - it needs an availability check
-and a focus function, and nothing else in the codebase changes.
 
 ## Security
 
@@ -169,6 +229,11 @@ Since this server ends up running `osascript` and `tmux`, it also requires
 The hook never sends prompts, transcripts or file contents. It sends the session id, the
 working directory, the event name, a notification message where Claude supplies one, and the
 window identity needed to focus the tab.
+
+Expanding a row shows conversation text, and that is the only place it appears. It is read
+from a local file by a local server and rendered in your own browser - it is not in the
+event stream, not in the hook payload, and not sent anywhere. The token guards that route
+like every other one, which is exactly why localhost alone is not treated as a boundary.
 
 ## Troubleshooting
 
@@ -190,45 +255,9 @@ updated.
 ## Development
 
 ```sh
-npm test
+npm test          # 304 tests, no network, no build step, ~1s
+npm run typecheck
 ```
 
-126 tests, no dependencies, no network, no build step. The focus adapters take an injected
-command runner, so the suite asserts on the AppleScript and tmux commands that *would* run
-without stealing your focus mid-test. The same goes for the process table and the pid
-liveness probe, which are injected rather than read from the machine running the tests.
-
-That injected runner is **asynchronous everywhere it is reachable from the server**. The
-server polls on a one second timer, pushes an event stream and answers hook posts that give
-up after two seconds; one synchronous child process stalls all three at once, and the signal
-you actually care about is the one that gets dropped. The server tests inject an `exec` that
-fails the test if it is ever called, and `/focus` is exercised against it so that guard means
-something.
-
-Coverage comes from Node's own `--experimental-test-coverage`, so it needs no dependency
-either:
-
-```sh
-npm run coverage
-```
-
-### Layout
-
-| Path | What |
-| --- | --- |
-| `bin/nmmon.js` | CLI |
-| `src/cli-args.js` | argument parsing (pure) |
-| `src/nm-state.js` | reads the no-mistakes database, with schema probe and fallback |
-| `src/registry.js` | live Claude sessions, fed by hooks |
-| `src/dashboard.js` | joins the two into ranked rows (pure) |
-| `src/focus/` | tmux resolution and per-terminal adapters |
-| `src/process-tree.js` | which terminal and which agent process a hook is running under |
-| `src/security.js` | token, Host and Origin checks (pure) |
-| `src/server.js` | HTTP, server-sent events, the poll loop |
-| `hooks/nmmon-hook.js` | the Claude Code hook |
-| `public/index.html` | the page, self-contained |
-
-The server polls the SQLite file once a second and pushes to the browser over server-sent
-events. The daemon does expose a live event stream over its unix socket, but the protocol is
-private and undocumented, so polling a local database was the more stable choice - it survives
-no-mistakes upgrades that a reverse-engineered wire format would not.
+Architecture, conventions, the file layout and the design decisions behind them are in
+[AGENTS.md](AGENTS.md).

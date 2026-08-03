@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>nmmon</title>
+    <link id="favicon" rel="icon" href="data:," />
     <style>
       :root {
         color-scheme: light dark;
@@ -15,6 +16,8 @@
         --faint: #9aa1ab;
         --blocked: #d92d20;
         --blocked-bg: #fef3f2;
+        --review: #7839ee;
+        --review-bg: #f9f5ff;
         --parked: #b54708;
         --parked-bg: #fffaeb;
         --failed: #7a271a;
@@ -33,6 +36,8 @@
           --faint: #6b7280;
           --blocked: #ff6b5e;
           --blocked-bg: #2a1614;
+          --review: #b692f6;
+          --review-bg: #1e1830;
           --parked: #fdb022;
           --parked-bg: #2a2114;
           --failed: #ff8a7a;
@@ -93,6 +98,15 @@
         color: var(--blocked);
         border-color: color-mix(in srgb, var(--blocked) 35%, transparent);
         background: var(--blocked-bg);
+      }
+      /*
+       * Its own colour rather than the red one. A pill that does not match the
+       * cards it is counting makes the colour coding mean nothing.
+       */
+      .pill.review {
+        color: var(--review);
+        border-color: color-mix(in srgb, var(--review) 35%, transparent);
+        background: var(--review-bg);
       }
       .spacer {
         flex: 1;
@@ -171,32 +185,58 @@
       .group-title:first-child {
         margin-top: 0;
       }
+      /*
+       * The card is a container, not a control. It used to be one <button>
+       * wrapping everything, which is the simplest thing that works right up
+       * until the row needs a second control - a nested button is invalid HTML
+       * and unreachable by keyboard. The click target is `.hit`; `Focus ↗` and
+       * the expander are their own buttons beside it.
+       */
       .card {
         display: flex;
         align-items: center;
         gap: 14px;
         width: 100%;
-        text-align: left;
         background: var(--panel);
         border: 1px solid var(--border);
         border-radius: 10px;
         padding: 12px 14px;
-        margin-bottom: 8px;
         box-shadow: var(--shadow);
-        transition:
-          border-color 0.12s ease,
-          transform 0.06s ease;
+        transition: border-color 0.12s ease;
       }
-      button.card {
+      .row-wrap {
+        margin-bottom: 8px;
+      }
+      /* An open card and its panel read as one object, not two stacked ones. */
+      .row-wrap.open .card {
+        border-bottom-left-radius: 0;
+        border-bottom-right-radius: 0;
+        border-bottom-color: transparent;
+      }
+      button.hit,
+      div.hit {
+        flex: 1;
+        min-width: 0;
+        font: inherit;
+        color: inherit;
+        text-align: left;
+        background: none;
+        border: 0;
+        padding: 0;
+        border-radius: 4px;
+      }
+      button.hit {
         cursor: pointer;
       }
-      button.card:hover {
+      .card.focusable:hover {
         border-color: color-mix(in srgb, var(--text) 25%, var(--border));
       }
-      button.card:active {
+      button.hit:active {
         transform: translateY(1px);
       }
-      button.card:focus-visible {
+      button.hit:focus-visible,
+      button.expand:focus-visible,
+      button.focus-hint:focus-visible {
         outline: 2px solid var(--working);
         outline-offset: 2px;
       }
@@ -205,7 +245,7 @@
        * attribute, on a card that looks exactly like the ones that do nothing.
        * Say it in the row itself, quietly at rest and plainly on hover.
        */
-      .focus-hint {
+      button.focus-hint {
         display: inline-flex;
         align-items: center;
         gap: 4px;
@@ -213,23 +253,147 @@
         font-weight: 600;
         white-space: nowrap;
         color: var(--faint);
+        background: var(--panel);
         border: 1px solid var(--border);
         border-radius: 5px;
         padding: 1px 6px;
+        cursor: pointer;
         transition:
           color 0.12s ease,
           border-color 0.12s ease,
           background-color 0.12s ease;
       }
-      button.card:hover .focus-hint,
-      button.card:focus-visible .focus-hint {
+      .card.focusable:hover .focus-hint,
+      button.focus-hint:hover,
+      button.hit:focus-visible ~ .meta .focus-hint {
         color: var(--working);
         border-color: color-mix(in srgb, var(--working) 45%, transparent);
         background: color-mix(in srgb, var(--working) 10%, transparent);
       }
+      /*
+       * The expander. Only rendered for a row with a session behind it, since a
+       * pipeline run with no Claude session has no transcript to show.
+       */
+      button.expand {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        padding: 0;
+        font-size: 10px;
+        line-height: 1;
+        color: var(--faint);
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        cursor: pointer;
+        transition: transform 0.14s ease, color 0.12s ease;
+      }
+      /*
+       * Drawn from two borders rather than set as a glyph. The ▾ character
+       * renders at wildly different weights across the system fonts - on this
+       * machine it came out as a one pixel dot - and a control whose whole
+       * meaning is its shape cannot be left to font fallback.
+       */
+      button.expand::before {
+        content: '';
+        width: 6px;
+        height: 6px;
+        border-right: 1.5px solid currentColor;
+        border-bottom: 1.5px solid currentColor;
+        transform: translateY(-2px) rotate(45deg);
+      }
+      button.expand:hover {
+        color: var(--text);
+      }
+      button.expand.open {
+        transform: rotate(180deg);
+        color: var(--text);
+      }
+      .panel {
+        border: 1px solid var(--border);
+        border-top: 0;
+        border-radius: 0 0 10px 10px;
+        background: var(--panel);
+        padding: 4px 14px 10px 31px;
+        box-shadow: var(--shadow);
+      }
+      .event {
+        display: flex;
+        gap: 10px;
+        align-items: baseline;
+        padding: 3px 0;
+        font-size: 12px;
+        min-width: 0;
+      }
+      .event + .event {
+        border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+      }
+      .event-time {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 10.5px;
+        color: var(--faint);
+        flex: none;
+        width: 52px;
+      }
+      .event-who {
+        font-size: 10.5px;
+        font-weight: 650;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        flex: none;
+        width: 58px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .event-who.you {
+        color: var(--working);
+      }
+      .event-who.claude {
+        color: var(--muted);
+      }
+      .event-who.tool {
+        color: var(--faint);
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        text-transform: none;
+        letter-spacing: 0;
+      }
+      .event-text {
+        flex: 1;
+        min-width: 0;
+        color: var(--text);
+        overflow-wrap: anywhere;
+      }
+      .event.tool .event-text {
+        color: var(--muted);
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 11.5px;
+      }
+      .event-outcome {
+        flex: none;
+        font-size: 11px;
+        color: var(--faint);
+      }
+      .event-outcome.error {
+        color: var(--blocked);
+      }
+      .event-outcome.running {
+        color: var(--working);
+      }
+      .panel-empty {
+        font-size: 12px;
+        color: var(--faint);
+        padding: 6px 0;
+      }
       .card.blocked {
         border-color: color-mix(in srgb, var(--blocked) 45%, transparent);
         background: var(--blocked-bg);
+      }
+      .card.review {
+        border-color: color-mix(in srgb, var(--review) 45%, transparent);
+        background: var(--review-bg);
       }
       .card.parked {
         border-color: color-mix(in srgb, var(--parked) 40%, transparent);
@@ -243,6 +407,9 @@
       }
       .bar.blocked {
         background: var(--blocked);
+      }
+      .bar.review {
+        background: var(--review);
       }
       .bar.parked {
         background: var(--parked);
@@ -289,11 +456,22 @@
         color: var(--muted);
         min-width: 0;
       }
+      /*
+       * Never wrapped. It is two or three words and the shortest thing on the
+       * line, so when the row gets tight it is the message and the activity
+       * that should give - both of which ellipsis. Letting the state fold puts
+       * "Waiting for / you" over two lines and buckles the whole card.
+       */
       .state {
         font-weight: 600;
+        white-space: nowrap;
+        flex: none;
       }
       .state.blocked {
         color: var(--blocked);
+      }
+      .state.review {
+        color: var(--review);
       }
       .state.parked {
         color: var(--parked);
@@ -313,6 +491,83 @@
         white-space: nowrap;
         min-width: 0;
       }
+      /*
+       * What the session is about, in Claude's own words. Third line, and
+       * quieter than the state above it: it is what you read once you have
+       * found the row you want, not what you scan for.
+       */
+      .summary {
+        margin-top: 2px;
+        font-size: 12px;
+        color: var(--faint);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+      }
+      /*
+       * The pipeline's own agent, folded into the row of the repo it is working
+       * on. Indented and marked, because "Reviewing terrain.ts" on the repo's
+       * card would otherwise read as something you did.
+       */
+      .agent {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        margin-top: 2px;
+        font-size: 12px;
+        color: var(--faint);
+        min-width: 0;
+      }
+      .agent-tag {
+        font-size: 10px;
+        font-weight: 650;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 0 4px;
+        flex: none;
+      }
+      .agent-what {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 11.5px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+      }
+      /* The tool running right now, set apart from the state it qualifies. */
+      .activity {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 11.5px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+      }
+      .mode {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--parked);
+        border: 1px solid color-mix(in srgb, var(--parked) 35%, transparent);
+        border-radius: 4px;
+        padding: 0 4px;
+        flex: none;
+      }
+      a.review-link {
+        color: var(--review);
+        text-decoration: none;
+        font-size: 12px;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      a.review-link:hover {
+        text-decoration: underline;
+      }
       .meta {
         display: flex;
         align-items: center;
@@ -330,13 +585,44 @@
         font-size: 11px;
       }
       a.pr {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 5px;
         color: var(--working);
         text-decoration: none;
         font-size: 12px;
+        font-weight: 600;
         white-space: nowrap;
       }
       a.pr:hover {
         text-decoration: underline;
+      }
+      /*
+       * The state word, and only when it is current. no-mistakes stops watching
+       * a pull request the moment its run ends, so afterwards the stored state
+       * is a snapshot of that moment - every cancelled run in a real database
+       * still reads "open" days later. A frozen reading rendered as live status
+       * is exactly the confident-but-wrong signal this page must never give, so
+       * the link survives the run and the state word does not.
+       */
+      .pr-state {
+        font-size: 10.5px;
+        font-weight: 650;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding: 1px 5px;
+        border-radius: 4px;
+        border: 1px solid currentColor;
+      }
+      .pr-state.merged {
+        color: var(--done);
+      }
+      .pr-state.open {
+        color: var(--working);
+      }
+      .pr-state.closed,
+      .pr-state.declined {
+        color: var(--muted);
       }
       .empty {
         text-align: center;
@@ -409,18 +695,69 @@
       const connTextEl = document.getElementById('connText');
       const toastEl = document.getElementById('toast');
       const notifyBtn = document.getElementById('notify');
+      const faviconEl = document.getElementById('favicon');
 
       let lastBlocked = new Set();
       let latest = null;
+      let connectionTone = 'wait';
 
       const GROUPS = [
         ['blocked', 'Waiting for you'],
+        ['review', 'Waiting on your review'],
         ['parked', 'Pipeline parked'],
         ['failed', 'Failed'],
         ['working', 'Working'],
         ['idle', 'Idle'],
         ['done', 'Recently finished'],
       ];
+
+      /*
+       * The favicon carries the one thing worth knowing from a background tab:
+       * whether anything wants you. This page is meant to be left pinned, where
+       * the tab strip shows an icon and little else, so a static logo would be
+       * the one place the state is not.
+       *
+       * Drawn rather than fetched - an inline SVG data URI keeps the page
+       * self-contained and needs no build step or binary in the repo.
+       */
+      const FAVICON_COLOURS = {
+        blocked: '#d92d20',
+        review: '#7839ee',
+        parked: '#b54708',
+        failed: '#7a271a',
+        working: '#175cd3',
+        idle: '#98a2b3',
+        done: '#067647',
+      };
+
+      /**
+       * A filled dot in the most urgent colour on the page, or a hollow ring
+       * when the page has gone stale - the same honesty the header dot owes
+       * you. A solid icon over state we can no longer vouch for would be a
+       * confident green light on a dead feed.
+       */
+      function faviconFor(attention, live) {
+        const colour = FAVICON_COLOURS[attention] || FAVICON_COLOURS.idle;
+        const shape = live
+          ? '<circle cx="16" cy="16" r="13" fill="' + colour + '"/>'
+          : '<circle cx="16" cy="16" r="11" fill="none" stroke="#98a2b3" stroke-width="4"/>';
+        const svg =
+          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' + shape + '</svg>';
+        return 'data:image/svg+xml,' + encodeURIComponent(svg);
+      }
+
+      let faviconHref = '';
+      function showFavicon() {
+        const rows = (latest && latest.rows) || [];
+        // ATTENTION_ORDER is most-urgent-first and the server sorts on it, so
+        // the top row is by definition the most urgent thing on the page.
+        const attention = rows.length ? rows[0].attention : 'idle';
+        const href = faviconFor(attention, connectionTone !== 'bad');
+        // Reassigning an unchanged href makes some browsers refetch and flicker.
+        if (href === faviconHref) return;
+        faviconHref = href;
+        faviconEl.href = href;
+      }
 
       function ago(ms) {
         if (ms == null) return '';
@@ -429,7 +766,12 @@
         const m = Math.floor(s / 60);
         if (m < 60) return m + 'm';
         const h = Math.floor(m / 60);
-        return h + 'h' + (m % 60 ? ' ' + (m % 60) + 'm' : '');
+        if (h < 24) return h + 'h' + (m % 60 ? ' ' + (m % 60) + 'm' : '');
+        // Past a day, hours stop being a unit anyone reads - "72h 43m" is three
+        // days, and nobody works that out at a glance. Pull requests are the
+        // only thing here that lives long enough to need this.
+        const d = Math.floor(h / 24);
+        return d + 'd' + (h % 24 ? ' ' + (h % 24) + 'h' : '');
       }
 
       function toast(text, bad) {
@@ -468,21 +810,141 @@
         }
       }
 
-      function card(row) {
-        const el = document.createElement(row.focusable ? 'button' : 'div');
-        el.className = 'card ' + row.attention;
-        if (row.focusable) {
-          el.addEventListener('click', () => focusRow(row));
-          el.title = 'Bring this window to the front';
-          el.setAttribute(
-            'aria-label',
-            row.title + ' - ' + row.attentionLabel + '. Bring this window to the front.',
+      /*
+       * The expando: the last few things a session did, pulled on demand.
+       *
+       * Two pieces of state, because render() rebuilds the whole list from
+       * scratch on every push and every five-second tick. Without `expanded` an
+       * open panel would slam shut under the user a second after they opened
+       * it; without `recent` it would flicker empty on each rebuild while the
+       * fetch caught up.
+       */
+      const expanded = new Set();
+      const recent = new Map();
+
+      /** How often an open panel goes back for more. Closed ones cost nothing. */
+      const EXPANDO_REFRESH_MS = 3000;
+
+      async function fetchRecent(sessionId) {
+        try {
+          const res = await fetch(
+            '/recent?session=' + encodeURIComponent(sessionId) + '&t=' + TOKEN,
           );
+          const data = await res.json();
+          // A session that has ended is not an error worth shouting about; the
+          // row is about to disappear from the list anyway.
+          recent.set(sessionId, data.ok ? data.events || [] : []);
+        } catch (err) {
+          recent.set(sessionId, []);
         }
+      }
+
+      async function loadRecent(sessionId) {
+        await fetchRecent(sessionId);
+        if (latest) render(latest);
+      }
+
+      /** Session ids behind the rows that are currently open. */
+      function expandedSessionIds() {
+        const rows = (latest && latest.rows) || [];
+        return rows.filter((r) => expanded.has(r.id) && r.sessionId).map((r) => r.sessionId);
+      }
+
+      function toggleExpanded(row) {
+        if (expanded.has(row.id)) {
+          expanded.delete(row.id);
+        } else {
+          expanded.add(row.id);
+          loadRecent(row.sessionId);
+        }
+        if (latest) render(latest);
+      }
+
+      function eventTime(at) {
+        if (!at) return '';
+        const d = new Date(at);
+        return (
+          String(d.getHours()).padStart(2, '0') +
+          ':' +
+          String(d.getMinutes()).padStart(2, '0') +
+          ':' +
+          String(d.getSeconds()).padStart(2, '0')
+        );
+      }
+
+      const OUTCOME_MARKS = { ok: '✓', error: '✗', running: '…' };
+
+      function panelFor(row) {
+        const panel = document.createElement('div');
+        panel.className = 'panel';
+        const events = recent.get(row.sessionId);
+        if (!events) {
+          const loading = document.createElement('div');
+          loading.className = 'panel-empty';
+          loading.textContent = 'Reading the transcript…';
+          panel.appendChild(loading);
+          return panel;
+        }
+        if (events.length === 0) {
+          const none = document.createElement('div');
+          none.className = 'panel-empty';
+          none.textContent = 'Nothing recorded yet.';
+          panel.appendChild(none);
+          return panel;
+        }
+        for (const event of events) {
+          const line = document.createElement('div');
+          line.className = 'event ' + event.kind;
+
+          const time = document.createElement('span');
+          time.className = 'event-time';
+          time.textContent = eventTime(event.at);
+          line.appendChild(time);
+
+          const who = document.createElement('span');
+          who.className = 'event-who ' + event.kind;
+          who.textContent = event.kind === 'tool' ? event.label || 'tool' : event.kind;
+          if (event.kind === 'tool' && event.label) who.title = event.label;
+          line.appendChild(who);
+
+          const text = document.createElement('span');
+          text.className = 'event-text';
+          text.textContent = event.text;
+          line.appendChild(text);
+
+          if (event.kind === 'tool' && event.outcome) {
+            const mark = document.createElement('span');
+            mark.className = 'event-outcome ' + event.outcome;
+            mark.textContent = OUTCOME_MARKS[event.outcome] || '';
+            line.appendChild(mark);
+          }
+          panel.appendChild(line);
+        }
+        return panel;
+      }
+
+      function card(row) {
+        const wrap = document.createElement('div');
+        wrap.className = 'row-wrap' + (expanded.has(row.id) ? ' open' : '');
+
+        const el = document.createElement('div');
+        el.className = 'card ' + row.attention + (row.focusable ? ' focusable' : '');
+        wrap.appendChild(el);
 
         const bar = document.createElement('div');
         bar.className = 'bar ' + row.attention;
         el.appendChild(bar);
+
+        const hit = document.createElement(row.focusable ? 'button' : 'div');
+        hit.className = 'hit';
+        if (row.focusable) {
+          hit.addEventListener('click', () => focusRow(row));
+          hit.title = 'Bring this window to the front';
+          hit.setAttribute(
+            'aria-label',
+            row.title + ' - ' + row.attentionLabel + '. Bring this window to the front.',
+          );
+        }
 
         const body = document.createElement('div');
         body.className = 'body';
@@ -527,32 +989,111 @@
           msg.textContent = detail.join(' ');
           line2.appendChild(msg);
         }
+        // What it is doing this second, which only means anything while it is
+        // still doing it. A finished row's last tool is history, not status.
+        if (row.activity && row.attention !== 'done' && row.attention !== 'idle') {
+          const activity = document.createElement('span');
+          activity.className = 'activity';
+          activity.textContent = row.activity;
+          line2.appendChild(activity);
+        }
+        if (row.mode) {
+          const mode = document.createElement('span');
+          mode.className = 'mode';
+          mode.textContent = row.mode;
+          line2.appendChild(mode);
+        }
         body.appendChild(line2);
-        el.appendChild(body);
+
+        // The step is already on line2 with its findings, so a summary line is
+        // only added when it says something new - which is exactly the case
+        // this was built for: a plain Claude session with no pipeline at all.
+        if (row.summary && !(row.run && row.run.step)) {
+          const summary = document.createElement('div');
+          summary.className = 'summary';
+          summary.textContent = row.summary;
+          body.appendChild(summary);
+        }
+        // What no-mistakes' own agent is doing, on the row of the repo it is
+        // working on rather than as a second card nobody can act on. Presence
+        // follows the agent existing, never `activity` - that goes null between
+        // every pair of tool calls, and rendering on it blinked the marker in
+        // and out several times a minute.
+        if (row.agent && row.attention !== 'done') {
+          const agent = document.createElement('div');
+          agent.className = 'agent';
+          const tag = document.createElement('span');
+          tag.className = 'agent-tag';
+          tag.textContent = 'no-mistakes';
+          agent.appendChild(tag);
+          const text = document.createElement('span');
+          text.className = 'agent-what';
+          text.textContent = row.agent.what;
+          agent.appendChild(text);
+          body.appendChild(agent);
+        }
+        hit.appendChild(body);
+        el.appendChild(hit);
 
         const meta = document.createElement('div');
         meta.className = 'meta';
-        if (row.run && webUrl(row.run.prUrl)) {
+        // The whole point of the review state: the page it is waiting on is one
+        // you opened a while ago and have since lost. Give it back.
+        if (row.reviewUrl) {
           const a = document.createElement('a');
-          a.className = 'pr';
-          a.href = webUrl(row.run.prUrl);
+          a.className = 'review-link';
+          a.href = row.reviewUrl;
           a.target = '_blank';
           a.rel = 'noreferrer';
-          a.textContent = 'PR';
+          a.textContent = 'Review ↗';
+          a.addEventListener('click', (e) => e.stopPropagation());
+          meta.appendChild(a);
+        }
+        if (row.pr && webUrl(row.pr.url)) {
+          const a = document.createElement('a');
+          a.className = 'pr';
+          a.href = webUrl(row.pr.url);
+          a.target = '_blank';
+          a.rel = 'noreferrer';
+          const label = document.createElement('span');
+          label.textContent = row.pr.number ? 'PR #' + row.pr.number : 'PR';
+          a.appendChild(label);
+          if (row.pr.live && row.pr.state && row.pr.state !== 'none') {
+            const state = document.createElement('span');
+            state.className = 'pr-state ' + row.pr.state;
+            state.textContent = row.pr.state;
+            a.appendChild(state);
+          } else if (row.pr.state && row.pr.state !== 'none') {
+            // Say it was true once, and when, rather than showing it as now.
+            a.title =
+              'Was ' +
+              row.pr.state +
+              (row.pr.observedAt ? ' when last checked ' + ago(Date.now() - row.pr.observedAt) + ' ago' : '');
+          }
           a.addEventListener('click', (e) => e.stopPropagation());
           meta.appendChild(a);
         }
         // Computed from absolute timestamps, not the server's elapsed values, so
         // the ticking re-render below stays accurate between pushes.
+        // How long it has been waiting on you, which is the number that decides
+        // which row to deal with first. A review waits exactly as visibly as a
+        // permission prompt does.
         const since =
-          row.attention === 'blocked'
+          row.attention === 'blocked' || row.attention === 'review'
             ? row.sessionStateSince
             : row.run && row.run.parked
               ? row.run.parkedSince
               : null;
-        if (since) {
+        // How long it has been waiting is the number that decides what to deal
+        // with first, so it keeps the slot on the rows that have one. Every
+        // other row shows when it last actually did something instead - which
+        // on a "Working" row is the difference between working and wedged.
+        const stamp = since || row.lastActivityAt;
+        if (stamp) {
           const t = document.createElement('span');
-          t.textContent = ago(Date.now() - since);
+          t.textContent = ago(Date.now() - stamp);
+          t.title =
+            (since ? 'Waiting since ' : 'Last activity ') + new Date(stamp).toLocaleString();
           meta.appendChild(t);
         }
         if (row.hostKind) {
@@ -562,18 +1103,45 @@
           meta.appendChild(host);
         }
         if (row.focusable) {
-          const hint = document.createElement('span');
+          const hint = document.createElement('button');
           hint.className = 'focus-hint';
           hint.textContent = 'Focus ↗';
+          hint.addEventListener('click', (e) => {
+            e.stopPropagation();
+            focusRow(row);
+          });
           meta.appendChild(hint);
         }
+        // A run with no session behind it has no transcript to expand.
+        if (row.sessionId) {
+          const toggle = document.createElement('button');
+          const open = expanded.has(row.id);
+          toggle.className = 'expand' + (open ? ' open' : '');
+          toggle.title = open ? 'Hide recent activity' : 'Show recent activity';
+          toggle.setAttribute('aria-expanded', String(open));
+          toggle.setAttribute('aria-label', 'Recent activity for ' + row.title);
+          toggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleExpanded(row);
+          });
+          meta.appendChild(toggle);
+        }
         el.appendChild(meta);
-        return el;
+
+        if (expanded.has(row.id)) wrap.appendChild(panelFor(row));
+        return wrap;
       }
 
       function render(payload) {
         latest = payload;
         const rows = payload.rows || [];
+
+        // Forget panels whose rows have gone, so a page left open for a week
+        // does not hold the history of every session it has ever shown.
+        const liveIds = new Set(rows.map((r) => r.id));
+        const liveSessions = new Set(rows.map((r) => r.sessionId).filter(Boolean));
+        for (const id of expanded) if (!liveIds.has(id)) expanded.delete(id);
+        for (const id of recent.keys()) if (!liveSessions.has(id)) recent.delete(id);
 
         noticeEl.innerHTML = '';
         if (payload.warning) {
@@ -586,16 +1154,21 @@
         const s = payload.summary || {};
         countsEl.innerHTML = '';
         const pills = [];
-        if (s.blocked) pills.push([s.blocked + ' waiting for you', true]);
-        if (s.parked) pills.push([s.parked + ' parked', false]);
-        if (s.failed) pills.push([s.failed + ' failed', false]);
-        for (const [text, alert] of pills) {
+        if (s.blocked) pills.push([s.blocked + ' waiting for you', 'alert']);
+        if (s.review) pills.push([s.review + ' awaiting review', 'review']);
+        if (s.parked) pills.push([s.parked + ' parked', '']);
+        if (s.failed) pills.push([s.failed + ' failed', '']);
+        for (const [text, tone] of pills) {
           const p = document.createElement('span');
-          p.className = 'pill' + (alert ? ' alert' : '');
+          p.className = tone ? 'pill ' + tone : 'pill';
           p.textContent = text;
           countsEl.appendChild(p);
         }
-        document.title = s.blocked ? '(' + s.blocked + ') nmmon' : 'nmmon';
+        // Both states mean a person is the blocker, so both belong in the count
+        // you see from another tab.
+        const wantsYou = (s.blocked || 0) + (s.review || 0);
+        document.title = wantsYou ? '(' + wantsYou + ') nmmon' : 'nmmon';
+        showFavicon();
 
         rowsEl.innerHTML = '';
         if (rows.length === 0) {
@@ -620,22 +1193,39 @@
         notifyOnNewlyBlocked(rows);
       }
 
+      /*
+       * Both states mean the agent has stopped and only a person can restart
+       * it, so both are worth a notification. They differ in where they send
+       * you: a blocked session wants its terminal, a review wants the browser
+       * page it is waiting on.
+       */
+      function wantsYou(row) {
+        return row.attention === 'blocked' || row.attention === 'review';
+      }
+
       function notifyOnNewlyBlocked(rows) {
-        const blocked = new Set(rows.filter((r) => r.attention === 'blocked').map((r) => r.id));
+        const waiting = new Set(rows.filter(wantsYou).map((r) => r.id));
         if (hasNotifications() && Notification.permission === 'granted') {
           for (const row of rows) {
-            if (row.attention !== 'blocked' || lastBlocked.has(row.id)) continue;
-            const n = new Notification(row.title + ' needs you', {
-              body: row.message || 'Claude is waiting for input',
-              tag: row.id,
-            });
+            if (!wantsYou(row) || lastBlocked.has(row.id)) continue;
+            const review = row.attention === 'review';
+            const n = new Notification(
+              row.title + (review ? ' wants your review' : ' needs you'),
+              {
+                body: review
+                  ? row.summary || 'A review page is waiting for you'
+                  : row.message || 'Claude is waiting for input',
+                tag: row.id,
+              },
+            );
             n.onclick = () => {
               window.focus();
-              focusRow(row);
+              if (review && row.reviewUrl) window.open(row.reviewUrl, '_blank', 'noreferrer');
+              else focusRow(row);
             };
           }
         }
-        lastBlocked = blocked;
+        lastBlocked = waiting;
       }
 
       function hasNotifications() {
@@ -668,12 +1258,14 @@
 
       function showConnection() {
         const { text, tone } = connectionLabel(watch.status(), watch.quietForMs());
+        connectionTone = tone;
         connTextEl.textContent = text;
         dotEl.className = 'dot' + (tone === 'bad' ? ' off' : tone === 'wait' ? ' wait' : '');
         connEl.className = 'conn' + (tone === 'bad' ? ' off' : '');
         // Dim what we can no longer vouch for. A blocked session that cleared
         // ten minutes ago must not keep sitting there looking current.
         document.body.classList.toggle('unconfirmed', tone === 'bad');
+        showFavicon();
       }
 
       function connect() {
@@ -711,6 +1303,15 @@
         if (watch.shouldReconnect()) connect();
         if (latest) render(latest);
       }, 5000);
+
+      // An open panel keeps itself current. Only open ones cost anything: with
+      // nothing expanded this fires, finds no sessions and does no work.
+      setInterval(async () => {
+        const ids = expandedSessionIds();
+        if (ids.length === 0) return;
+        await Promise.all(ids.map(fetchRecent));
+        if (latest) render(latest);
+      }, EXPANDO_REFRESH_MS);
 
       // Waking from sleep is the common case, and it should not take five
       // seconds of staring at a stale page to find out.

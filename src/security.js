@@ -59,7 +59,18 @@ export function extractToken(req, url) {
 }
 
 /**
- * @returns {{ok: true} | {ok: false, status: number, reason: string}}
+ * Discriminated on `ok`, so a caller that checks it can reach `status` and
+ * `reason` without a further guard.
+ *
+ * @typedef {{ok: true, status?: undefined, reason?: undefined}
+ *           | {ok: false, status: number, reason: string}} CheckResult
+ */
+
+/**
+ * @param {import('node:http').IncomingMessage} req
+ * @param {URL} url
+ * @param {{token: string, port: number}} options
+ * @returns {CheckResult}
  */
 export function checkRequest(req, url, { token, port }) {
   if (!hostAllowed(req.headers.host, port)) {

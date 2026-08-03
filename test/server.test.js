@@ -424,3 +424,73 @@ test('probeHealth gives up on a port that accepts and never answers', async () =
     await close();
   }
 });
+
+test('/recent serves one session"s history, and only to an authenticated caller', async () => {
+  // The expando is pulled rather than pushed: putting every session's history
+  // in every state frame would send it to every open page once a second, to
+  // render something that is collapsed nearly all of the time.
+  const { dir, cleanup } = scratch();
+  const previousHome = process.env.NMMON_HOME;
+  process.env.NMMON_HOME = dir;
+  try {
+    const port = await freePort();
+    const transcriptPath = join(dir, 'transcript.jsonl');
+    const records = [
+      { type: 'user', timestamp: '2026-08-03T01:00:00.000Z', message: { content: [{ type: 'text', text: 'do the thing' }] } },
+      { type: 'assistant', timestamp: '2026-08-03T01:00:05.000Z', message: { content: [{ type: 'tool_use', id: 'a', name: 'Bash', input: { description: 'run the tests' } }] } },
+    ];
+    const monitor = createMonitorServer({
+      port,
+      token: 'test-token',
+      dbPath: join(dir, 'no-such.sqlite'),
+      sessionsPath: join(dir, 'sessions'),
+      exec: () => assert.fail('no blocking commands from the server'),
+      execAsync: async () => '',
+      transcriptFiles: {
+        stat: () => ({ size: 1, mtimeMs: 1 }),
+        readTail: () => ({ text: records.map((r) => JSON.stringify(r)).join('\n'), partial: false }),
+      },
+    });
+    await monitor.start();
+
+    await fetch(`http://127.0.0.1:${port}/event`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-nmmon-token': 'test-token' },
+      body: JSON.stringify({
+        session_id: 'expand-me',
+        hook_event_name: 'SessionStart',
+        cwd: dir,
+        transcript_path: transcriptPath,
+      }),
+    });
+
+    const res = await fetch(`http://127.0.0.1:${port}/recent?session=expand-me&t=test-token`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.ok, true);
+    assert.deepEqual(
+      body.events.map((e) => [e.kind, e.text]),
+      [
+        ['you', 'do the thing'],
+        ['tool', 'run the tests'],
+      ],
+    );
+
+    // The token is load-bearing on this route above all: it serves the contents
+    // of a conversation, and localhost is not a boundary.
+    const bare = await fetch(`http://127.0.0.1:${port}/recent?session=expand-me`);
+    assert.equal(bare.status, 401);
+
+    const unknown = await fetch(`http://127.0.0.1:${port}/recent?session=nobody&t=test-token`);
+    assert.equal(unknown.status, 404);
+
+    const missing = await fetch(`http://127.0.0.1:${port}/recent?t=test-token`);
+    assert.equal(missing.status, 404);
+
+    await monitor.stop();
+  } finally {
+    if (previousHome === undefined) delete process.env.NMMON_HOME;
+    else process.env.NMMON_HOME = previousHome;
+    cleanup();
+  }
+});

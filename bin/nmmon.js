@@ -23,6 +23,10 @@ import {
 } from '../src/hooks.js';
 import { NoMistakesState } from '../src/nm-state.js';
 import { SessionRegistry } from '../src/registry.js';
+import { TranscriptReader } from '../src/transcript-reader.js';
+import { GitBranch } from '../src/git-branch.js';
+import { LavishState } from '../src/lavish.js';
+import { PollWatch } from '../src/poll-watch.js';
 import { focusSession } from '../src/focus/index.js';
 import { ALL_TERMINALS } from '../src/focus/terminals.js';
 import { exec, execAsync, tryExec, tryExecAsync } from '../src/exec.js';
@@ -235,7 +239,7 @@ async function cmdOpen() {
   if (process.platform === 'darwin') tryExec(exec, 'open', [url]);
 }
 
-function cmdStatus() {
+async function cmdStatus() {
   const registry = new SessionRegistry({ dir: sessionsDir() });
   const sessions = registry.list();
   const nmState = new NoMistakesState({ dbPath: statePath(), exec });
@@ -243,10 +247,47 @@ function cmdStatus() {
   const candidateDirs = [...new Set(sessions.map((s) => s.cwd).filter(Boolean))];
   // One shot and then gone, so this is the one caller that can afford to wait
   // for the degraded path rather than reporting an empty cache.
-  const { runs, warning } = nmState.read({ candidateDirs, blocking: true });
+  const { runs, pullRequests, warning } = nmState.read({ candidateDirs, blocking: true });
+
+  const transcripts = new TranscriptReader();
+  const gitBranches = new GitBranch();
+  const branches = new Map(sessions.map((s) => [s.sessionId, gitBranches.branchFor(s.cwd)]));
+  const agentPids = new Set(sessions.map((s) => s.host?.pid).filter(Boolean));
+  const polls = new PollWatch({ execAsync });
+  await polls.load(agentPids);
+  const summaries = new Map(
+    sessions.map((s) => {
+      const read = transcripts.read(s.transcriptPath, branches.get(s.sessionId));
+      const polledFile = polls.fileFor(s.host?.pid, agentPids);
+      return [s.sessionId, polledFile ? { ...read, lavishFile: polledFile } : read];
+    }),
+  );
+  const pipelines = new Set(
+    sessions.filter((s) => polls.pipelineFor(s.host?.pid, agentPids)).map((s) => s.sessionId),
+  );
+
+  // Asking Lavish costs a second or two, so it is only worth it when something
+  // is actually waiting on a review.
+  const reviewUrls = new Map();
+  const awaitingReview = [...summaries].filter(([, summary]) => summary.lavishFile);
+  if (awaitingReview.length > 0) {
+    const lavish = new LavishState({ execAsync });
+    await lavish.load();
+    for (const [sessionId, summary] of awaitingReview) {
+      reviewUrls.set(sessionId, lavish.urlFor(summary.lavishFile));
+    }
+  }
 
   // Reuse the dashboard projection so the CLI and the page can never disagree.
-  const rows = buildRows({ sessions, runs });
+  const rows = buildRows({
+    sessions,
+    runs,
+    summaries,
+    reviewUrls,
+    branches,
+    pullRequests,
+    pipelines,
+  });
 
   if (warning) console.log(`${yellow('Note')} ${warning}\n`);
   if (rows.length === 0) {
@@ -255,12 +296,34 @@ function cmdStatus() {
     return;
   }
   for (const row of rows) {
-    const colour = row.attention === 'blocked' ? red : row.attention === 'parked' ? yellow : dim;
+    const colour =
+      row.attention === 'blocked' || row.attention === 'review'
+        ? red
+        : row.attention === 'parked'
+          ? yellow
+          : dim;
     const step = row.run?.step ? ` ${dim(`step ${row.run.step.name}`)}` : '';
     console.log(
       `${colour(row.attentionLabel.padEnd(26))} ${bold(row.title)} ${dim(row.branch || '')}${step}`,
     );
     if (row.message) console.log(`  ${dim(row.message)}`);
+    // The summary is what the step line already says when there is a pipeline.
+    if (row.summary && !row.run?.step) console.log(`  ${dim(row.summary)}`);
+    if (row.activity && row.attention !== 'idle' && row.attention !== 'done') {
+      console.log(`  ${dim(row.activity)}`);
+    }
+    // The pipeline's own agent, on the repo's line rather than a row of its own.
+    if (row.agent && row.attention !== 'done') {
+      console.log(`  ${dim(`no-mistakes  ${row.agent.what}`)}`);
+    }
+    if (row.reviewUrl) console.log(`  ${row.reviewUrl}`);
+    // The state word only while the run is live: no-mistakes stops observing a
+    // pull request when its run ends, so anything later is a frozen reading.
+    if (row.pr) {
+      const label = row.pr.number ? `PR #${row.pr.number}` : 'PR';
+      const state = row.pr.live && row.pr.state ? ` ${row.pr.state}` : '';
+      console.log(`  ${dim(`${label}${state}`)} ${row.pr.url}`);
+    }
   }
   nmState.close();
 }
@@ -475,7 +538,7 @@ async function main() {
       await cmdOpen();
       break;
     case 'status':
-      cmdStatus();
+      await cmdStatus();
       break;
     case 'focus':
       await cmdFocus(positional);

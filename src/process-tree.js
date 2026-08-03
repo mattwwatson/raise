@@ -25,6 +25,32 @@
 import { basename } from 'node:path';
 
 /**
+ * One line of `ps`, parsed.
+ *
+ * @typedef {object} PsRecord
+ * @property {number} ppid
+ * @property {string|null} tty null when the process has no controlling terminal
+ * @property {string} command argv[0]
+ * @property {string} args the full argument vector
+ */
+
+/**
+ * A `PsRecord` with the pid it was read for. Ancestor walks carry this, because
+ * `ps` reports a process's parent but not itself.
+ *
+ * @typedef {PsRecord & {pid: number}} ProcessRecord
+ */
+
+/**
+ * Reads one process from the process table. Injected everywhere so tests never
+ * depend on the machine running them.
+ *
+ * @callback ReadProcess
+ * @param {number} pid
+ * @returns {PsRecord|null} null once the process has gone
+ */
+
+/**
  * Commands that only ever wrap something else. The hook's own parent is one of
  * these, and its pid is exactly the one we must never store.
  */
@@ -59,7 +85,7 @@ const CLAUDE_ARGS = /@anthropic-ai\/claude-code|claude-code\/cli\.js|(^|\/)claud
  * Parse one line of `ps -o ppid=,tty=,args=`.
  *
  * @param {string} line
- * @returns {{ppid: number, tty: string|null, command: string, args: string}|null}
+ * @returns {PsRecord|null}
  */
 export function parsePsLine(line) {
   const match = String(line || '')
@@ -87,11 +113,12 @@ function normaliseTty(field) {
  *
  * @param {number} startPid
  * @param {object} options
- * @param {Function} options.readProcess (pid) => parsed ps record, or null
+ * @param {ReadProcess} options.readProcess
  * @param {number} [options.maxDepth]
- * @returns {object[]}
+ * @returns {ProcessRecord[]}
  */
-export function readAncestors(startPid, { readProcess, maxDepth = 8 } = {}) {
+export function readAncestors(startPid, { readProcess, maxDepth = 8 }) {
+  /** @type {ProcessRecord[]} */
   const chain = [];
   let pid = Number(startPid);
   for (let depth = 0; depth < maxDepth && Number.isInteger(pid) && pid > 1; depth += 1) {
@@ -108,7 +135,12 @@ export function readAncestors(startPid, { readProcess, maxDepth = 8 } = {}) {
   return chain;
 }
 
-/** The terminal the session is actually attached to, or null under a daemon. */
+/**
+ * The terminal the session is actually attached to, or null under a daemon.
+ *
+ * @param {ProcessRecord[]} chain
+ * @returns {string|null}
+ */
 export function resolveTty(chain) {
   for (const proc of chain) {
     if (proc.tty) return proc.tty;
@@ -116,10 +148,12 @@ export function resolveTty(chain) {
   return null;
 }
 
+/** @param {string} command */
 export function isWrapper(command) {
   return WRAPPER_COMMANDS.has(basename(command || ''));
 }
 
+/** @param {PsRecord|ProcessRecord|null} proc */
 export function looksLikeClaude(proc) {
   if (!proc) return false;
   if (CLAUDE_COMMAND.test(basename(proc.command || ''))) return true;
@@ -135,7 +169,7 @@ export function looksLikeClaude(proc) {
  * the hook has already been excluded and everything above the agent is a shell
  * too.
  *
- * @param {object[]} chain nearest ancestor first
+ * @param {ProcessRecord[]} chain nearest ancestor first
  * @returns {number|null}
  */
 export function pickAgentPid(chain = []) {
@@ -150,7 +184,8 @@ export function pickAgentPid(chain = []) {
 /**
  * @param {number} startPid
  * @param {object} options
- * @param {Function} options.readProcess
+ * @param {ReadProcess} options.readProcess
+ * @param {number} [options.maxDepth]
  * @returns {{tty: string|null, agentPid: number|null}}
  */
 export function inspectHost(startPid, { readProcess, maxDepth = 8 }) {

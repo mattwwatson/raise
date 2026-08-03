@@ -14,6 +14,39 @@
 import { resolveTmuxTarget, selectPane } from './tmux.js';
 import { orderedTerminals, ALL_TERMINALS } from './terminals.js';
 
+/** @typedef {import('./terminals.js').Terminal} Terminal */
+/** @typedef {import('../registry.js').Session} Session */
+/** @typedef {import('../registry.js').Host} Host */
+
+/**
+ * What focusing this session will take, decided without doing any of it.
+ *
+ * `kind` discriminates: a tmux pane needs resolving through tmux first, a tab
+ * can be handed straight to the terminal adapters, and an unfocusable session
+ * carries only the reason to show the user.
+ *
+ * @typedef {object} FocusPlan
+ * @property {'tmux'|'tab'|'unfocusable'} kind
+ * @property {string} [pane] tmux only
+ * @property {string|null} [tmuxEnv] tmux only, the TMUX socket
+ * @property {string|null} [sessionUuid] tab only
+ * @property {string|null} [tty] tab only
+ * @property {string|null} [termProgram] which adapter to try first
+ * @property {string} [reason] unfocusable only, phrased for the user
+ */
+
+/**
+ * The outcome of trying to raise a window.
+ *
+ * @typedef {object} FocusResult
+ * @property {boolean} ok
+ * @property {string} [adapter] which terminal claimed it
+ * @property {string} [reason] why not, phrased for the user
+ * @property {string} [hint] a command the user can run instead
+ * @property {string} [tmuxSession]
+ * @property {boolean} [ambiguous] more than one window matched, so none was raised
+ */
+
 /**
  * The stable part of a pane title, for matching against a terminal's own name
  * for that pane.
@@ -58,6 +91,9 @@ export function itermUuid(sessionIdEnv) {
  * Terminal.app also sets TERM_SESSION_ID, so the value here is not necessarily
  * an iTerm2 UUID. That is harmless: the iTerm2 adapter simply finds no match
  * and the search falls through to the next terminal.
+ *
+ * @param {Host} [host]
+ * @returns {string|null}
  */
 export function terminalSessionUuid(host = {}) {
   return itermUuid(host.iterm_session_id) || itermUuid(host.term_session_id);
@@ -68,10 +104,8 @@ export function terminalSessionUuid(host = {}) {
  *
  * Separated from execution so the decision is testable on its own.
  *
- * @param {object} record a session record from the registry
- * @returns {{kind: 'tmux'|'tab'|'unfocusable', pane?: string, tmuxEnv?: string,
- *            sessionUuid?: string|null, tty?: string|null, termProgram?: string|null,
- *            reason?: string}}
+ * @param {Session|null} record a session record from the registry
+ * @returns {FocusPlan}
  */
 export function planFocus(record) {
   const host = record?.host || {};
@@ -104,7 +138,10 @@ export function planFocus(record) {
 /**
  * Try every terminal adapter in turn until one reports it found the tab.
  *
- * @returns {Promise<{ok: boolean, adapter?: string, reason?: string}>}
+ * @param {Function} exec
+ * @param {{sessionUuid?: string|null, tty?: string|null, termProgram?: string|null,
+ *          terminals: Terminal[]}} target
+ * @returns {Promise<FocusResult>}
  */
 async function focusTerminal(exec, { sessionUuid, tty, termProgram, terminals }) {
   const candidates = orderedTerminals(termProgram, terminals);
@@ -143,10 +180,10 @@ async function focusTerminal(exec, { sessionUuid, tty, termProgram, terminals })
 /**
  * Focus the window hosting a session.
  *
- * @param {object} record session record
- * @param {{exec: Function, terminals?: object[]}} deps `exec` must be
+ * @param {Session|null} record session record
+ * @param {{exec: Function, terminals?: Terminal[]}} deps `exec` must be
  *   asynchronous; this is reachable from the server's /focus handler.
- * @returns {Promise<{ok: boolean, adapter?: string, reason?: string, hint?: string, tmuxSession?: string}>}
+ * @returns {Promise<FocusResult>}
  */
 export async function focusSession(record, { exec, terminals = ALL_TERMINALS }) {
   const plan = planFocus(record);
@@ -217,7 +254,9 @@ export async function focusSession(record, { exec, terminals = ALL_TERMINALS }) 
 /**
  * Ask each terminal that supports it to find a pane by title.
  *
- * @returns {Promise<{ok: boolean, adapter?: string, ambiguous?: boolean}>}
+ * @param {Function} exec
+ * @param {{title: string|null, termProgram?: string|null, terminals: Terminal[]}} target
+ * @returns {Promise<FocusResult>}
  */
 async function focusByPaneTitle(exec, { title, termProgram, terminals }) {
   if (!title) return { ok: false };
