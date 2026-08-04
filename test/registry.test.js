@@ -125,6 +125,36 @@ test('window identity captured at session start survives later events', () => {
   }
 });
 
+test('a pi event carrying no host at all keeps the identity from session start', () => {
+  // pi's extension walks the process table once, on session_start, and omits
+  // the field entirely afterwards - so the merge is what keeps the row
+  // focusable for the rest of the session.
+  const { dir, cleanup } = scratch();
+  try {
+    const registry = new SessionRegistry({ dir });
+    registry.record({
+      session_id: 'p1',
+      hook_event_name: 'session_start',
+      agent: 'pi',
+      cwd: '/repo',
+      host: { tty: '/dev/ttys004', pid: process.pid },
+    });
+    registry.record({
+      session_id: 'p1',
+      hook_event_name: 'before_agent_start',
+      agent: 'pi',
+      cwd: '/repo',
+    });
+
+    const record = registry.get('p1');
+    assert.equal(record.host.tty, '/dev/ttys004');
+    assert.equal(record.host.pid, process.pid);
+    assert.equal(record.state, 'working');
+  } finally {
+    cleanup();
+  }
+});
+
 test('a notification message is kept while blocked and cleared when it moves on', () => {
   const { dir, cleanup } = scratch();
   try {

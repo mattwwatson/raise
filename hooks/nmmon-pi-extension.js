@@ -18,6 +18,13 @@
  *     that alone - `resolveTty` returns the first controlling terminal at or
  *     above us, which under any terminal is the pi process itself.
  *
+ * That walk is a blocking `ps` per ancestor, which is exactly what must not
+ * happen in the user's editing loop, so the window identity is collected on
+ * `session_start` and nowhere else. It cannot change for the life of a pi
+ * process, and the registry merges `host` over the record it already holds - so
+ * a later event that omits the field entirely keeps the identity captured at
+ * the start rather than erasing it.
+ *
  * The payload is deliberately the same shape Claude Code's hook posts. One wire
  * format means one parser on the server, one privacy boundary, and one set of
  * tests - and the boundary is unchanged: session id, cwd, transcript path,
@@ -33,13 +40,16 @@ import { execFileSync } from 'node:child_process';
 
 import { parsePsLine, inspectHost } from '../src/process-tree.js';
 
+/** @typedef {import('../src/process-tree.js').ReadProcess} ReadProcess */
+
 const TIMEOUT_MS = 2000;
 
 /**
  * The events worth reporting, and nothing more.
  *
- * `turn_start` is included because a turn can run for minutes between tool
- * calls; without it a long turn's only evidence is the transcript. The tool
+ * `before_agent_start` and `agent_settled` bracket each agent run, so there is
+ * no gap between them for the state to be wrong in and `turn_start` would add
+ * nothing - `registry.js` maps it defensively, but we never send it. The tool
  * events are deliberately left out - they fire per call, and everything they
  * would tell us is already on disk in the session file.
  */
@@ -82,10 +92,15 @@ function readProcess(pid) {
   return parsePsLine(line);
 }
 
-function collectHost() {
+/**
+ * The window identity, walked once per pi process.
+ *
+ * @param {ReadProcess} read
+ */
+function collectHost(read) {
   let tty = null;
   try {
-    ({ tty } = inspectHost(process.pid, { readProcess }));
+    ({ tty } = inspectHost(process.pid, { readProcess: read }));
   } catch {
     // A session we cannot place is rendered as "no window" rather than as a
     // confident claim about a terminal that is not there.
@@ -148,8 +163,13 @@ function sessionFile(ctx) {
   }
 }
 
-/** @param {any} pi */
-export default function (pi) {
+/**
+ * @param {any} pi
+ * @param {{readProcess?: ReadProcess}} [deps]
+ *   the process table, injected so the suite never reads the real one
+ */
+export default function (pi, deps) {
+  const read = deps?.readProcess || readProcess;
   for (const event of EVENTS) {
     pi.on(event, (payload, ctx) => {
       try {
@@ -164,7 +184,7 @@ export default function (pi) {
           agent: 'pi',
           cwd: ctx?.cwd || process.cwd(),
           transcript_path: sessionFile(ctx),
-          host: collectHost(),
+          ...(event === 'session_start' ? { host: collectHost(read) } : {}),
         });
       } catch {
         // Nothing this module does is worth interrupting a turn for.
