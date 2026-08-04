@@ -54,6 +54,9 @@ import { pullRequestNumber } from './nm-state.js';
  * @property {number|null} waitingForMs how long blocked, for the "2m" column
  * @property {boolean} focusable whether clicking this row can do anything
  * @property {'tmux'|'tab'|'app'|'unknown'|null} hostKind where the session lives
+ * @property {import('./registry.js').AgentKind|null} agentKind which agent is
+ *   running it; null for a run with no session behind it. Named apart from
+ *   `agent` below, which is the pipeline's own session folded into this row
  * @property {Run|null} run
  * @property {number|null} updatedAt
  * @property {string|null} summary what the session is working on, in Claude's
@@ -541,6 +544,9 @@ export function buildRows({
           : null,
       focusable: plan.kind !== 'unfocusable',
       hostKind: hostKindFor(plan),
+      // A record written before pi was supported carries no agent, and only
+      // Claude Code sessions existed then.
+      agentKind: session.agent || 'claude',
       run: run || null,
       updatedAt: session.updatedAt || null,
       // The pipeline step is the better summary when there is one: it says what
@@ -601,6 +607,7 @@ export function buildRows({
       waitingForMs: null,
       focusable: false,
       hostKind: null,
+      agentKind: null,
       run,
       updatedAt: run.updatedAt || null,
       summary: run.step?.name ? `step ${run.step.name}` : null,

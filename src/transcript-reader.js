@@ -23,6 +23,19 @@ import {
   recentEvents,
   EMPTY_SUMMARY,
 } from './transcript.js';
+import { parsePiTranscriptTail } from './pi-transcript.js';
+
+/**
+ * Which parser reads which agent's file.
+ *
+ * The only place the two formats differ, by design: pi's entries are normalised
+ * into the same records, so everything past this line is shared. See
+ * `pi-transcript.js` for why that is a normaliser and not a second summariser.
+ */
+const PARSERS = {
+  claude: parseTranscriptTail,
+  pi: parsePiTranscriptTail,
+};
 
 /**
  * @typedef {object} TranscriptFile
@@ -63,10 +76,17 @@ export const defaultFileAccess = {
  * checkout that switches branch has to be re-read even though the file has not
  * moved.
  *
+ * `agent` is part of it for the same reason: it chooses the parser, so an entry
+ * derived by one is not an answer for the other. In practice a session file
+ * belongs to one agent for its whole life and this never fires - but a cache
+ * that cannot say what it was derived from is one refactor away from returning
+ * a confidently parsed answer to a question nobody asked it.
+ *
  * @typedef {object} CacheEntry
  * @property {number} size
  * @property {number} mtimeMs
  * @property {string|null} branch
+ * @property {import('./registry.js').AgentKind} agent
  * @property {import('./transcript.js').TranscriptSummary} summary
  * @property {import('./transcript.js').TranscriptEvent[]} [events]
  */
@@ -91,10 +111,11 @@ export class TranscriptReader {
    * @param {string|null} path
    * @param {string|null} [branch] the session's branch, so a pull request in
    *   the tail can be attributed to it rather than guessed at
+   * @param {import('./registry.js').AgentKind} [agent] whose format this is
    * @returns {import('./transcript.js').TranscriptSummary}
    */
-  read(path, branch = null) {
-    return this.#entry(path, { branch })?.summary ?? EMPTY_SUMMARY;
+  read(path, branch = null, agent = 'claude') {
+    return this.#entry(path, { branch, agent })?.summary ?? EMPTY_SUMMARY;
   }
 
   /**
@@ -107,20 +128,22 @@ export class TranscriptReader {
    *
    * @param {string|null} path
    * @param {number} [limit]
+   * @param {import('./registry.js').AgentKind} [agent] whose format this is
    * @returns {import('./transcript.js').TranscriptEvent[]}
    */
-  events(path, limit) {
-    return this.#entry(path, { withEvents: true, limit })?.events ?? [];
+  events(path, limit, agent = 'claude') {
+    return this.#entry(path, { withEvents: true, limit, agent })?.events ?? [];
   }
 
   /**
    * The cache entry for a path, refreshed if the file or the branch has moved.
    *
    * @param {string|null} path
-   * @param {{withEvents?: boolean, limit?: number, branch?: string|null}} [want]
+   * @param {{withEvents?: boolean, limit?: number, branch?: string|null,
+   *          agent?: import('./registry.js').AgentKind}} [want]
    * @returns {CacheEntry|null}
    */
-  #entry(path, { withEvents = false, limit, branch = null } = {}) {
+  #entry(path, { withEvents = false, limit, branch = null, agent = 'claude' } = {}) {
     if (!path) return null;
     let info;
     try {
@@ -137,14 +160,25 @@ export class TranscriptReader {
     // read against one nor discards it when re-parsing.
     const want = branch ?? cached?.branch ?? null;
     const fresh =
-      cached && cached.size === info.size && cached.mtimeMs === info.mtimeMs && cached.branch === want;
+      cached &&
+      cached.size === info.size &&
+      cached.mtimeMs === info.mtimeMs &&
+      cached.branch === want &&
+      cached.agent === agent;
     if (fresh && (!withEvents || cached.events)) return cached;
 
     /** @type {CacheEntry} */
-    let entry = { size: info.size, mtimeMs: info.mtimeMs, branch: want, summary: EMPTY_SUMMARY };
+    let entry = {
+      size: info.size,
+      mtimeMs: info.mtimeMs,
+      branch: want,
+      agent,
+      summary: EMPTY_SUMMARY,
+    };
     try {
       const { text, partial } = this.#files.readTail(path, TAIL_BYTES);
-      const records = parseTranscriptTail(text, partial);
+      const parse = PARSERS[agent] || parseTranscriptTail;
+      const records = parse(text, partial);
       entry.summary = summariseTranscript(records, want);
       if (withEvents) entry.events = recentEvents(records, limit);
     } catch {

@@ -163,12 +163,12 @@ const said = (role, text, over = {}) => ({
 });
 
 test('recentEvents tells apart who said what', () => {
-  const events = recentEvents([said('you', 'make the ramp drain'), said('claude', 'Done.')]);
+  const events = recentEvents([said('you', 'make the ramp drain'), said('agent', 'Done.')]);
   assert.deepEqual(
     events.map((e) => [e.kind, e.text]),
     [
       ['you', 'make the ramp drain'],
-      ['claude', 'Done.'],
+      ['agent', 'Done.'],
     ],
   );
 });
@@ -223,7 +223,7 @@ test("a subagent's conversation does not get attributed to the main one", () => 
   // prompts under the human's name.
   const events = recentEvents([
     said('you', 'a prompt to a subagent', { isSidechain: true }),
-    said('claude', 'a subagent reply', { isSidechain: true }),
+    said('agent', 'a subagent reply', { isSidechain: true }),
     said('you', 'the actual prompt'),
   ]);
   assert.deepEqual(
@@ -239,7 +239,7 @@ test('recentEvents leaves out thinking', () => {
       timestamp: '2026-08-03T01:00:00.000Z',
       message: { content: [{ type: 'thinking', thinking: 'a long internal monologue' }] },
     },
-    said('claude', 'the reply'),
+    said('agent', 'the reply'),
   ]);
   assert.deepEqual(
     events.map((e) => e.text),
@@ -261,7 +261,7 @@ test('recentEvents collapses whitespace so one entry stays one line', () => {
 
 test('recentEvents returns the newest entries, oldest first', () => {
   const events = recentEvents(
-    [1, 2, 3, 4, 5].map((n) => said('claude', 'reply ' + n)),
+    [1, 2, 3, 4, 5].map((n) => said('agent', 'reply ' + n)),
     2,
   );
   assert.deepEqual(
@@ -272,7 +272,7 @@ test('recentEvents returns the newest entries, oldest first', () => {
 
 test('recentEvents carries the timestamp, and copes without one', () => {
   const events = recentEvents([
-    said('claude', 'stamped'),
+    said('agent', 'stamped'),
     { type: 'assistant', message: { content: [{ type: 'text', text: 'unstamped' }] } },
   ]);
   assert.equal(events[0].at, Date.parse('2026-08-03T01:00:00.000Z'));

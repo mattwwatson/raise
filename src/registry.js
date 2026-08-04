@@ -1,12 +1,23 @@
 /**
- * The registry of live Claude Code sessions.
+ * The registry of live agent sessions.
  *
  * Pipeline state tells you what no-mistakes is doing. It cannot tell you that
- * Claude itself is sitting on a permission prompt waiting for a human. That
- * only exists inside Claude Code, and reaches us through hooks.
+ * the agent itself is sitting on a permission prompt waiting for a human. That
+ * only exists inside the agent, and reaches us through hooks - Claude Code's,
+ * or the extension pi loads.
  *
  * Records are files rather than memory so the dashboard survives a restart of
  * the server without losing track of which window is which.
+ *
+ * **The two agents do not report the same states, and the difference is real
+ * rather than a gap to paper over.** Claude Code asks permission before running
+ * a tool, so it can say "a human is needed right now". pi ships no sandbox and
+ * no approval gate - its tools simply run - so nothing inside it corresponds to
+ * that, and `PI_EVENT_STATES` therefore contains no `blocked` at all. Inferring
+ * one from "the turn ended a while ago" would put pi rows in competition with
+ * real permission prompts on the strength of a guess, which is precisely how a
+ * page stops being believed. A pi session still reaches the top of the list the
+ * honest way, through its pipeline: parked, failed, or waiting on a review.
  */
 
 import {
@@ -41,14 +52,24 @@ import { join } from 'node:path';
  */
 
 /**
- * A Claude Code hook payload, with the `host` the hook adds before posting.
+ * Which agent is running a session.
+ *
+ * @typedef {'claude'|'pi'} AgentKind
+ */
+
+/**
+ * A hook payload, with the `host` the reporter adds before posting.
  *
  * Snake-cased because the field names are Claude Code's, not ours, and it
- * arrives over a socket - so nothing here can be assumed present or well formed.
+ * arrives over a socket - so nothing here can be assumed present or well
+ * formed. pi's extension speaks the same shape deliberately: one wire format
+ * means one parser, one privacy boundary and one set of tests.
  *
  * @typedef {object} HookPayload
  * @property {string} session_id
  * @property {string} hook_event_name
+ * @property {AgentKind} [agent] which agent sent this; Claude Code cannot say,
+ *   so an absent value means Claude Code
  * @property {string} [cwd]
  * @property {string} [transcript_path]
  * @property {string} [message] why Claude wants you, on a Notification
@@ -68,6 +89,8 @@ import { join } from 'node:path';
  *
  * @typedef {object} Session
  * @property {string} sessionId
+ * @property {AgentKind} agent which agent is running it, which decides how its
+ *   transcript is parsed and what the page says it is
  * @property {string|null} cwd
  * @property {string|null} transcriptPath
  * @property {string} event the hook event that last touched this record
@@ -98,16 +121,46 @@ const EVENT_STATES = {
 };
 
 /**
+ * How a pi extension event maps to a session state.
+ *
+ * `agent_settled` rather than `agent_end` is the idle signal: it fires once
+ * there is no retry, compaction or follow-up left, so a session that is about
+ * to carry on by itself is never announced as finished. Measured against a real
+ * failed turn, the whole sequence still arrives - `before_agent_start`,
+ * `agent_start`, `turn_start`, `turn_end`, `agent_end`, `agent_settled` - so an
+ * errored turn cannot strand a session reading "Working" forever.
+ *
+ * There is no `blocked` here, and that is the design rather than an omission.
+ * See the module comment.
+ */
+const PI_EVENT_STATES = {
+  session_start: 'idle',
+  before_agent_start: 'working',
+  agent_start: 'working',
+  turn_start: 'working',
+  agent_settled: 'idle',
+  session_shutdown: 'ended',
+};
+
+/**
  * @param {string} event
+ * @param {AgentKind} [agent]
  * @returns {SessionState}
  */
-export function stateForEvent(event) {
-  return EVENT_STATES[event] || 'working';
+export function stateForEvent(event, agent = 'claude') {
+  const states = agent === 'pi' ? PI_EVENT_STATES : EVENT_STATES;
+  return states[event] || 'working';
 }
 
-/** Events that mean the session is gone and its record should be removed. */
-export function isTerminalEvent(event) {
-  return stateForEvent(event) === 'ended';
+/**
+ * Events that mean the session is gone and its record should be removed.
+ *
+ * @param {string} event
+ * @param {AgentKind} [agent]
+ * @returns {boolean}
+ */
+export function isTerminalEvent(event, agent = 'claude') {
+  return stateForEvent(event, agent) === 'ended';
 }
 
 /**
@@ -146,26 +199,31 @@ export class SessionRegistry {
       throw new Error('invalid session id');
     }
     const event = payload.hook_event_name;
-    if (isTerminalEvent(event)) {
+    // Claude Code's hook has no field to say which agent it is, so silence
+    // means Claude Code. Only pi announces itself, and only pi needs to.
+    const agent = /** @type {AgentKind} */ (payload.agent === 'pi' ? 'pi' : 'claude');
+    if (isTerminalEvent(event, agent)) {
       this.remove(sessionId);
       return null;
     }
 
     const previous = this.get(sessionId) || /** @type {Partial<Session>} */ ({});
+    const state = stateForEvent(event, agent);
     const record = {
       sessionId,
+      agent,
       cwd: payload.cwd || previous.cwd || null,
       transcriptPath: payload.transcript_path || previous.transcriptPath || null,
       event,
-      state: stateForEvent(event),
+      state,
       // A Notification carries the reason Claude is asking for you. Keep it
       // while blocked and clear it the moment the session moves on, so the
       // dashboard never shows a stale "needs permission".
-      message: stateForEvent(event) === 'blocked' ? payload.message || null : null,
+      message: state === 'blocked' ? payload.message || null : null,
       host: { ...(previous.host || {}), ...(payload.host || {}) },
       startedAt: previous.startedAt || now,
       updatedAt: now,
-      stateSince: previous.state === stateForEvent(event) ? previous.stateSince || now : now,
+      stateSince: previous.state === state ? previous.stateSince || now : now,
     };
     this.#write(sessionId, record);
     return record;

@@ -123,7 +123,7 @@ export function createMonitorServer({
       // reachable from here may block the poll loop.
       const branch = branches.branchFor(session.cwd);
       sessionBranches.set(session.sessionId, branch);
-      const read = transcripts.read(session.transcriptPath, branch);
+      const read = transcripts.read(session.transcriptPath, branch, session.agent);
       // The process table is the authority on whether a poll is still running.
       // A transcript can say the poll returned when only the tool call did -
       // Claude Code backgrounds anything past its own timeout, and a review
@@ -323,7 +323,7 @@ export function createMonitorServer({
       JSON.stringify({
         ok: true,
         sessionId: record.sessionId,
-        events: transcripts.events(record.transcriptPath),
+        events: transcripts.events(record.transcriptPath, undefined, record.agent),
       }),
     );
   }

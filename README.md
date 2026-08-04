@@ -1,9 +1,10 @@
 # no-mistakes-monitor (`nmmon`)
 
-One page that shows every `no-mistakes` pipeline run and every Claude Code session on your
-machine, tells you which one is waiting for you, and jumps to that window when you click it.
+One page that shows every `no-mistakes` pipeline run and every agent session on your machine -
+Claude Code and pi - tells you which one is waiting for you, and jumps to that window when you
+click it.
 
-If you run several Claude sessions across several repos, the problem is not knowing that work
+If you run several agent sessions across several repos, the problem is not knowing that work
 is happening. It is noticing the one that stopped and wants an answer, and then finding which
 of your fifteen terminal tabs it was in. That is what this fixes.
 
@@ -22,7 +23,7 @@ Three different things, because they answer three different questions.
 
 | Signal | Where it comes from | What it means |
 | --- | --- | --- |
-| **Waiting for you** | Claude Code hooks | Claude hit a permission prompt or is idle waiting for input. This is the one worth interrupting yourself for. |
+| **Waiting for you** | Claude Code hooks | Claude hit a permission prompt or is idle waiting for input. This is the one worth interrupting yourself for. **Claude Code only** - see [pi sessions](#pi-sessions). |
 | **Waiting on your review** | the running `lavish-axi poll` | The agent is sitting in a `lavish-axi poll`, waiting for you to open a review page and respond. It looks busy from the outside; it is not. |
 | **Pipeline parked** | the no-mistakes database | A run stopped at a gate. Usually the agent answers it itself within seconds, so it is informational. |
 
@@ -122,7 +123,7 @@ reason the header dot does.
 
 - Node 22.5 or newer (`node:sqlite` is used, and it is built in - **there are no runtime dependencies**)
 - `no-mistakes` installed
-- Claude Code, for the "waiting for you" half
+- Claude Code, for the "waiting for you" half. pi is supported too, with the caveat below
 - macOS for window focusing. Monitoring itself works anywhere.
 
 ## Install
@@ -145,6 +146,34 @@ sessions already open will not report themselves until you restart them.
 Then open the URL `nmmon serve` prints and leave the tab pinned. Click "Enable alerts" once if
 you want desktop notifications when something starts waiting on you.
 
+### pi sessions
+
+[pi](https://pi.dev) sessions are watched too, and they are marked with a `pi` chip so you can
+tell them from Claude Code rows at a glance:
+
+```sh
+nmmon install-pi
+```
+
+That adds one path to `~/.pi/agent/settings.json`, with the same manners as `install-hooks` -
+it shows the change, asks first, keeps a `.nmmon-backup`, leaves your other extensions alone
+and in order, and is safe to run twice. Restart any pi sessions afterwards; extensions load at
+startup. Undo it with `nmmon uninstall-pi`.
+
+Everything on a pi row works the way it does on a Claude Code row - the repo, the branch, the
+pull request, the pipeline step, what it is doing right now, the review gate, and clicking to
+focus the window.
+
+**One thing is genuinely different: a pi row never says "waiting for you".** pi has no
+permission prompt - it runs its tools without asking - so there is no such state to report,
+and nmmon does not invent one. A pi session that has finished its turn shows as idle, not as
+something demanding your attention. It can still reach the top of the page through its
+pipeline: parked, failed, or waiting on a review.
+
+The other small difference: Claude Code writes a short AI-generated title for every session
+and pi generates none, so a pi row shows no summary line unless you have named the session
+yourself. `/name Refactor auth` gives it one, and the page picks it up on the next poll.
+
 ## Commands
 
 | Command | Does |
@@ -155,6 +184,7 @@ you want desktop notifications when something starts waiting on you.
 | `nmmon doctor` | Check the setup and explain anything missing |
 | `nmmon focus <session>` | Bring a session's window to the front from the terminal |
 | `nmmon install-hooks` / `uninstall-hooks` | Manage the Claude Code hooks |
+| `nmmon install-pi` / `uninstall-pi` | Manage the pi extension |
 
 Useful flags: `--port`, `--settings <path>`, `--dry-run`, `--yes`. `NMMON_PORT` sets the
 default port when `--port` is absent; if it holds something that is not a port, `serve`

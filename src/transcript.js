@@ -184,6 +184,10 @@ const TOOL_VERBS = {
   NotebookEdit: 'Editing',
   Grep: 'Searching',
   Glob: 'Searching',
+  // Claude Code has no such tool; pi does. This table is the page's display
+  // vocabulary rather than any one agent's tool list, so a verb here costs
+  // nothing and stops a real tool rendering as a bare lowercase word.
+  Ls: 'Listing',
   Bash: 'Running',
   Task: 'Running an agent',
   WebFetch: 'Fetching',
@@ -271,7 +275,10 @@ export function lastActivityAt(records) {
  *
  * @typedef {object} TranscriptEvent
  * @property {number|null} at epoch ms, from the record's own timestamp
- * @property {'you'|'claude'|'tool'} kind who or what produced it
+ * @property {'you'|'agent'|'tool'} kind who or what produced it. `agent` rather
+ *   than `claude` because more than one agent writes these transcripts now, and
+ *   the page renders this string: a pi session's replies labelled "claude"
+ *   would be a small confident lie in the one place conversation text appears
  * @property {string|null} label the tool's name, for a `tool`
  * @property {string} text what to show, already truncated
  * @property {boolean} truncated whether `text` had more after it
@@ -396,7 +403,7 @@ export function recentEvents(records, limit = RECENT_EVENT_LIMIT) {
 
     for (const block of contentBlocks(record)) {
       if (block?.type === 'text' && String(block.text || '').trim()) {
-        events.push({ kind: 'claude', at: stamp, label: null, outcome: null, ...clip(block.text) });
+        events.push({ kind: 'agent', at: stamp, label: null, outcome: null, ...clip(block.text) });
       } else if (block?.type === 'tool_use') {
         events.push({
           kind: 'tool',

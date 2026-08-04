@@ -20,6 +20,21 @@ export function noMistakesHome() {
   return process.env.NM_HOME || join(homedir(), '.no-mistakes');
 }
 
+/**
+ * Where pi keeps its config, which is where its extension list lives.
+ *
+ * `PI_CODING_AGENT_DIR` is pi's own variable rather than one of ours, so
+ * honouring it is correct behaviour and not merely a hook for the tests: a user
+ * who has moved pi's config directory expects us to follow it there.
+ */
+export function piHome() {
+  return process.env.PI_CODING_AGENT_DIR || join(homedir(), '.pi', 'agent');
+}
+
+export function piSettingsPath() {
+  return join(piHome(), 'settings.json');
+}
+
 export function statePath() {
   return join(noMistakesHome(), 'state.sqlite');
 }

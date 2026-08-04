@@ -983,3 +983,24 @@ test('with no pipeline running, the idle nudge still means you', () => {
   });
   assert.equal(row.attention, 'blocked');
 });
+
+test('a row carries which agent is running it', () => {
+  const rows = buildRows({
+    sessions: [session({ agent: 'pi' })],
+    runs: [],
+  });
+  assert.equal(rows[0].agentKind, 'pi');
+});
+
+test('a session record written before pi existed is Claude Code', () => {
+  // The field is simply absent on every record already on disk.
+  const rows = buildRows({ sessions: [session()], runs: [] });
+  assert.equal(rows[0].agentKind, 'claude');
+});
+
+test('a run with no session behind it claims no agent', () => {
+  // Nobody is running it - it is a pipeline the database knows about - and
+  // naming an agent there would be an invention.
+  const rows = buildRows({ sessions: [], runs: [run()] });
+  assert.equal(rows[0].agentKind, null);
+});
