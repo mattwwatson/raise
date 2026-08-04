@@ -72,6 +72,7 @@ Four sources of truth, joined into one list:
 | `src/exec.js` | the one place that runs external commands |
 | `src/server.js` | HTTP, server-sent events, the poll loop |
 | `src/hooks.js` | merging our hooks into the user's `~/.claude/settings.json` |
+| `src/hook-payload.js` | which fields may leave an agent and reach us (pure) |
 | `hooks/nmmon-hook.js` | the Claude Code hook |
 | `hooks/nmmon-pi-extension.js` | the pi extension, which is the same reporter in-process |
 | `src/pi-transcript.js` | pi transcripts, normalised into the records `transcript.js` reads |
@@ -133,9 +134,12 @@ now", and it is what separates *is sitting in a Bash command* from *used Bash at
 Results arrive out of order when tools run in parallel, so match on ids, never on position.
 
 **A recorded block is disbelieved once the transcript runs past it.** The installed hooks are
-`SessionStart`, `UserPromptSubmit`, `Notification`, `Stop`, `SessionEnd` - so after
-`Notification` fires, nothing fires again until the turn ends. Granting a permission prompt
-therefore leaves the session reading "Waiting for you" for the whole rest of the turn.
+`SessionStart`, `UserPromptSubmit`, `PermissionRequest`, `Notification`, `Stop`, `SessionEnd` -
+so after a block is announced, nothing fires again until the turn ends. **Claude Code has no
+event for a permission prompt being answered**, and that is a fact about Claude Code rather
+than a choice we made: all 31 hook events were read out of the 2.1.221 binary looking for one.
+Granting a permission prompt therefore leaves the session reading "Waiting for you" for the
+whole rest of the turn.
 Observed live at 185 seconds stale while the transcript was 3 seconds old. A false "waiting
 for you" is worse than a missing one: it is what teaches you to stop believing the page.
 
@@ -161,10 +165,10 @@ assumed:
 The transcript may only ever *clear* a block, never assert one. A transcript that cannot be
 read leaves the hooks' answer standing.
 
-> **Option not taken: a `PostToolUse` hook.** The direct fix is to have Claude Code report
-> the state change itself rather than infer it. It is a one-line change - add `PostToolUse`
-> to `HOOK_EVENTS` in `src/hooks.js`; `EVENT_STATES` in `registry.js` already maps it (and
-> `PreToolUse`) to `working`, so nothing else moves.
+> **Option not taken: a `PostToolUse` hook.** The direct fix would be to have Claude Code
+> report the *end* of the block rather than leave it to be inferred. It is a one-line change -
+> add `PostToolUse` to `HOOK_EVENTS` in `src/hooks.js`; `EVENT_STATES` in `registry.js`
+> already maps it (and `PreToolUse`) to `working`, so nothing else moves.
 >
 > Not chosen because it costs a hook process and a localhost POST **per tool call**, inside
 > the user's editing loop, and because hooks are read at session start: it fixes nothing
@@ -172,9 +176,14 @@ read leaves the hooks' answer standing.
 > exactly when a stale block is most annoying. The transcript approach fixes sessions that
 > are already running, for free.
 >
-> Worth revisiting if the transcript ever stops being readable or the 3s margin proves wrong
-> in practice - in which case prefer it outright rather than stacking both, since a reported
-> state beats an inferred one whenever you can have it.
+> `PostToolBatch` was looked at when `PermissionRequest` was adopted and rejected on the same
+> ground. It is cheaper - one hook per batch of parallel calls rather than one per call - but
+> it still fires on every step of every turn, and it buys nothing the transcript does not
+> already give within 3 seconds.
+>
+> Adopting `PermissionRequest` did not change this. It reports the *start* of a block sooner;
+> the end of one is still inferred, because there is nothing to report it. Revisit only if
+> the transcript stops being readable or the 3s margin proves wrong in practice.
 
 **A `lavish-axi poll` is a human gate wearing work clothes.** It blocks until someone opens
 the artifact and responds, so the hooks see a busy session while the actual blocker is a
@@ -183,10 +192,10 @@ drops its activity text - "Running lavish-axi" beside "Waiting on your review" r
 progress. `lavish-axi` takes about 1.7 seconds, so it is never on the poll path: the lookup is
 fired at most once every `REFRESH_MS` and the page uses the last answer.
 
-**Claude Code's `Notification` hook means two different things, and only the message tells
-them apart.** It fires both when Claude wants permission for a tool and when a turn has ended
-and Claude has been idle for sixty seconds - and `registry.js` maps both to `blocked`, because
-at that layer they are the same event.
+**Claude Code's `Notification` hook means two different things, and the payload says which.**
+It fires both when Claude wants permission for a tool and when a turn has ended and Claude has
+been idle for sixty seconds - and `registry.js` maps both to `blocked`, because at that layer
+they are the same event.
 
 The escalation is deliberate for the second case and worth keeping: a quiet `Stop` becoming a
 loud "waiting for you" a minute later is how a finished session asks for its next instruction.
@@ -195,11 +204,69 @@ backgrounds a command past its own ten-minute timeout, the turn ends, the nudge 
 page summons you to a session doing plenty of work - observed live for two minutes with
 `no-mistakes axi respond` running the whole time.
 
-So a live pipeline disproves the nudge, and **only the nudge**. `isIdleNudge` matches narrowly
-and fails closed: an unrecognised or absent message stays a hard block, because a permission
-prompt stops everything until a human answers whether or not something churns in the
-background. If Claude Code rewords the string, the cost is the stale row we had before, never
-a swallowed permission prompt.
+So a live pipeline disproves the nudge, and **only the nudge**. `isIdleNudge` fails closed:
+anything unrecognised stays a hard block, because a permission prompt stops everything until a
+human answers whether or not something churns in the background.
+
+**Which one it is comes from `notification_type`, not from the message.** The payload carries
+`idle_prompt` for the nudge and `permission_prompt` for a real prompt, so the answer is read
+rather than matched. This replaced a regex on the message text, and it is strictly better than
+one: a reworded string no longer costs anything, and there is no case where the words and the
+type disagree. A type we do not recognise is *new*, not missing, so it stays a block and the
+message is not consulted underneath it - falling back there would be guessing with the answer
+already in hand. The message remains the fallback only when there is no type at all, which is
+a Claude Code too old to send one, or a record written before nmmon read it.
+
+Two other things about this notification are worth knowing, both measured in the 2.1.221
+binary. It is **fired on a six-second tick and only once you have been idle six seconds**, so
+a permission prompt reaches us six to twelve seconds late, and later still while you are
+typing. And it is the *only* thing Claude Code says about a permission prompt: nothing fires
+when one is answered. See the `PermissionRequest` note below for the first, and the "recorded
+block is disbelieved" note above for the second.
+
+**`PermissionRequest` is the one per-tool-shaped hook worth installing, because it is not
+per-tool.** It fires only when a tool actually needs a human: the permission evaluation runs
+first, and a rule that approves the tool, `bypassPermissions`, `acceptEdits` for an edit, and
+the auto-mode classifier all settle the question before the event is reached. So it is as rare
+as a `Notification` and carries none of the cost that made `PostToolUse` unacceptable.
+
+What it buys is **six to twelve seconds**. The `Notification` for a permission prompt is fired
+on a repeating six-second tick and only once you have been idle six seconds, so it arrives
+late, and later still while you are typing. `PermissionRequest` fires the instant Claude
+decides it needs to ask. It also catches prompts answered inside six seconds, which previously
+never reached us at all - the cost being that a prompt you answer immediately can render the
+row red for one poll. That is a true statement briefly displayed, and `blockDisproved` clears
+it as soon as the transcript moves.
+
+It carries no message, so the row says a human is needed and picks up the reason when the
+`Notification` catches up. `stateSince` is what matters and it is set by the earlier event, so
+the waiting timer counts from when Claude asked rather than from when it got round to saying
+so.
+
+**One block, announced twice, needs two timestamps.** `stateSince` deliberately does not move
+while the state is unchanged, so once the `Notification` restates a block `PermissionRequest`
+already reported, it still points six to twelve seconds back. That is right for the waiting
+timer and wrong for the disproof: measuring `blockDisproved`'s three-second margin from there
+hands every permission block that much extra tolerance, and a transcript write four seconds
+after Claude asked - a sibling tool in the same batch returning, say - would clear a prompt
+still sitting open. So `Session.blockAnnouncedAt` moves on *every* event that says blocked and
+the disproof anchors on it, while the timer keeps counting from `stateSince`. It is held on
+the same terms as `message` and `notificationType`, and a record without it falls back to
+`stateSince`, so an older reporter behaves exactly as it always did.
+
+Two things this does **not** do. It does not shorten a stale block by one millisecond - there
+is no resolution event, so clearing is still the transcript's job. And it does nothing at all
+for a session that is already open: hook *registration* is read at session start, so this
+needs `nmmon install-hooks` re-run and every session restarted. Reading `notification_type`,
+by contrast, took effect everywhere the moment the server restarted, because the hook script's
+*contents* are read fresh on every event. That asymmetry is worth remembering when choosing
+between the two kinds of fix.
+
+One residual risk, noted rather than guarded: the hook fires *before* the dialog is rendered,
+and a `PermissionRequest` hook that returns `allow` or `deny` suppresses the dialog entirely.
+Ours returns nothing so it cannot do that, but a foreign hook could leave us asserting a block
+no human ever saw. The transcript clears it within seconds, which is why this is a note and
+not a mechanism.
 
 **A live poll process is what settles whether a review is still open**, not the transcript.
 Claude Code backgrounds any tool past its own ten-minute timeout and writes a `tool_result`,
@@ -491,7 +558,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 362 tests, no network, no dependencies, ~2s
+npm test          # 384 tests, no network, no dependencies, ~2s
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
 
@@ -532,9 +599,19 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 - **`src/pi-extension.js` writes to the user's `~/.pi/agent/settings.json`.** Same obligations
   as `hooks.js`: show a diff, ask first, back up, leave every foreign entry in place and in
   order - load order is meaningful in pi - and be safe to run twice.
-- **The hook payload is a privacy boundary.** Session id, cwd, transcript *path*, event name,
-  Claude's own notification message, and window identity. Never prompt text, transcript
-  content or file contents. Do not widen it.
+- **The hook payload is a privacy boundary, and it is an allowlist.** Session id, cwd,
+  transcript *path*, event name, Claude's own notification message and type, and window
+  identity - the list is `REPORTABLE_FIELDS` in `src/hook-payload.js`, and the reporter sends
+  those fields rather than the payload it was handed. Never prompt text, transcript content or
+  file contents. Do not widen it.
+
+  It has to be an allowlist because Claude Code's payloads carry all three of those already:
+  `UserPromptSubmit` carries `prompt`, `Stop` carries `last_assistant_message`, and
+  `PermissionRequest` carries `tool_input`, which for `Write` and `Edit` is the contents of the
+  file. Until 04/08/2026 the hook forwarded the payload verbatim, so the first two crossed the
+  process boundary on every turn - unread and unstored, but sent. The two failure modes are
+  not comparable: a field we forgot to allow is a feature that quietly does not work, and a
+  field we forgot to deny is somebody's source code on a socket.
 - **Reading a transcript is not the same as sending one, and the difference is the rule.**
   The server reads the tail of a local file and renders it on the user's own dashboard, in
   the browser, on that same machine. Nothing leaves the machine, and the conversation never
@@ -564,7 +641,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 ## Commands
 
 ```sh
-npm test                       # 362 tests, ~2s
+npm test                       # 384 tests, ~2s
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
 ```

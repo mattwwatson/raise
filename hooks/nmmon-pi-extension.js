@@ -40,6 +40,12 @@
  * event name and window identity. pi has no notification message to carry
  * because it has no permission prompt, so nothing new crosses. No prompt text,
  * no transcript content, ever.
+ *
+ * It is built field by field rather than filtered through `src/hook-payload.js`
+ * the way the Claude Code hook is, so it is inside that allowlist by
+ * construction - there is no payload here to forget to strip. Routing it
+ * through anyway would change nothing on the wire and put an edit on pi's
+ * in-process path for it.
  */
 
 import { readFileSync } from 'node:fs';

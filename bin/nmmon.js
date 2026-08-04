@@ -19,7 +19,7 @@ import {
   readSettings,
   writeSettings,
   hookCommand,
-  HOOK_EVENTS,
+  hookInstallState,
 } from '../src/hooks.js';
 import { mergeExtension, removeExtension, EXTENSION_MARKER } from '../src/pi-extension.js';
 import { NoMistakesState } from '../src/nm-state.js';
@@ -161,10 +161,20 @@ async function cmdServe(flags) {
   if (monitor.probe.warning) console.log(`  ${yellow('Note')}       ${monitor.probe.warning}`);
 
   const settings = readSettingsQuietly(DEFAULT_SETTINGS);
-  if (!hooksInstalled(settings)) {
+  const hooks = hookInstallState(settings);
+  if (hooks.state === 'missing') {
     console.log(
       `\n  ${yellow('Hooks are not installed.')} Pipeline state will still show, but nmmon cannot\n` +
         '  tell when Claude is waiting for you, and cannot focus windows.\n' +
+        `  Run ${bold('nmmon install-hooks')}, then restart your Claude sessions.`,
+    );
+  } else if (hooks.state === 'partial') {
+    // Everything already installed keeps working, so this says what is missing
+    // rather than repeating the message above - claiming nmmon is blind while
+    // SessionStart and Notification are both in place would be a lie.
+    console.log(
+      `\n  ${yellow('Hooks are out of date.')} What is installed still works; nmmon is missing\n` +
+        `  ${hooks.missing.join(', ')}.\n` +
         `  Run ${bold('nmmon install-hooks')}, then restart your Claude sessions.`,
     );
   }
@@ -366,14 +376,6 @@ function readSettingsQuietly(path) {
   }
 }
 
-function hooksInstalled(settings) {
-  return HOOK_EVENTS.every((event) =>
-    (settings?.hooks?.[event] || []).some((group) =>
-      (group?.hooks || []).some((h) => String(h?.command || '').includes('nmmon-hook.js')),
-    ),
-  );
-}
-
 async function cmdInstallHooks(flags) {
   const settingsPath = flags.settings || DEFAULT_SETTINGS;
   const command = hookCommand(process.execPath, HOOK_SCRIPT);
@@ -516,8 +518,15 @@ async function cmdDoctor() {
   }
 
   const settings = readSettingsQuietly(DEFAULT_SETTINGS);
-  if (hooksInstalled(settings)) {
+  const hooks = hookInstallState(settings);
+  if (hooks.state === 'installed') {
     ok('Claude Code hooks', `installed in ${DEFAULT_SETTINGS}`);
+  } else if (hooks.state === 'partial') {
+    warn(
+      'Claude Code hooks',
+      `out of date - missing ${hooks.missing.join(', ')}. Run ${bold('nmmon install-hooks')} ` +
+        'and restart your Claude sessions to pick them up',
+    );
   } else {
     warn('Claude Code hooks', `not installed - run ${bold('nmmon install-hooks')}`);
   }

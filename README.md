@@ -136,9 +136,14 @@ nmmon install-hooks
 nmmon serve
 ```
 
-`install-hooks` merges five hook entries into `~/.claude/settings.json`. It shows you exactly
+`install-hooks` merges six hook entries into `~/.claude/settings.json`. It shows you exactly
 what it will change and asks before writing, keeps a `.nmmon-backup` copy, leaves any hooks
 you already have alone, and is safe to run twice. Undo it with `nmmon uninstall-hooks`.
+
+When a later version of nmmon adds an event to that set, `serve` and `doctor` name the ones
+you are missing rather than calling the hooks uninstalled - what you already have keeps
+working, and the new event only makes the signal arrive sooner. Re-run `install-hooks` when it
+suits you, and restart your sessions then.
 
 **Restart your existing Claude sessions afterwards.** Hooks are read when a session starts, so
 sessions already open will not report themselves until you restart them.
@@ -281,7 +286,9 @@ Since this server ends up running `osascript` and `tmux`, it also requires
 The hook - and pi's extension, which posts the same payload - never sends prompts,
 transcripts or file contents. It sends the session id, the working directory, the event name,
 a notification message where Claude supplies one, and the window identity needed to focus
-the tab.
+the tab. That is an allowlist rather than a promise: the hook copies out the fields it is
+allowed to send, so anything Claude Code adds to a payload in a future version stays inside
+your session unless someone deliberately adds it to the list.
 
 Expanding a row shows conversation text, and that is the only place it appears. It is read
 from a local file by a local server and rendered in your own browser - it is not in the
@@ -310,7 +317,7 @@ updated.
 ## Development
 
 ```sh
-npm test          # 362 tests, no network, no build step, ~2s
+npm test          # 384 tests, no network, no build step, ~2s
 npm run typecheck
 ```
 

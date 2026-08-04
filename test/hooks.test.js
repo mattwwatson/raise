@@ -1,7 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { mergeHooks, removeHooks, hookCommand, HOOK_EVENTS } from '../src/hooks.js';
+import {
+  mergeHooks,
+  removeHooks,
+  hookCommand,
+  hookInstallState,
+  HOOK_EVENTS,
+} from '../src/hooks.js';
 
 const COMMAND = '/usr/local/bin/node /opt/nmmon/hooks/nmmon-hook.js';
 
@@ -10,6 +16,22 @@ test('mergeHooks adds an entry for every event', () => {
   assert.equal(changes.length, HOOK_EVENTS.length);
   for (const event of HOOK_EVENTS) {
     assert.equal(settings.hooks[event][0].hooks[0].command, COMMAND);
+  }
+});
+
+test('the events installed are the ones that are rare and mean something', () => {
+  // Named rather than derived, so that widening the list to a per-tool-call
+  // event has to be a deliberate edit to a test that says why it is not one.
+  assert.deepEqual(HOOK_EVENTS, [
+    'SessionStart',
+    'UserPromptSubmit',
+    'PermissionRequest',
+    'Notification',
+    'Stop',
+    'SessionEnd',
+  ]);
+  for (const perCall of ['PreToolUse', 'PostToolUse', 'PostToolBatch', 'MessageDisplay']) {
+    assert.equal(HOOK_EVENTS.includes(perCall), false, `${perCall} fires inside the editing loop`);
   }
 });
 
@@ -72,6 +94,28 @@ test('removeHooks takes out only our entries', () => {
 test('removeHooks on a clean settings file is a no-op', () => {
   const { changes } = removeHooks({ hooks: {} });
   assert.deepEqual(changes, []);
+});
+
+test('hookInstallState tells an install that has gone stale from no install at all', () => {
+  // Adding an event to HOOK_EVENTS leaves every existing installation one
+  // short. Calling that "not installed" would tell the user nmmon cannot see
+  // when Claude is waiting and cannot focus windows, when both still work.
+  assert.deepEqual(hookInstallState(mergeHooks({}, COMMAND).settings), {
+    state: 'installed',
+    missing: [],
+  });
+  assert.deepEqual(hookInstallState({}), { state: 'missing', missing: [...HOOK_EVENTS] });
+
+  const older = HOOK_EVENTS.filter((event) => event !== 'PermissionRequest');
+  assert.deepEqual(hookInstallState(mergeHooks({}, COMMAND, older).settings), {
+    state: 'partial',
+    missing: ['PermissionRequest'],
+  });
+});
+
+test('hookInstallState does not count somebody else\'s hooks as ours', () => {
+  const foreign = { hooks: { Stop: [{ hooks: [{ type: 'command', command: 'say done' }] }] } };
+  assert.equal(hookInstallState(foreign).state, 'missing');
 });
 
 test('hookCommand quotes paths containing spaces', () => {

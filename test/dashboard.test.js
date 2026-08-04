@@ -135,6 +135,47 @@ test('an unreadable transcript leaves the hooks answer standing', () => {
   );
 });
 
+test('a restated block is measured from when it was last announced', () => {
+  // PermissionRequest at 1000 and the Notification saying the same thing at
+  // 9000. Anchoring on stateSince would give this block eight extra seconds of
+  // tolerance, so anything the session wrote while the prompt sat open - a
+  // sibling tool in the same batch returning, say - would read as the prompt
+  // having been answered and turn the row green over a real block.
+  const blocked = { state: 'blocked', stateSince: 1000, blockAnnouncedAt: 9000 };
+  assert.equal(
+    attentionFor({ session: blocked, run: null, summary: { lastActivityAt: 6000 } }),
+    'blocked',
+  );
+  assert.equal(
+    attentionFor({ session: blocked, run: null, summary: { lastActivityAt: 13000 } }),
+    'working',
+  );
+});
+
+test('a block with no announcement anchor is measured from stateSince', () => {
+  // A record written by an older reporter, or before this branch. It has to go
+  // on behaving exactly as it did rather than becoming un-clearable.
+  const blocked = { state: 'blocked', stateSince: 1000 };
+  assert.equal(
+    attentionFor({ session: blocked, run: null, summary: { lastActivityAt: 3999 } }),
+    'blocked',
+  );
+  assert.equal(
+    attentionFor({ session: blocked, run: null, summary: { lastActivityAt: 4001 } }),
+    'working',
+  );
+});
+
+test('the waiting timer counts from when Claude asked, not from the restatement', () => {
+  const rows = buildRows({
+    sessions: [session({ state: 'blocked', stateSince: 1000, blockAnnouncedAt: 9000 })],
+    runs: [],
+    now: 21000,
+  });
+  assert.equal(rows[0].attention, 'blocked');
+  assert.equal(rows[0].waitingForMs, 20000);
+});
+
 test('a disproved block still yields to a live review', () => {
   assert.equal(
     attentionFor({
@@ -932,6 +973,64 @@ test('isIdleNudge tells the sixty-second nudge from a permission prompt', () => 
   // notification costs a stale row rather than a swallowed permission prompt.
   assert.equal(isIdleNudge(null), false);
   assert.equal(isIdleNudge(''), false);
+});
+
+test('the notification type settles it outright, and the message is not consulted', () => {
+  // Claude Code names the kind of notification it is sending, so the answer is
+  // read rather than inferred. A type that says nudge is a nudge whatever the
+  // wording, and a type that says permission prompt is a hard block even if the
+  // message happens to contain the nudge's own words.
+  assert.equal(isIdleNudge('reworded entirely', 'idle_prompt'), true);
+  assert.equal(isIdleNudge('Claude is waiting for your input', 'permission_prompt'), false);
+});
+
+test('an unrecognised notification type is a hard block, not a fallback to the message', () => {
+  // A type we do not know is new, not absent - Claude Code told us something
+  // and we did not understand it. Reading the message underneath would be
+  // guessing, and the safe guess here is the one that still asks for a human.
+  assert.equal(isIdleNudge('Claude is waiting for your input', 'agent_needs_input'), false);
+});
+
+test('without a type at all, the message still decides', () => {
+  // A session started under a Claude Code that predates the field, or one
+  // whose record was written before this change. Nothing regresses for it.
+  assert.equal(isIdleNudge('Claude is waiting for your input', null), true);
+  assert.equal(isIdleNudge('Claude is waiting for your input', undefined), true);
+  assert.equal(isIdleNudge('Claude needs your permission to use Bash', null), false);
+});
+
+test('a live pipeline answers a typed idle nudge', () => {
+  const [row] = buildRows({
+    sessions: [
+      session({
+        state: 'blocked',
+        stateSince: 5000,
+        message: 'Claude is waiting for your input',
+        notificationType: 'idle_prompt',
+      }),
+    ],
+    runs: [],
+    now: 6000,
+    pipelines: new Set(['s1']),
+  });
+  assert.equal(row.attention, 'working');
+});
+
+test('a live pipeline does not answer a typed permission prompt', () => {
+  const [row] = buildRows({
+    sessions: [
+      session({
+        state: 'blocked',
+        stateSince: 5000,
+        message: 'Claude needs your permission to use Bash',
+        notificationType: 'permission_prompt',
+      }),
+    ],
+    runs: [],
+    now: 6000,
+    pipelines: new Set(['s1']),
+  });
+  assert.equal(row.attention, 'blocked');
 });
 
 test('a running pipeline disproves "Claude is waiting for your input"', () => {

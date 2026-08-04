@@ -321,13 +321,16 @@ function rankRun(run) {
  */
 const BLOCK_DISPROVED_AFTER_MS = 3000;
 
+/** What Claude Code calls the nudge it sends after sixty idle seconds. */
+const IDLE_NUDGE_TYPE = 'idle_prompt';
+
 /**
  * Claude Code's sixty-second nudge, as opposed to a permission prompt.
  *
  * The `Notification` hook fires for two different things, and the registry
  * cannot tell them apart because they arrive as the same event: Claude wanting
  * permission for a tool, and Claude having finished its turn and waiting for
- * you to say something next. Only the message distinguishes them.
+ * you to say something next.
  *
  * The distinction is load-bearing. A running pipeline is grounds for
  * disbelieving the second - the session is not free, it is mid-run - and is no
@@ -335,14 +338,25 @@ const BLOCK_DISPROVED_AFTER_MS = 3000;
  * everything until a human answers whether or not something else is churning
  * in the background.
  *
- * Matched narrowly and failing closed: anything unrecognised, including no
- * message at all, stays a hard block. If Claude Code rewords this, the cost is
- * the stale "waiting for you" we had before, not a swallowed permission prompt.
+ * **Claude Code says which one it is, so ask rather than infer.** The payload
+ * carries a `notification_type` - `idle_prompt` for the nudge,
+ * `permission_prompt` for a real prompt - and when it is there it settles the
+ * question outright. A type we do not recognise is new rather than missing, so
+ * it stays a hard block and the message underneath is never consulted: falling
+ * back there would be guessing with the answer already in hand.
+ *
+ * The message is the fallback for a session whose Claude Code predates the
+ * field, or whose record was written before nmmon read it. Both paths fail
+ * closed - anything unrecognised, including no message at all, is a block -
+ * because the cost of a stale "waiting for you" is a row you distrust, and the
+ * cost of the other mistake is a swallowed permission prompt.
  *
  * @param {string|null|undefined} message
+ * @param {string|null|undefined} [notificationType]
  * @returns {boolean}
  */
-export function isIdleNudge(message) {
+export function isIdleNudge(message, notificationType) {
+  if (notificationType) return notificationType === IDLE_NUDGE_TYPE;
   return /waiting for your input/i.test(String(message || ''));
 }
 
@@ -361,9 +375,19 @@ export function isIdleNudge(message) {
  * so the transcript settles it. Only ever used to *clear* a block, never to
  * assert one - a transcript that cannot be read leaves the hooks' answer
  * standing.
+ *
+ * Measured from when the block was last *announced*, not from when the session
+ * entered the state. A permission prompt is reported twice, six to twelve
+ * seconds apart, and `stateSince` deliberately keeps the earlier of the two so
+ * the waiting timer says how long you have kept it waiting. Anchoring the
+ * disproof there as well would hand every permission block that much extra
+ * tolerance - a transcript write four seconds after Claude asked, while the
+ * prompt is still open, would clear a block that is still entirely real. A
+ * record written before this anchor existed falls back to `stateSince` and
+ * behaves as it always did.
  */
 function blockDisproved(session, summary) {
-  const since = session?.stateSince;
+  const since = session?.blockAnnouncedAt ?? session?.stateSince;
   const last = summary?.lastActivityAt;
   if (!since || !last) return false;
   return last - since > BLOCK_DISPROVED_AFTER_MS;
@@ -380,7 +404,9 @@ function blockDisproved(session, summary) {
  * the transcript is silent evidence, whereas a live process is the work itself.
  * It only ever answers the idle nudge - see `isIdleNudge`.
  *
- * @param {Session|{state: string, stateSince?: number, message?: string|null}|null} session
+ * @param {Session|{state: string, stateSince?: number,
+ *          blockAnnouncedAt?: number|null, message?: string|null,
+ *          notificationType?: string|null}|null} session
  * @param {import('./transcript.js').TranscriptSummary|null} summary
  * @param {boolean} [pipelineRunning]
  * @returns {import('./registry.js').SessionState|null}
@@ -389,7 +415,7 @@ function effectiveSessionState(session, summary, pipelineRunning = false) {
   if (!session) return null;
   if (session.state === 'blocked') {
     if (blockDisproved(session, summary)) return 'working';
-    if (pipelineRunning && isIdleNudge(session.message)) return 'working';
+    if (pipelineRunning && isIdleNudge(session.message, session.notificationType)) return 'working';
   }
   return /** @type {import('./registry.js').SessionState|null} */ (session.state ?? null);
 }

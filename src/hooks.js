@@ -16,19 +16,19 @@ import { dirname } from 'node:path';
  * Which events we listen to, and why.
  *
  * PreToolUse/PostToolUse are deliberately not included: they fire constantly
- * and would add a process spawn to every tool call.
+ * and would add a process spawn to every tool call. `PermissionRequest` is the
+ * exception that proves the rule - it fires only when a tool actually needs a
+ * human, so it is as rare as a `Notification` and says the same thing sooner.
  *
- * They would not be *no* signal, though - `Notification` is the last event of
- * a turn until `Stop`, so nothing here reports that a permission prompt was
- * granted, and the session reads as blocked until the turn ends. That is
- * settled by reading the transcript instead; `registry.js` already maps both
- * events to `working` should this ever be reconsidered. See the "recorded
- * block is disbelieved" note in AGENTS.md for the trade-off.
+ * Nothing here reports that a permission prompt was *granted*, because Claude
+ * Code has no such event to fire. That is settled by reading the transcript
+ * instead. See the "recorded block is disbelieved" note in AGENTS.md.
  */
 export const HOOK_EVENTS = [
   'SessionStart', // register the session and capture its window identity
   'UserPromptSubmit', // you gave it work, so it is now busy
-  'Notification', // Claude wants permission or input: the signal that matters
+  'PermissionRequest', // a tool needs a human, said the moment Claude decides it
+  'Notification', // that same prompt six seconds later, plus the idle nudge
   'Stop', // turn finished, waiting for your next instruction
   'SessionEnd', // deregister
 ];
@@ -52,6 +52,32 @@ function containsOurHook(group) {
   return (group?.hooks || []).some(
     (hook) => typeof hook?.command === 'string' && hook.command.includes(HOOK_MARKER),
   );
+}
+
+/**
+ * How much of our hook set a settings file already has.
+ *
+ * Deliberately three states rather than a boolean. `HOOK_EVENTS` grows, and
+ * every time it does, every existing installation is momentarily short of one -
+ * so an all-or-nothing answer reports a working setup as "not installed", and
+ * the copy that goes with that tells the user nmmon cannot see when Claude is
+ * waiting and cannot focus windows. Neither is true while `SessionStart` and
+ * `Notification` are still there; the signal just arrives a few seconds later.
+ * The re-run still needs asking for, so `missing` names what it will add.
+ *
+ * @param {{hooks?: Record<string, unknown>}|null|undefined} settings a parsed
+ *   settings file, of which only `hooks` is ever read
+ * @param {string[]} [events]
+ * @returns {{state: 'installed'|'partial'|'missing', missing: string[]}}
+ */
+export function hookInstallState(settings, events = HOOK_EVENTS) {
+  const missing = events.filter((event) => {
+    const groups = settings?.hooks?.[event];
+    return !Array.isArray(groups) || !groups.some(containsOurHook);
+  });
+  if (missing.length === 0) return { state: 'installed', missing };
+  if (missing.length === events.length) return { state: 'missing', missing };
+  return { state: 'partial', missing };
 }
 
 /**
