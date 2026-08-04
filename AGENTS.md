@@ -243,6 +243,17 @@ It carries no message, so the row says a human is needed and picks up the reason
 the waiting timer counts from when Claude asked rather than from when it got round to saying
 so.
 
+**One block, announced twice, needs two timestamps.** `stateSince` deliberately does not move
+while the state is unchanged, so once the `Notification` restates a block `PermissionRequest`
+already reported, it still points six to twelve seconds back. That is right for the waiting
+timer and wrong for the disproof: measuring `blockDisproved`'s three-second margin from there
+hands every permission block that much extra tolerance, and a transcript write four seconds
+after Claude asked - a sibling tool in the same batch returning, say - would clear a prompt
+still sitting open. So `Session.blockAnnouncedAt` moves on *every* event that says blocked and
+the disproof anchors on it, while the timer keeps counting from `stateSince`. It is held on
+the same terms as `message` and `notificationType`, and a record without it falls back to
+`stateSince`, so an older reporter behaves exactly as it always did.
+
 Two things this does **not** do. It does not shorten a stale block by one millisecond - there
 is no resolution event, so clearing is still the transcript's job. And it does nothing at all
 for a session that is already open: hook *registration* is read at session start, so this
@@ -547,7 +558,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 378 tests, no network, no dependencies, ~2s
+npm test          # 384 tests, no network, no dependencies, ~2s
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
 
@@ -630,7 +641,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 ## Commands
 
 ```sh
-npm test                       # 378 tests, ~2s
+npm test                       # 384 tests, ~2s
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
 ```

@@ -258,6 +258,44 @@ test('a Notification from a Claude Code too old to type it is still recorded', (
   }
 });
 
+test('a restated block moves the announcement anchor but not stateSince', () => {
+  // One permission prompt, announced twice: PermissionRequest the moment Claude
+  // decides it needs a human, then the Notification six to twelve seconds later.
+  // The waiting timer wants the first - that is how long you have kept it
+  // waiting - and the transcript's disproof wants the last, so a block restated
+  // eight seconds in is not already eight seconds through its tolerance.
+  const { dir, cleanup } = scratch();
+  try {
+    const registry = new SessionRegistry({ dir });
+    registry.record({ session_id: 's1', hook_event_name: 'PermissionRequest' }, 1000);
+    const asked = registry.get('s1');
+    assert.equal(asked.stateSince, 1000);
+    assert.equal(asked.blockAnnouncedAt, 1000);
+
+    registry.record(
+      {
+        session_id: 's1',
+        hook_event_name: 'Notification',
+        message: 'Claude needs your permission to use Bash',
+        notification_type: 'permission_prompt',
+      },
+      9000,
+    );
+    const restated = registry.get('s1');
+    assert.equal(restated.stateSince, 1000, 'the wait still started when Claude asked');
+    assert.equal(restated.blockAnnouncedAt, 9000);
+
+    registry.record({ session_id: 's1', hook_event_name: 'UserPromptSubmit' }, 12000);
+    assert.equal(
+      registry.get('s1').blockAnnouncedAt,
+      null,
+      'the anchor expires with the block it describes, like the message does',
+    );
+  } finally {
+    cleanup();
+  }
+});
+
 test('stateSince only moves when the state actually changes', () => {
   const { dir, cleanup } = scratch();
   try {

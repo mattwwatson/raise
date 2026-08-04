@@ -375,9 +375,19 @@ export function isIdleNudge(message, notificationType) {
  * so the transcript settles it. Only ever used to *clear* a block, never to
  * assert one - a transcript that cannot be read leaves the hooks' answer
  * standing.
+ *
+ * Measured from when the block was last *announced*, not from when the session
+ * entered the state. A permission prompt is reported twice, six to twelve
+ * seconds apart, and `stateSince` deliberately keeps the earlier of the two so
+ * the waiting timer says how long you have kept it waiting. Anchoring the
+ * disproof there as well would hand every permission block that much extra
+ * tolerance - a transcript write four seconds after Claude asked, while the
+ * prompt is still open, would clear a block that is still entirely real. A
+ * record written before this anchor existed falls back to `stateSince` and
+ * behaves as it always did.
  */
 function blockDisproved(session, summary) {
-  const since = session?.stateSince;
+  const since = session?.blockAnnouncedAt ?? session?.stateSince;
   const last = summary?.lastActivityAt;
   if (!since || !last) return false;
   return last - since > BLOCK_DISPROVED_AFTER_MS;
@@ -394,7 +404,8 @@ function blockDisproved(session, summary) {
  * the transcript is silent evidence, whereas a live process is the work itself.
  * It only ever answers the idle nudge - see `isIdleNudge`.
  *
- * @param {Session|{state: string, stateSince?: number, message?: string|null,
+ * @param {Session|{state: string, stateSince?: number,
+ *          blockAnnouncedAt?: number|null, message?: string|null,
  *          notificationType?: string|null}|null} session
  * @param {import('./transcript.js').TranscriptSummary|null} summary
  * @param {boolean} [pipelineRunning]

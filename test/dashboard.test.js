@@ -135,6 +135,47 @@ test('an unreadable transcript leaves the hooks answer standing', () => {
   );
 });
 
+test('a restated block is measured from when it was last announced', () => {
+  // PermissionRequest at 1000 and the Notification saying the same thing at
+  // 9000. Anchoring on stateSince would give this block eight extra seconds of
+  // tolerance, so anything the session wrote while the prompt sat open - a
+  // sibling tool in the same batch returning, say - would read as the prompt
+  // having been answered and turn the row green over a real block.
+  const blocked = { state: 'blocked', stateSince: 1000, blockAnnouncedAt: 9000 };
+  assert.equal(
+    attentionFor({ session: blocked, run: null, summary: { lastActivityAt: 6000 } }),
+    'blocked',
+  );
+  assert.equal(
+    attentionFor({ session: blocked, run: null, summary: { lastActivityAt: 13000 } }),
+    'working',
+  );
+});
+
+test('a block with no announcement anchor is measured from stateSince', () => {
+  // A record written by an older reporter, or before this branch. It has to go
+  // on behaving exactly as it did rather than becoming un-clearable.
+  const blocked = { state: 'blocked', stateSince: 1000 };
+  assert.equal(
+    attentionFor({ session: blocked, run: null, summary: { lastActivityAt: 3999 } }),
+    'blocked',
+  );
+  assert.equal(
+    attentionFor({ session: blocked, run: null, summary: { lastActivityAt: 4001 } }),
+    'working',
+  );
+});
+
+test('the waiting timer counts from when Claude asked, not from the restatement', () => {
+  const rows = buildRows({
+    sessions: [session({ state: 'blocked', stateSince: 1000, blockAnnouncedAt: 9000 })],
+    runs: [],
+    now: 21000,
+  });
+  assert.equal(rows[0].attention, 'blocked');
+  assert.equal(rows[0].waitingForMs, 20000);
+});
+
 test('a disproved block still yields to a live review', () => {
   assert.equal(
     attentionFor({

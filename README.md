@@ -312,7 +312,7 @@ updated.
 ## Development
 
 ```sh
-npm test          # 378 tests, no network, no build step, ~2s
+npm test          # 384 tests, no network, no build step, ~2s
 npm run typecheck
 ```
 

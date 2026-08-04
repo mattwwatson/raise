@@ -1,7 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { mergeHooks, removeHooks, hookCommand, HOOK_EVENTS } from '../src/hooks.js';
+import {
+  mergeHooks,
+  removeHooks,
+  hookCommand,
+  hookInstallState,
+  HOOK_EVENTS,
+} from '../src/hooks.js';
 
 const COMMAND = '/usr/local/bin/node /opt/nmmon/hooks/nmmon-hook.js';
 
@@ -88,6 +94,28 @@ test('removeHooks takes out only our entries', () => {
 test('removeHooks on a clean settings file is a no-op', () => {
   const { changes } = removeHooks({ hooks: {} });
   assert.deepEqual(changes, []);
+});
+
+test('hookInstallState tells an install that has gone stale from no install at all', () => {
+  // Adding an event to HOOK_EVENTS leaves every existing installation one
+  // short. Calling that "not installed" would tell the user nmmon cannot see
+  // when Claude is waiting and cannot focus windows, when both still work.
+  assert.deepEqual(hookInstallState(mergeHooks({}, COMMAND).settings), {
+    state: 'installed',
+    missing: [],
+  });
+  assert.deepEqual(hookInstallState({}), { state: 'missing', missing: [...HOOK_EVENTS] });
+
+  const older = HOOK_EVENTS.filter((event) => event !== 'PermissionRequest');
+  assert.deepEqual(hookInstallState(mergeHooks({}, COMMAND, older).settings), {
+    state: 'partial',
+    missing: ['PermissionRequest'],
+  });
+});
+
+test('hookInstallState does not count somebody else\'s hooks as ours', () => {
+  const foreign = { hooks: { Stop: [{ hooks: [{ type: 'command', command: 'say done' }] }] } };
+  assert.equal(hookInstallState(foreign).state, 'missing');
 });
 
 test('hookCommand quotes paths containing spaces', () => {

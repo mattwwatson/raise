@@ -55,6 +55,31 @@ function containsOurHook(group) {
 }
 
 /**
+ * How much of our hook set a settings file already has.
+ *
+ * Deliberately three states rather than a boolean. `HOOK_EVENTS` grows, and
+ * every time it does, every existing installation is momentarily short of one -
+ * so an all-or-nothing answer reports a working setup as "not installed", and
+ * the copy that goes with that tells the user nmmon cannot see when Claude is
+ * waiting and cannot focus windows. Neither is true while `SessionStart` and
+ * `Notification` are still there; the signal just arrives a few seconds later.
+ * The re-run still needs asking for, so `missing` names what it will add.
+ *
+ * @param {object|null|undefined} settings
+ * @param {string[]} [events]
+ * @returns {{state: 'installed'|'partial'|'missing', missing: string[]}}
+ */
+export function hookInstallState(settings, events = HOOK_EVENTS) {
+  const missing = events.filter((event) => {
+    const groups = settings?.hooks?.[event];
+    return !Array.isArray(groups) || !groups.some(containsOurHook);
+  });
+  if (missing.length === 0) return { state: 'installed', missing };
+  if (missing.length === events.length) return { state: 'missing', missing };
+  return { state: 'partial', missing };
+}
+
+/**
  * Merge our hook entries into a settings object.
  *
  * Never touches anybody else's hooks, and replaces our own previous entry

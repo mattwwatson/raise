@@ -106,6 +106,9 @@ import { join } from 'node:path';
  * @property {number} startedAt
  * @property {number} updatedAt
  * @property {number} stateSince when `state` last changed, for "waiting 2m"
+ * @property {number|null} blockAnnouncedAt when a hook last said this session
+ *   is blocked, as opposed to when it first became so. Held on the same terms
+ *   as `message`, and null whenever the session is not blocked
  */
 
 /**
@@ -239,6 +242,15 @@ export class SessionRegistry {
       startedAt: previous.startedAt || now,
       updatedAt: now,
       stateSince: previous.state === state ? previous.stateSince || now : now,
+      // Unlike `stateSince`, this moves on every event that says "blocked",
+      // including one restating a block already recorded. One permission prompt
+      // is announced twice - by `PermissionRequest` when Claude decides it needs
+      // a human, and by the `Notification` six to twelve seconds later - so the
+      // two timestamps answer different questions: how long the human has kept
+      // it waiting, and how recently a hook last asserted the block. The
+      // transcript's disproof needs the second, or a restated block arrives with
+      // those seconds of its tolerance already spent.
+      blockAnnouncedAt: state === 'blocked' ? now : null,
     };
     this.#write(sessionId, record);
     return record;
