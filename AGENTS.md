@@ -321,19 +321,25 @@ resuming the same session id. Observed three times over two days before anyone c
 the click.
 
 There is no other route: `claude://code/...` matches `/^(cse|session)_/`, which is cloud
-session ids, and is behind a feature flag. So **the default is to raise the app and say so** -
-`open -b com.anthropic.claudefordesktop`, plus a `note` on the `FocusResult` that the page
-toasts. The deep link is used only where `hasImportedSession` finds `local_<our uuid>` in the
-app's own store, which is precisely the condition that makes the app's dedupe fire. That
-lookup answers `false` for every unknown - missing app, unreadable directory, unexpected
-layout, a thrown error - because `false` is the branch that cannot copy anything. **Do not
-make it fail open.**
+session ids, and is behind a feature flag. So **raising the app and saying so is the whole
+behaviour** - `open -b com.anthropic.claudefordesktop`, plus a `note` on the `FocusResult`
+that the page toasts.
+
+**The link is not used even where that dedupe would fire**, and this is the half that took a
+second pass to see. A record filed under the id we hold is, by those same numbers, one an
+earlier click imported - so resuming it lands on the *copy* rather than the session, and both
+such records in the real store were archived, which takes the "unarchive and reuse" branch and
+can put a second Claude Code process on the one transcript. The original symptom, reached by
+the path meant to avoid it. Consulting the app's own store to tell the two apart was tried and
+removed: nothing in a record distinguishes a prior import from the rare case where the app's
+uuid and the CLI's coincide, so there is no test that could make the link safe. **Do not
+reintroduce a precise path without one.**
 
 Two honest limits remain, and both belong on the page rather than in a comment. `open` returns
 once Launch Services accepts, so the app's own failures (expired sign-in, deleted transcript)
-surface as a toast inside it and never reach us. And on the imprecise path the app opens
-wherever it left off, which is usually the session you clicked and sometimes is not - hence
-the note. `ok` here means *raised*, never *showing what you asked for*.
+surface as a toast inside it and never reach us. And the app opens wherever it left off, which
+is usually the session you clicked and sometimes is not - hence the note. `ok` here means
+*raised*, never *showing what you asked for*.
 
 **The host terminal for a tmux session is deliberately not stored.** A tmux session can be
 detached and reattached in a different terminal entirely, so it is resolved fresh on every
@@ -408,7 +414,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 324 tests, no network, no dependencies, ~1s
+npm test          # 314 tests, no network, no dependencies, ~1s
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
 
@@ -474,7 +480,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 ## Commands
 
 ```sh
-npm test                       # 324 tests, ~1s
+npm test                       # 314 tests, ~1s
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
 ```

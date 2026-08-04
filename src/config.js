@@ -20,19 +20,6 @@ export function noMistakesHome() {
   return process.env.NM_HOME || join(homedir(), '.no-mistakes');
 }
 
-/**
- * Claude Desktop's own record of the sessions it hosts.
- *
- * Someone else's directory, in someone else's shape - read only to answer one
- * question, and overridable so the suite never reads the real app.
- */
-export function claudeDesktopSessionsDir() {
-  return (
-    process.env.CLAUDE_DESKTOP_HOME ||
-    join(homedir(), 'Library', 'Application Support', 'Claude', 'claude-code-sessions')
-  );
-}
-
 export function statePath() {
   return join(noMistakesHome(), 'state.sqlite');
 }

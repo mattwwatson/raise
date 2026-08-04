@@ -226,9 +226,10 @@ Focusing one brings the app to the front, and says so in a toast: nmmon cannot r
 Claude Desktop to select a session, so it raises the app and leaves the sidebar to you. The
 app's `claude://resume` link looks like the answer and is not - it *imports* a session rather
 than switching to one, and because the app files its sessions under an id of its own, resuming
-one it is already running leaves you with two entries over the same conversation. nmmon uses
-that link only where the app has already imported the session, which is the one case where it
-switches instead of copying.
+one it is already running leaves you with two entries over the same conversation. The one case
+where the app would recognise the id instead of copying is a session an earlier such click
+already imported, so the link would land on that duplicate rather than the session you clicked
+- which is why nmmon never uses it.
 
 ## Security
 
@@ -273,7 +274,7 @@ updated.
 ## Development
 
 ```sh
-npm test          # 324 tests, no network, no build step, ~1s
+npm test          # 314 tests, no network, no build step, ~1s
 npm run typecheck
 ```
 
