@@ -357,9 +357,11 @@ The tie is `matchRunForAgentCwd`: **the run id is a path segment of the agent's 
 whole segment against ids we already hold, never as a pattern - guessing at the shape of a
 ULID would eventually claim somebody's real directory.
 
-One row per repo, never two. But folding must not swallow the one signal this tool exists to
-give, so **a blocked agent still makes the row blocked and carries its message** - an agent
-sitting on a permission prompt has stalled the pipeline, and only a human can free it.
+One row per repo, never two - and once a run has an owner, that is the owner's row, because the
+folded agent is pipeline state like the step and the parked gate. But folding must not swallow
+the one signal this tool exists to give, so **a blocked agent still makes the row blocked and
+carries its message** - an agent sitting on a permission prompt has stalled the pipeline, and
+only a human can free it.
 
 An agent's block is subject to every disproof a human session's is, and for a sharper reason:
 the hooks fall silent between the permission prompt and the end of the turn either way, but
