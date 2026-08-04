@@ -319,10 +319,31 @@ Two rules keep it from becoming a confident wrong answer of its own:
 `axi respond`, so there is no process to walk up from for exactly as long as a run is parked -
 which is when the dashboard matters most. Without the memory the row would scatter back across
 every session in the repo at the gate, and again for the half hour a finished run stays
-visible. First observation wins: a run does not change hands. Verified live - with the run
-parked, `ps` showed only the daemon, and `nmmon status`, which is one-shot and has no memory,
-still reported all three rows. The server polls, so it catches `axi run` within a second of
-it starting and holds the answer.
+visible. Verified live - with the run parked, `ps` showed only the daemon, and `nmmon status`,
+which is one-shot and has no memory, still reported all three rows. The server polls, so it
+catches `axi run` within a second of it starting and holds the answer.
+
+**Ownership does not change hands between live sessions, and is released when the owner is
+gone.** The first half is the guard against a session that ran a driving command near the end
+of a pipeline taking the row off the session that started it - a sighting from another *live*
+session is not a handover.
+
+The second half exists because the memory above outlives the sessions it names. A session ends
+while its run is parked, which is the ordinary way a pipeline outlives the window that started
+it, and whoever answers the gate next with `axi respond` is the session a human actually needs.
+Held by a dead owner, that run stayed unattributable: the new driver's card showed no pipeline
+at all, and the run fell through to a row with no Focus button - this feature's own failure
+mode inverted, and a confident wrong answer rather than the vague one it replaced. So `release`
+drops any ownership whose session is no longer registered, and it runs *before* the tick's
+sightings, or the new driver would still be refused on the very tick the old owner disappeared.
+
+**A reading we did not get is not evidence.** `prune` forgets runs that have left no-mistakes'
+recency window, so an empty runs list would forget every ownership at once - and the degraded
+`axi status` path returns exactly that from its cache until the first non-blocking call warms
+it. A parked run has no live process to be re-observed from, so one such tick would scatter it
+back across its repo permanently. The prune is therefore skipped on an empty reading, the same
+rule `PollWatch` applies to a `ps` it could not read. A few stale entries until a real reading
+arrives is the cheap side of the trade.
 
 **no-mistakes' own agent sessions are folded into the repo's row, never given one.**
 no-mistakes runs its pipeline steps as Claude sessions in a worktree at
@@ -596,7 +617,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 379 tests, no network, no dependencies, ~2s
+npm test          # 410 tests, no network, no dependencies, ~2s
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
 
@@ -679,7 +700,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 ## Commands
 
 ```sh
-npm test                       # 379 tests, ~2s
+npm test                       # 410 tests, ~2s
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
 ```

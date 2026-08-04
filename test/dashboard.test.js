@@ -501,6 +501,29 @@ test('a run whose owner is no longer registered gets a row of its own', () => {
   assert.equal(runRow.focusable, false);
 });
 
+test('a run taken over by a live session lands on that session, not on a row of its own', () => {
+  // The counterpart to the test above, and the reason `RunOwners.release`
+  // exists: the session that started the run ended at the gate, and the one
+  // that answered it with `axi respond` is now the owner. That session must
+  // carry the pipeline - it is the only window that can act on it - rather than
+  // watching it render beside them as a row with no Focus button.
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'taker', state: 'working' }),
+      session({ sessionId: 'bystander', state: 'idle', host: { tty: '/dev/ttys005' } }),
+    ],
+    runs: [run({ runId: 'r1', parked: true })],
+    runOwners: new Map([['r1', 'taker']]),
+    now: 5000,
+  });
+  assert.equal(rows.length, 2);
+  const byId = new Map(rows.map((r) => [r.sessionId, r]));
+  assert.equal(byId.get('taker').run?.runId, 'r1');
+  assert.equal(byId.get('taker').attention, 'parked');
+  assert.equal(byId.get('taker').focusable, true);
+  assert.equal(byId.get('bystander').run, null);
+});
+
 test('rows sort by urgency, then by recency', () => {
   const rows = sortRows([
     { attention: 'idle', updatedAt: 100 },

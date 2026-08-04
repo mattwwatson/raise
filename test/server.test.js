@@ -591,3 +591,104 @@ test('a pipeline lands on the session that started it, not on its neighbours', a
     cleanup();
   }
 });
+
+test('one empty reading does not forget who owns what', async () => {
+  // A reading we did not get is not evidence that every run ended - the
+  // degraded `axi status` path serves an empty cache until its first
+  // background refresh lands. Pruning on that would drop every ownership in a
+  // single tick, and a parked run has no live process to be re-observed from,
+  // so it would scatter back across its repo silently and for good.
+  const { dir, cleanup } = scratch();
+  const previousHome = process.env.NMMON_HOME;
+  process.env.NMMON_HOME = dir;
+  const repo = join(dir, 'repo');
+  let monitor = null;
+  try {
+    const dbPath = join(dir, 'state.sqlite');
+    const db = new DatabaseSync(dbPath);
+    db.exec(
+      'CREATE TABLE repos (id TEXT, working_path TEXT);' +
+        'CREATE TABLE runs (id TEXT, repo_id TEXT, branch TEXT, status TEXT,' +
+        ' awaiting_agent_since INTEGER, created_at INTEGER, updated_at INTEGER,' +
+        ' pr_url TEXT, pr_state TEXT, pr_state_observed_at INTEGER, head_sha TEXT, error TEXT);' +
+        'CREATE TABLE step_results (run_id TEXT, step_name TEXT, status TEXT, step_order INTEGER,' +
+        ' findings_json TEXT, last_activity TEXT, last_activity_at INTEGER, log_path TEXT);',
+    );
+    const seconds = Math.floor(Date.now() / 1000);
+    const insertRun = (status) =>
+      db
+        .prepare('INSERT INTO runs VALUES (?, ?, ?, ?, NULL, ?, ?, NULL, NULL, NULL, NULL, NULL)')
+        .run('run-1', 'repo-1', 'main', status, seconds, seconds);
+    db.prepare('INSERT INTO repos VALUES (?, ?)').run('repo-1', repo);
+    insertRun('running');
+
+    const driverPid = process.pid;
+    const neighbourPid = process.ppid;
+    const ps = [
+      '  100     1 /Applications/iTerm.app/Contents/MacOS/iTerm2',
+      `  ${driverPid}   100 claude`,
+      `  999999   ${driverPid} /usr/local/bin/no-mistakes axi run --intent "ship it"`,
+      `  ${neighbourPid}   100 claude`,
+      `  999998   ${neighbourPid} /usr/local/bin/no-mistakes axi status`,
+    ].join('\n');
+
+    const port = await freePort();
+    monitor = createMonitorServer({
+      port,
+      token: 'test-token',
+      dbPath,
+      sessionsPath: join(dir, 'sessions'),
+      exec: () => assert.fail('no blocking commands from the server'),
+      execAsync: async (command) => (command === 'ps' ? ps : ''),
+    });
+    await monitor.start();
+
+    for (const [sessionId, pid] of [
+      ['driver', driverPid],
+      ['neighbour', neighbourPid],
+    ]) {
+      const registered = await fetch(`http://127.0.0.1:${port}/event`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-nmmon-token': 'test-token' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          hook_event_name: 'SessionStart',
+          cwd: repo,
+          host: { tty: '/dev/ttys004', term_program: 'iTerm.app', pid },
+        }),
+      });
+      assert.equal(registered.status, 204);
+    }
+
+    const state = async () =>
+      (await (await fetch(`http://127.0.0.1:${port}/state?t=test-token`)).json()).rows;
+    // Asking is what schedules the scan, so the first reading predates it.
+    await state();
+    for (let i = 0; i < 10; i += 1) await nextTick();
+    assert.equal((await state()).find((r) => r.sessionId === 'driver')?.run?.runId, 'run-1');
+
+    // The degraded tick: nothing at all comes back.
+    db.prepare('DELETE FROM runs').run();
+    assert.deepEqual(
+      (await state()).map((r) => r.run),
+      [null, null],
+    );
+
+    // The run comes back finished, so nothing can be re-observed driving it -
+    // only the memory can still say whose it was. Without the guard above the
+    // pipeline would be back on both cards, which is the bug this whole change
+    // exists to fix.
+    insertRun('completed');
+    const rows = await state();
+    const byId = new Map(rows.map((r) => [r.sessionId, r]));
+    assert.equal(byId.get('driver')?.run?.runId, 'run-1');
+    assert.equal(byId.get('neighbour')?.run, null);
+    assert.equal(rows.length, 2);
+    db.close();
+  } finally {
+    await monitor?.stop();
+    if (previousHome === undefined) delete process.env.NMMON_HOME;
+    else process.env.NMMON_HOME = previousHome;
+    cleanup();
+  }
+});

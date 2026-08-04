@@ -18,7 +18,7 @@ import { TranscriptReader, defaultFileAccess } from './transcript-reader.js';
 import { GitBranch, defaultGitAccess } from './git-branch.js';
 import { LavishState } from './lavish.js';
 import { PollWatch } from './poll-watch.js';
-import { buildRows, matchRunForCwd, summarise } from './dashboard.js';
+import { buildRows, summarise } from './dashboard.js';
 import { RunOwners } from './run-owner.js';
 import { focusSession } from './focus/index.js';
 import { checkRequest } from './security.js';
@@ -115,6 +115,15 @@ export function createMonitorServer({
     const { runs, pullRequests, source, warning } = nmState.read({ candidateDirs });
 
     const agentPids = new Set(sessions.map((s) => s.host?.pid).filter(Boolean));
+    // Whose run it is, off the same scan the poll gate and the pipeline check
+    // use. Several sessions can be open on one checkout, and only the one
+    // driving the pipeline should carry it - the others cannot answer its gate,
+    // so summoning anyone to them is a wrong answer with a Focus button
+    // attached. Departed owners let go first, or a new driver's sighting would
+    // be discarded on the very tick the old owner disappeared.
+    runOwners.release(new Set(sessions.map((s) => s.sessionId)));
+    runOwners.observeFrom(sessions, runs, (s) => polls.ownsRunFor(s.host?.pid, agentPids));
+
     const summaries = new Map();
     const reviewUrls = new Map();
     const sessionBranches = new Map();
@@ -136,16 +145,6 @@ export function createMonitorServer({
       // Same scan, second question: a backgrounded pipeline is what makes
       // Claude Code's "waiting for your input" a lie.
       if (polls.pipelineFor(session.host?.pid, agentPids)) pipelines.add(session.sessionId);
-      // Third question off the same scan: whose run it is. Several sessions can
-      // be open on one checkout, and only the one driving the pipeline should
-      // carry it - the others cannot answer its gate, so summoning anyone to
-      // them is a wrong answer with a Focus button attached.
-      if (polls.ownsRunFor(session.host?.pid, agentPids)) {
-        const owned = matchRunForCwd(session.cwd, runs);
-        // Only a live run can be owned by a live process. A driving command run
-        // while the newest match is a finished run would otherwise claim it.
-        if (owned?.active) runOwners.observe(owned.runId, session.sessionId);
-      }
       const summary = polledFile ? { ...read, lavishFile: polledFile } : read;
       summaries.set(session.sessionId, summary);
       // Only ask Lavish about sessions that say they are polling it. Asking is
@@ -157,7 +156,15 @@ export function createMonitorServer({
     }
     transcripts.prune(new Set(sessions.map((s) => s.transcriptPath).filter(Boolean)));
     branches.prune(new Set(candidateDirs));
-    runOwners.prune(new Set(runs.map((r) => r.runId)));
+    // An empty reading is not evidence that every run ended - it is what the
+    // degraded `axi status` path returns from its cache before the first
+    // non-blocking call has warmed it. Pruning on that would forget every
+    // ownership in one tick, and a parked run has no live process to be
+    // re-observed from, so it would scatter back across its repo for the rest
+    // of its life. Same rule PollWatch applies to a `ps` it could not read: a
+    // reading we did not get is not evidence of anything. A few stale entries
+    // until a real reading arrives is the cheap side of the trade.
+    if (runs.length > 0) runOwners.prune(new Set(runs.map((r) => r.runId)));
 
     const rows = buildRows({
       sessions,
