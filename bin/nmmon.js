@@ -29,6 +29,7 @@ import { LavishState } from '../src/lavish.js';
 import { PollWatch } from '../src/poll-watch.js';
 import { focusSession } from '../src/focus/index.js';
 import { ALL_TERMINALS } from '../src/focus/terminals.js';
+import { hasImportedSession } from '../src/focus/claude-desktop-store.js';
 import { exec, execAsync, tryExec, tryExecAsync } from '../src/exec.js';
 import {
   monitorHome,
@@ -342,9 +343,9 @@ async function cmdFocus(positional) {
     process.exitCode = 1;
     return;
   }
-  const result = await focusSession(record, { exec: execAsync });
+  const result = await focusSession(record, { exec: execAsync, appSessions: hasImportedSession });
   if (result.ok) {
-    console.log(`Focused via ${result.adapter}.`);
+    console.log(result.note || `Focused via ${result.adapter}.`);
   } else {
     console.error(result.reason || 'Could not focus that session.');
     if (result.hint) console.error(`  Try: ${bold(result.hint)}`);

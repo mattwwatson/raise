@@ -20,6 +20,7 @@ import { LavishState } from './lavish.js';
 import { PollWatch } from './poll-watch.js';
 import { buildRows, summarise } from './dashboard.js';
 import { focusSession } from './focus/index.js';
+import { hasImportedSession } from './focus/claude-desktop-store.js';
 import { checkRequest } from './security.js';
 import { exec as defaultExec, execAsync as defaultExecAsync } from './exec.js';
 import { sessionsDir, statePath, serverInfoPath, readOrCreateToken, defaultPort } from './config.js';
@@ -405,7 +406,7 @@ export function createMonitorServer({
     // stream and every hook post along with it.
     let result;
     try {
-      result = await focusSession(record, { exec: execAsync });
+      result = await focusSession(record, { exec: execAsync, appSessions: hasImportedSession });
     } catch (err) {
       result = { ok: false, reason: `Could not focus that session: ${err.message}` };
     }

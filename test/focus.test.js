@@ -90,42 +90,79 @@ test('resumeUrl only builds a link for an id the app can resolve', () => {
   assert.equal(resumeUrl(null), null);
 });
 
-test('focusing a desktop session hands it to the app by deep link', async () => {
+test('focusing a desktop session never imports it into the app', async () => {
+  // The regression this file exists for. `claude://resume` is an *import*: its
+  // only dedupe is on `local_<the id we pass>`, and a session the app hosts
+  // natively is filed under `local_<the app's own uuid>` instead. So resuming
+  // one gave the user two sidebar entries over one transcript, mirroring each
+  // other. Raising the app is the only thing that cannot do that.
   const exec = fakeExec({ open: '' });
   const result = await focusSession(
     {
       sessionId: '2205e739-08bc-4ee6-a8d4-b15204bab998',
       host: { app: 'claude-desktop' },
     },
-    { exec },
+    { exec, appSessions: () => false },
   );
   assert.equal(result.ok, true);
   assert.equal(result.adapter, 'claude-desktop');
-  assert.deepEqual(exec.calls, ['open claude://resume?session=2205e739-08bc-4ee6-a8d4-b15204bab998']);
+  assert.deepEqual(exec.calls, ['open -b com.anthropic.claudefordesktop']);
+  assert.match(result.note, /sidebar/);
 });
 
-test('a desktop session with an id the app cannot resolve is refused, not guessed at', async () => {
-  // The deep link imports a session the app has never seen, so a wrong or
-  // malformed id is not a harmless miss. Nothing is run at all.
-  const exec = fakeExec({});
+test('a session the app has already imported is resumed precisely', async () => {
+  // Here, and only here, the app's own dedupe fires: it finds `local_<id>` in
+  // its store and unarchives it rather than importing again. That makes the
+  // deep link the better answer, because it lands on the session itself.
+  const exec = fakeExec({ open: '' });
+  const result = await focusSession(
+    { sessionId: '2205e739-08bc-4ee6-a8d4-b15204bab998', host: { app: 'claude-desktop' } },
+    { exec, appSessions: () => true },
+  );
+  assert.equal(result.ok, true);
+  assert.deepEqual(exec.calls, ['open claude://resume?session=2205e739-08bc-4ee6-a8d4-b15204bab998']);
+  assert.equal(result.note, undefined);
+});
+
+test('a store lookup that throws falls back to raising the app', async () => {
+  // The store's layout is the app's, not ours, and it is read behind a click.
+  // Anything unexpected there has to land on the path that cannot duplicate.
+  const exec = fakeExec({ open: '' });
+  const result = await focusSession(
+    { sessionId: '2205e739-08bc-4ee6-a8d4-b15204bab998', host: { app: 'claude-desktop' } },
+    {
+      exec,
+      appSessions: () => {
+        throw new Error('permission denied');
+      },
+    },
+  );
+  assert.equal(result.ok, true);
+  assert.deepEqual(exec.calls, ['open -b com.anthropic.claudefordesktop']);
+});
+
+test('a desktop session with an unresolvable id still raises the app', async () => {
+  // It used to be refused outright, because the only thing on offer was an
+  // import and a wrong id imported the wrong conversation. Activating the app
+  // needs no id and cannot go wrong, so refusing would only be a dead card.
+  const exec = fakeExec({ open: '' });
   const result = await focusSession(
     { sessionId: 'run-42', host: { app: 'claude-desktop' } },
-    { exec },
+    { exec, appSessions: () => true },
   );
-  assert.equal(result.ok, false);
-  assert.match(result.reason, /did not report an id/);
-  assert.deepEqual(exec.calls, []);
+  assert.equal(result.ok, true);
+  assert.deepEqual(exec.calls, ['open -b com.anthropic.claudefordesktop']);
 });
 
-test('a desktop deep link that will not open reports why, with the command to try', async () => {
+test('a desktop app that will not come to the front reports why, with the command to try', async () => {
   const exec = fakeExec({ open: new Error('LSOpenURLsWithRole() failed') });
   const result = await focusSession(
     { sessionId: '2205e739-08bc-4ee6-a8d4-b15204bab998', host: { app: 'claude-desktop' } },
-    { exec },
+    { exec, appSessions: () => false },
   );
   assert.equal(result.ok, false);
   assert.match(result.reason, /Claude Desktop/);
-  assert.equal(result.hint, "open 'claude://resume?session=2205e739-08bc-4ee6-a8d4-b15204bab998'");
+  assert.equal(result.hint, 'open -b com.anthropic.claudefordesktop');
 });
 
 test('planFocus routes a plain tab to the tab path', () => {

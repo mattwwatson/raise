@@ -49,6 +49,7 @@ import { focusClaudeDesktop } from './claude-desktop.js';
  * @property {string} [adapter] which terminal claimed it
  * @property {string} [reason] why not, phrased for the user
  * @property {string} [hint] a command the user can run instead
+ * @property {string} [note] raised, but not onto the thing you asked for - say so
  * @property {string} [tmuxSession]
  * @property {boolean} [ambiguous] more than one window matched, so none was raised
  */
@@ -193,11 +194,14 @@ async function focusTerminal(exec, { sessionUuid, tty, termProgram, terminals })
  * Focus the window hosting a session.
  *
  * @param {Session|null} record session record
- * @param {{exec: Function, terminals?: Terminal[]}} deps `exec` must be
- *   asynchronous; this is reachable from the server's /focus handler.
+ * @param {{exec: Function, terminals?: Terminal[],
+ *          appSessions?: (sessionId: string|null) => boolean}} deps `exec` must
+ *   be asynchronous; this is reachable from the server's /focus handler.
+ *   `appSessions` answers whether Claude Desktop has already imported a
+ *   session, and is defaulted at the edge so tests never read the real app.
  * @returns {Promise<FocusResult>}
  */
-export async function focusSession(record, { exec, terminals = ALL_TERMINALS }) {
+export async function focusSession(record, { exec, terminals = ALL_TERMINALS, appSessions }) {
   const plan = planFocus(record);
 
   if (plan.kind === 'unfocusable') {
@@ -205,7 +209,16 @@ export async function focusSession(record, { exec, terminals = ALL_TERMINALS }) 
   }
 
   if (plan.kind === 'app') {
-    return focusClaudeDesktop(exec, { sessionId: plan.sessionId ?? null });
+    const sessionId = plan.sessionId ?? null;
+    // Anything this lookup cannot answer means "not imported", which is the
+    // branch that only raises the app - never the one that could copy a session.
+    let imported = false;
+    try {
+      imported = appSessions ? appSessions(sessionId) === true : false;
+    } catch {
+      imported = false;
+    }
+    return focusClaudeDesktop(exec, { sessionId, imported });
   }
 
   if (plan.kind === 'tab') {

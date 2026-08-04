@@ -222,10 +222,13 @@ rather than `tab`, and everything else about them is ordinary: the repo, the bra
 is working on, its pull request, and any no-mistakes run in that checkout all appear exactly
 as they do for a terminal session.
 
-Focusing one brings the app to the front **with that session open**, rather than just
-activating it - nmmon hands the session to the app's own `claude://resume` link. Claude
-Desktop handles that asynchronously, so if it cannot open the session (a lapsed sign-in, say)
-the reason appears in the app rather than on the dashboard.
+Focusing one brings the app to the front, and says so in a toast: nmmon cannot reach inside
+Claude Desktop to select a session, so it raises the app and leaves the sidebar to you. The
+app's `claude://resume` link looks like the answer and is not - it *imports* a session rather
+than switching to one, and because the app files its sessions under an id of its own, resuming
+one it is already running leaves you with two entries over the same conversation. nmmon uses
+that link only where the app has already imported the session, which is the one case where it
+switches instead of copying.
 
 ## Security
 
@@ -270,7 +273,7 @@ updated.
 ## Development
 
 ```sh
-npm test          # 315 tests, no network, no build step, ~1s
+npm test          # 324 tests, no network, no build step, ~1s
 npm run typecheck
 ```
 

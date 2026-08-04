@@ -714,9 +714,12 @@
       /*
        * Where the session lives. "desktop" is the Claude Desktop app, which has
        * no tab and no tty - naming it a tab would be the one label on this page
-       * that tells you to go looking somewhere it is not.
+       * that tells you to go looking somewhere it is not. A kind with no entry
+       * here renders nothing at all, deliberately: this used to fall back to
+       * "tab", which turned every host we failed to recognise into a confident
+       * claim about a terminal.
        */
-      const HOST_LABELS = { tmux: 'tmux', tab: 'tab', app: 'desktop' };
+      const HOST_LABELS = { tmux: 'tmux', tab: 'tab', app: 'desktop', unknown: 'no window' };
 
       /*
        * The favicon carries the one thing worth knowing from a background tab:
@@ -797,7 +800,15 @@
             body: JSON.stringify({ sessionId: row.sessionId }),
           });
           const data = await res.json();
-          if (!data.ok) toast(data.hint ? data.reason + '  ->  ' + data.hint : data.reason, true);
+          // Success is otherwise silent - the window arriving in front of you is
+          // the feedback. A note means it arrived on something less than what
+          // you clicked, and staying quiet about that is how a monitor teaches
+          // you to distrust it.
+          if (data.ok) {
+            if (data.note) toast(data.note);
+          } else {
+            toast(data.hint ? data.reason + '  ->  ' + data.hint : data.reason, true);
+          }
         } catch (err) {
           toast('Could not reach nmmon: ' + err.message, true);
         }
@@ -1103,10 +1114,10 @@
             (since ? 'Waiting since ' : 'Last activity ') + new Date(stamp).toLocaleString();
           meta.appendChild(t);
         }
-        if (row.hostKind) {
+        if (HOST_LABELS[row.hostKind]) {
           const host = document.createElement('span');
           host.className = 'host';
-          host.textContent = HOST_LABELS[row.hostKind] || 'tab';
+          host.textContent = HOST_LABELS[row.hostKind];
           meta.appendChild(host);
         }
         if (row.focusable) {
