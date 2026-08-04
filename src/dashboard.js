@@ -54,6 +54,9 @@ import { pullRequestNumber } from './nm-state.js';
  * @property {number|null} waitingForMs how long blocked, for the "2m" column
  * @property {boolean} focusable whether clicking this row can do anything
  * @property {'tmux'|'tab'|'app'|'unknown'|null} hostKind where the session lives
+ * @property {import('./registry.js').AgentKind|null} agentKind which agent is
+ *   running it; null for a run with no session behind it. Named apart from
+ *   `agent` below, which is the pipeline's own session folded into this row
  * @property {Run|null} run
  * @property {number|null} updatedAt
  * @property {string|null} summary what the session is working on, in Claude's
@@ -541,6 +544,9 @@ export function buildRows({
           : null,
       focusable: plan.kind !== 'unfocusable',
       hostKind: hostKindFor(plan),
+      // A record written before pi was supported carries no agent, and only
+      // Claude Code sessions existed then.
+      agentKind: session.agent || 'claude',
       run: run || null,
       updatedAt: session.updatedAt || null,
       // The pipeline step is the better summary when there is one: it says what
@@ -560,8 +566,16 @@ export function buildRows({
       // verified but frozen. The transcript is neither, and is the only one
       // that sees a pull request no-mistakes never opened - which is common
       // enough that leaving it out means no link at all on plain Claude work.
+      //
+      // The run's own pull request has to clear the same branch check as the
+      // other two, for the reason given above `branch`: `matchRunForCwd` places
+      // a run by repo path alone, so a finished run keeps matching this session
+      // for half an hour after the checkout has moved on, and handed over a
+      // link to the branch it ended on. The row then disagreed with itself -
+      // `main` beside another branch's review - which is exactly the confident
+      // wrong link the whole feature is built to avoid.
       pr:
-        (run?.prUrl ? pullRequestForRun(run) : null) ||
+        (run?.prUrl && run.branch === branch ? pullRequestForRun(run) : null) ||
         matchPullRequest(session.cwd, branch, pullRequests) ||
         transcriptPullRequest(summary, run?.repoPath || session.cwd, branch, pullRequests),
       lastActivityAt: summary?.lastActivityAt ?? null,
@@ -593,6 +607,7 @@ export function buildRows({
       waitingForMs: null,
       focusable: false,
       hostKind: null,
+      agentKind: null,
       run,
       updatedAt: run.updatedAt || null,
       summary: run.step?.name ? `step ${run.step.name}` : null,

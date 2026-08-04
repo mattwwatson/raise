@@ -21,6 +21,7 @@ import {
   hookCommand,
   HOOK_EVENTS,
 } from '../src/hooks.js';
+import { mergeExtension, removeExtension, EXTENSION_MARKER } from '../src/pi-extension.js';
 import { NoMistakesState } from '../src/nm-state.js';
 import { SessionRegistry } from '../src/registry.js';
 import { TranscriptReader } from '../src/transcript-reader.js';
@@ -39,6 +40,7 @@ import {
   defaultPort,
   portFromFlag,
   ensureDirs,
+  piSettingsPath,
 } from '../src/config.js';
 import { buildRows } from '../src/dashboard.js';
 import { parseArgv } from '../src/cli-args.js';
@@ -46,6 +48,7 @@ import { probeHealth } from '../src/health.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HOOK_SCRIPT = resolve(HERE, '..', 'hooks', 'nmmon-hook.js');
+const PI_EXTENSION = resolve(HERE, '..', 'hooks', 'nmmon-pi-extension.js');
 const DEFAULT_SETTINGS = join(homedir(), '.claude', 'settings.json');
 
 const bold = (s) => `[1m${s}[0m`;
@@ -85,7 +88,7 @@ function probablePort() {
 }
 
 function usage() {
-  return `${bold('nmmon')} - watch every no-mistakes run and Claude session on this machine
+  return `${bold('nmmon')} - watch every no-mistakes run and agent session on this machine
 
 ${bold('Usage')}
   nmmon serve              start the monitor and print the dashboard URL
@@ -94,11 +97,14 @@ ${bold('Usage')}
   nmmon focus <session>    bring a session's window to the front
   nmmon install-hooks      add the Claude Code hooks to settings.json
   nmmon uninstall-hooks    remove them again
+  nmmon install-pi         add the pi extension to pi's settings.json
+  nmmon uninstall-pi       remove it again
   nmmon doctor             check the setup and explain anything missing
 
 ${bold('Options')}
   --port <n>               listen on a different port (default ${describedDefaultPort()})
-  --settings <path>        settings file for install/uninstall (default ~/.claude/settings.json)
+  --settings <path>        settings file for install/uninstall (defaults to the
+                           agent's own: ~/.claude/settings.json, ~/.pi/agent/settings.json)
   --dry-run                show what would change, write nothing
   --yes                    do not ask for confirmation
 `;
@@ -425,6 +431,62 @@ async function cmdUninstallHooks(flags) {
   console.log(green('Removed.'));
 }
 
+async function cmdInstallPiExtension(flags) {
+  const settingsPath = flags.settings || piSettingsPath();
+  let existing;
+  try {
+    existing = readSettings(settingsPath);
+  } catch (err) {
+    console.error(red(err.message));
+    process.exitCode = 1;
+    return;
+  }
+  const { settings, changes } = mergeExtension(existing, PI_EXTENSION);
+
+  if (changes.length === 0) {
+    console.log(`${green('Already installed')} - ${settingsPath} is up to date.`);
+    return;
+  }
+
+  console.log(`${bold('Changes to')} ${settingsPath}`);
+  for (const change of changes) console.log(`  ${change}`);
+  console.log(`\n${bold('Extension')}\n  ${PI_EXTENSION}\n`);
+
+  if (flags['dry-run']) {
+    console.log(dim('Dry run; nothing written.'));
+    return;
+  }
+  if (!flags.yes && !(await confirm('Write these changes?'))) {
+    console.log('Nothing written.');
+    return;
+  }
+  const backupPath = writeSettings(settingsPath, settings);
+  console.log(green(`Installed. ${backupPath ? `Backup at ${backupPath}` : ''}`));
+  console.log(
+    dim('Restart any pi sessions you already have open - extensions are loaded at startup.'),
+  );
+}
+
+async function cmdUninstallPiExtension(flags) {
+  const settingsPath = flags.settings || piSettingsPath();
+  const existing = readSettings(settingsPath);
+  const { settings, changes } = removeExtension(existing);
+  if (changes.length === 0) {
+    console.log('No nmmon extension found.');
+    return;
+  }
+  if (flags['dry-run']) {
+    console.log(changes.join('\n'));
+    return;
+  }
+  if (!flags.yes && !(await confirm(`Remove the nmmon extension from ${settingsPath}?`))) {
+    console.log('Nothing written.');
+    return;
+  }
+  writeSettings(settingsPath, settings);
+  console.log(green('Removed.'));
+}
+
 async function cmdDoctor() {
   const checks = [];
   const ok = (name, detail) => checks.push({ state: 'ok', name, detail });
@@ -458,6 +520,21 @@ async function cmdDoctor() {
     ok('Claude Code hooks', `installed in ${DEFAULT_SETTINGS}`);
   } else {
     warn('Claude Code hooks', `not installed - run ${bold('nmmon install-hooks')}`);
+  }
+
+  // Only reported when pi is actually installed. Telling somebody who does not
+  // use pi that a pi extension is missing is noise dressed as a problem, and a
+  // doctor that cries wolf gets skimmed.
+  const piSettings = piSettingsPath();
+  if (existsSync(piSettings)) {
+    const installed = (readSettingsQuietly(piSettings).extensions || []).some(
+      (entry) => typeof entry === 'string' && entry.includes(EXTENSION_MARKER),
+    );
+    if (installed) {
+      ok('pi extension', `installed in ${piSettings}`);
+    } else {
+      warn('pi extension', `not installed - run ${bold('nmmon install-pi')}`);
+    }
   }
 
   const sessions = new SessionRegistry({ dir: sessionsDir() }).list();
@@ -548,6 +625,12 @@ async function main() {
       break;
     case 'uninstall-hooks':
       await cmdUninstallHooks(flags);
+      break;
+    case 'install-pi':
+      await cmdInstallPiExtension(flags);
+      break;
+    case 'uninstall-pi':
+      await cmdUninstallPiExtension(flags);
       break;
     case 'doctor':
       await cmdDoctor();

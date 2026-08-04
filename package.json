@@ -1,7 +1,7 @@
 {
   "name": "no-mistakes-monitor",
   "version": "0.1.0",
-  "description": "Monitor no-mistakes pipeline runs and Claude Code sessions across every repo on your machine, and jump to the window that wants you.",
+  "description": "Monitor no-mistakes pipeline runs and agent sessions - Claude Code and pi - across every repo on your machine, and jump to the window that wants you.",
   "type": "module",
   "bin": {
     "nmmon": "bin/nmmon.js"

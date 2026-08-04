@@ -559,6 +559,52 @@ test('a live run"s own pull request wins, and is reported as current', () => {
   assert.equal(rows[0].pr.live, true);
 });
 
+test('a run does not lend its pull request to a session that has moved on', () => {
+  // Observed live: a merged run from twenty minutes earlier put its PR on a
+  // session sitting in the same repo on `main`, so the row said `main` and
+  // carried a link to another branch's review. `matchRunForCwd` matches on the
+  // repo path alone - deliberately - so the run attaching is right and the
+  // pull request coming with it is not. Same rule as `matchPullRequest`: the
+  // branch has to agree, or there is no link.
+  const rows = buildRows({
+    sessions: [session()],
+    runs: [
+      run({
+        active: false,
+        status: 'completed',
+        branch: 'fix/something-merged',
+        prUrl: 'https://example.com/pull/5',
+        prState: 'merged',
+      }),
+    ],
+    branches: new Map([['s1', 'main']]),
+  });
+  assert.equal(rows[0].branch, 'main');
+  assert.equal(rows[0].pr, null);
+});
+
+test('a run on another branch still falls through to the branch-verified source', () => {
+  // Rejecting the run's pull request must not cost the row the right one.
+  const rows = buildRows({
+    sessions: [session()],
+    runs: [run({ branch: 'fix/other', prUrl: 'https://example.com/pull/5' })],
+    branches: new Map([['s1', 'feat/x']]),
+    pullRequests: [pr()],
+  });
+  assert.equal(rows[0].pr.number, 7);
+});
+
+test('a checkout whose branch could not be read takes the run"s word for it', () => {
+  // With no branch of our own the run's is all there is, and it is also what
+  // the row itself is showing - so the two still agree, which is the rule.
+  const rows = buildRows({
+    sessions: [session()],
+    runs: [run({ branch: 'feat/x', active: true, prUrl: 'https://example.com/pull/9' })],
+  });
+  assert.equal(rows[0].branch, 'feat/x');
+  assert.equal(rows[0].pr.number, 9);
+});
+
 test('lastActivityAt reaches the row from the transcript', () => {
   const rows = buildRows({
     sessions: [session()],
@@ -936,4 +982,25 @@ test('with no pipeline running, the idle nudge still means you', () => {
     now: 6000,
   });
   assert.equal(row.attention, 'blocked');
+});
+
+test('a row carries which agent is running it', () => {
+  const rows = buildRows({
+    sessions: [session({ agent: 'pi' })],
+    runs: [],
+  });
+  assert.equal(rows[0].agentKind, 'pi');
+});
+
+test('a session record written before pi existed is Claude Code', () => {
+  // The field is simply absent on every record already on disk.
+  const rows = buildRows({ sessions: [session()], runs: [] });
+  assert.equal(rows[0].agentKind, 'claude');
+});
+
+test('a run with no session behind it claims no agent', () => {
+  // Nobody is running it - it is a pipeline the database knows about - and
+  // naming an agent there would be an invention.
+  const rows = buildRows({ sessions: [], runs: [run()] });
+  assert.equal(rows[0].agentKind, null);
 });

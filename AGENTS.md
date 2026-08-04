@@ -9,8 +9,8 @@ that are easy to undo by accident.
 ## Project Overview
 
 `nmmon` is a single-page monitor for one developer's machine. It shows every `no-mistakes`
-pipeline run and every Claude Code session across every repo, ranks them by who needs a human,
-and focuses the terminal window when you click a row.
+pipeline run and every agent session - Claude Code or pi - across every repo, ranks them by
+who needs a human, and focuses the terminal window when you click a row.
 
 The product is one sentence: **tell me which session is waiting for me, and take me there.**
 Everything else is supporting cast. Optimise for that signal arriving fast and never being
@@ -48,7 +48,7 @@ Four sources of truth, joined into one list:
 | Source | Module | Answers |
 | --- | --- | --- |
 | no-mistakes SQLite DB (polled, 1s) | `src/nm-state.js` | is a pipeline run parked, working, failed? |
-| Claude Code hooks (pushed) | `src/registry.js` | is Claude blocked waiting for a human? |
+| agent hooks (pushed) | `src/registry.js` | is the agent blocked waiting for a human? |
 | the session's own transcript (tail, on change) | `src/transcript.js` | what is it working on, what is it doing right now, and did it open a pull request? |
 | the process table (one `ps`, every 3s) | `src/poll-watch.js` | is a review still open, and is a pipeline still running? |
 
@@ -58,9 +58,9 @@ Four sources of truth, joined into one list:
 | `src/cli-args.js` | argument parsing (pure) |
 | `src/config.js` | paths, ports, the shared token; all env-overridable |
 | `src/nm-state.js` | reads the no-mistakes database, with schema probe and fallback |
-| `src/registry.js` | live Claude sessions, fed by hooks |
+| `src/registry.js` | live agent sessions, fed by hooks |
 | `src/transcript.js` | what a session is doing, parsed from its transcript (pure) |
-| `src/transcript-reader.js` | the tail read behind that, cached on mtime and branch |
+| `src/transcript-reader.js` | the tail read behind that, cached on mtime, branch and agent |
 | `src/git-branch.js` | the branch a checkout is on, read from `.git/HEAD` |
 | `src/lavish.js` | resolving a Lavish artifact to the page waiting on you |
 | `src/poll-watch.js` | which sessions are in a `lavish-axi poll`, and which have a pipeline running |
@@ -73,6 +73,9 @@ Four sources of truth, joined into one list:
 | `src/server.js` | HTTP, server-sent events, the poll loop |
 | `src/hooks.js` | merging our hooks into the user's `~/.claude/settings.json` |
 | `hooks/nmmon-hook.js` | the Claude Code hook |
+| `hooks/nmmon-pi-extension.js` | the pi extension, which is the same reporter in-process |
+| `src/pi-transcript.js` | pi transcripts, normalised into the records `transcript.js` reads |
+| `src/pi-extension.js` | merging our extension into pi's `settings.json` |
 | `public/index.html` | the page, self-contained |
 | `public/connection.js` | the liveness rule (pure, no DOM, injected clock) |
 
@@ -254,6 +257,15 @@ A live no-mistakes run is being watched right now, so its `pr_state` is real. Th
 history is branch-verified but frozen. The transcript is neither, and is the only one that
 sees a pull request no-mistakes never opened.
 
+**All three are gated on the checkout's branch, the run's own included.** `matchRunForCwd`
+places a run by repo path alone - deliberately, so the row keeps showing the repo's recent
+pipeline - which means a finished run still matches a session for the whole thirty minutes it
+counts as recent, long after the checkout has moved on. Taking its pull request
+unconditionally therefore put another branch's review beside `main`: exactly the confident
+wrong link the rest of this section is built to prevent. A checkout whose branch cannot be
+read is unaffected, because `branch` already falls back to the run's own and the two agree by
+construction.
+
 *The frozen part is the trap.* no-mistakes stops observing a pull request the moment its run
 reaches a terminal state - `pr_state_observed_at` never advances past `updated_at` - so every
 cancelled run in a real database still says `open`, days later. **The link survives the run;
@@ -341,6 +353,60 @@ surface as a toast inside it and never reach us. And the app opens wherever it l
 is usually the session you clicked and sometimes is not - hence the note. `ok` here means
 *raised*, never *showing what you asked for*.
 
+**A pi session can never be `blocked`, and that is the design rather than a gap.** pi is a
+second agent this monitors, and everything that keys off `cwd`, `transcriptPath` or `host.pid`
+- the run match, the branch, the pull request, the Lavish gate, the pipeline scan, every focus
+adapter - works on it unchanged. What does not carry over is the signal the tool exists for.
+
+Claude Code asks permission before it runs a tool, so it can say *a human is needed right now*.
+pi ships no sandbox and no approval gate; its tools simply run. Nothing inside it corresponds
+to a permission prompt, so `PI_EVENT_STATES` in `registry.js` contains no `blocked` at all.
+
+The tempting inference is "the turn ended and nobody has typed since, so escalate to blocked
+after a minute" - Claude Code's idle nudge, reimplemented. It was considered and rejected: it
+would put pi rows in competition with real permission prompts on the strength of a guess, and
+red that sometimes means *nothing is wrong* is how a page stops being believed. A pi session
+still reaches the top the honest way, through its pipeline: parked, failed, or waiting on a
+review. Revisit only if pi grows a real approval gate, in which case map that and nothing else.
+
+**pi's transcript is normalised, never summarised separately.** `parseTranscriptTail` is the
+only Claude-shaped thing in `transcript.js`; everything past it takes plain records. So
+`pi-transcript.js` rewrites pi's entries into those records and `summariseTranscript` runs on
+both unchanged. A parallel summariser would fork the id-matching in-flight rule, the
+`lastActivityAt` whitelist and all three pull-request guards - and the copy that missed the
+next fix would be the one putting a confident wrong answer on the page.
+
+Three things the rename has to get right, each learned from the other agent:
+
+- **Every pi entry carries a top-level timestamp**, `model_change` and `thinking_level_change`
+  included, and those are written at startup. This is the `away_summary` trap in another
+  dialect, so anything that is not the conversation is dropped rather than passed through
+  with a timestamp attached. `compactionSummary`, `branchSummary` and extension `custom`
+  records go the same way.
+- **A tool result is a `user` record**, exactly as in Claude Code. A returning tool is the
+  session working; typing it as anything else would make a busy session look idle.
+- **Tool names are mapped, not passed through.** `describeToolUse` picks a verb by name and
+  `summariseTranscript` keys on `Bash` to notice a `lavish-axi poll`. pi's `bash` left
+  lowercase would render as a bare word and, worse, hide a review gate. pi's `path` becomes
+  `file_path` for the same reason: without it the card reads "Reading Read".
+
+**The pi reporter is an extension, so "never fail" is stricter than for the hook.**
+`nmmon-hook.js` is a separate process - if it throws, a subprocess dies quietly. The pi
+extension runs *inside the agent*, and pi awaits event handlers, so an exception surfaces in
+somebody's editing loop and a slow `fetch` stalls their turn. Every handler catches
+everything; the post is bounded and never awaited.
+
+Two things are easier in return, both from being in-process: the agent pid is simply
+`process.pid` rather than something to walk the process table for, and the session file comes
+from `ctx.sessionManager.getSessionFile()`. That last one **must be resolved to an absolute
+path** - pi returns it exactly as given, so a relative `--session-dir` yields a relative path
+that the server would then resolve against its own working directory.
+
+**The extension is registered by path, never copied into `~/.pi/agent/extensions/`.**
+Auto-discovery would work and is shorter, but a copied file is a fork: it goes stale the first
+time the repo is pulled, and the stale half is the one running inside the agent.
+`nmmon-hook.js` is registered the same way for the same reason.
+
 **The host terminal for a tmux session is deliberately not stored.** A tmux session can be
 detached and reattached in a different terminal entirely, so it is resolved fresh on every
 click.
@@ -404,6 +470,17 @@ Keep it that way - it has no build step and must open as a file.
   entry renders no chip at all. It used to default to `tab`, which turned every host we failed
   to recognise - a Claude Desktop session included - into a confident claim about a terminal
   window that was not there. An unplaceable session says `no window`.
+- **The agent chip names pi and stays silent about Claude Code**, and `AGENT_LABELS` has no
+  entry for it. Claude Code is most of the rows, and a chip on every card saying so is noise
+  on a page whose whole job is to be scannable - the same reason `mode` hides `normal`. pi is
+  worth marking because what its states can mean differs: a pi row never turns red for a
+  permission prompt, because pi has none. It is outlined and `--faint`, quieter than the host
+  chip beside it, since provenance must not compete with where your window actually is.
+- **The expanded panel names the agent that wrote each line**, through `AGENT_NAMES`, which
+  *does* carry Claude Code - a label on a line is required where a chip on a card is not. The
+  record itself cannot say, because both agents write the same parsed shape, so the row is
+  what knows. An agent neither map recognises falls back to the neutral word `agent`, never
+  to a name.
 - Focusing succeeds silently: the window arriving in front of you is the feedback. A
   `FocusResult.note` is the exception - it means we raised something less than what you
   clicked, and it gets a neutral toast.
@@ -414,7 +491,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 314 tests, no network, no dependencies, ~1s
+npm test          # 362 tests, no network, no dependencies, ~2s
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
 
@@ -448,6 +525,13 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 - **`hooks/nmmon-hook.js` runs inside someone's live Claude session.** It must never fail and
   never block: every path exits 0, quietly, within `TIMEOUT_MS`. A monitor that can break
   Claude Code is worse than no monitor.
+- **`hooks/nmmon-pi-extension.js` runs in-process inside someone's live pi session**, which
+  is a stricter version of the rule above: pi awaits event handlers, so a throw reaches the
+  user's turn and a slow request stalls it. Every handler catches everything, and the post is
+  bounded and never awaited. Do not make it `await` anything on pi's path.
+- **`src/pi-extension.js` writes to the user's `~/.pi/agent/settings.json`.** Same obligations
+  as `hooks.js`: show a diff, ask first, back up, leave every foreign entry in place and in
+  order - load order is meaningful in pi - and be safe to run twice.
 - **The hook payload is a privacy boundary.** Session id, cwd, transcript *path*, event name,
   Claude's own notification message, and window identity. Never prompt text, transcript
   content or file contents. Do not widen it.
@@ -480,7 +564,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 ## Commands
 
 ```sh
-npm test                       # 314 tests, ~1s
+npm test                       # 362 tests, ~2s
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
 ```

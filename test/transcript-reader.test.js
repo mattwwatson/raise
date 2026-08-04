@@ -174,3 +174,36 @@ test('a transcript that cannot be read has no events rather than a false empty h
   assert.deepEqual(reader.events('/gone.jsonl'), []);
   assert.deepEqual(reader.events(null), []);
 });
+
+test('a pi transcript is parsed by pi"s parser, and a Claude one is not', () => {
+  // The same bytes mean different things to the two parsers, so picking by
+  // agent is what stops a pi session being read as an empty Claude one.
+  const files = fakeFiles();
+  files.set(
+    '/pi.jsonl',
+    line({
+      type: 'message',
+      timestamp: '2026-08-04T05:00:00.000Z',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'toolCall', id: 'tc_1', name: 'bash', arguments: { command: 'npm test' } }],
+      },
+    }),
+    100,
+  );
+  const reader = new TranscriptReader({ files: files.access });
+
+  assert.equal(reader.read('/pi.jsonl', null, 'pi').activity, 'Running npm');
+  // Read as Claude Code's format the same file says nothing at all - which is
+  // exactly the silent wrong answer this parameter prevents.
+  assert.equal(reader.read('/pi.jsonl', null, 'claude').activity, null);
+});
+
+test('an agent that was never named is read as Claude Code', () => {
+  // Records written before pi was supported carry no agent.
+  const files = fakeFiles();
+  files.set('/t.jsonl', line({ type: 'ai-title', aiTitle: 'a title' }), 100);
+  const reader = new TranscriptReader({ files: files.access });
+  assert.equal(reader.read('/t.jsonl').title, 'a title');
+  assert.equal(reader.read('/t.jsonl', null, undefined).title, 'a title');
+});

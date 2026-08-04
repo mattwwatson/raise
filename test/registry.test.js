@@ -21,6 +21,65 @@ test('hook events map to the right session state', () => {
   assert.equal(stateForEvent('SessionEnd'), 'ended');
 });
 
+test('pi events map to the right session state', () => {
+  assert.equal(stateForEvent('session_start', 'pi'), 'idle');
+  assert.equal(stateForEvent('before_agent_start', 'pi'), 'working');
+  assert.equal(stateForEvent('agent_settled', 'pi'), 'idle');
+  assert.equal(stateForEvent('session_shutdown', 'pi'), 'ended');
+});
+
+test('nothing pi can report is a block, and that is the design', () => {
+  // pi ships no sandbox and no approval gate, so no event inside it means "a
+  // human is needed right now". Inferring one would put pi rows in competition
+  // with real permission prompts on the strength of a guess.
+  const states = ['session_start', 'before_agent_start', 'agent_start', 'turn_start',
+    'agent_settled', 'session_shutdown', 'something_new_pi_adds']
+    .map((event) => stateForEvent(event, 'pi'));
+  assert.equal(states.includes('blocked'), false);
+});
+
+test('the two agents" event names do not leak into each other', () => {
+  // A Claude event name arriving on a pi session, or the reverse, must not be
+  // silently honoured - it would mean a payload was mislabelled, and the safe
+  // reading of an unknown event is that the session is busy.
+  assert.equal(stateForEvent('Notification', 'pi'), 'working');
+  assert.equal(stateForEvent('SessionEnd', 'pi'), 'working');
+  assert.equal(stateForEvent('session_shutdown', 'claude'), 'working');
+});
+
+test('a session that does not say which agent it is, is Claude Code', () => {
+  // Claude Code's hook has no field to say so, and only Claude Code existed
+  // when the records already on disk were written.
+  assert.equal(stateForEvent('Notification'), 'blocked');
+  const { dir, cleanup } = scratch();
+  try {
+    const registry = new SessionRegistry({ dir });
+    const record = registry.record({ session_id: 's1', hook_event_name: 'SessionStart' });
+    assert.equal(record.agent, 'claude');
+  } finally {
+    cleanup();
+  }
+});
+
+test('a pi session is recorded as one, and its shutdown deregisters it', () => {
+  const { dir, cleanup } = scratch();
+  try {
+    const registry = new SessionRegistry({ dir, isAlive: alwaysAlive });
+    const record = registry.record({
+      session_id: 'pi1',
+      hook_event_name: 'session_start',
+      agent: 'pi',
+      cwd: '/Users/x/work/repo',
+    });
+    assert.equal(record.agent, 'pi');
+    assert.equal(record.state, 'idle');
+    assert.equal(registry.record({ session_id: 'pi1', hook_event_name: 'session_shutdown', agent: 'pi' }), null);
+    assert.equal(registry.get('pi1'), null);
+  } finally {
+    cleanup();
+  }
+});
+
 test('session ids are validated before they reach the filesystem', () => {
   assert.equal(isSafeSessionId('abc-123_DEF'), true);
   assert.equal(isSafeSessionId('../../etc/passwd'), false);
@@ -60,6 +119,44 @@ test('window identity captured at session start survives later events', () => {
     const record = registry.get('s1');
     assert.equal(record.host.tmux_pane, '%4');
     assert.equal(record.cwd, '/repo', 'cwd should also carry forward');
+    assert.equal(record.state, 'idle');
+  } finally {
+    cleanup();
+  }
+});
+
+test('a pi session keeps its window whether an event repeats it or omits it', () => {
+  // pi's extension caches the identity and resends it, so the merge is what
+  // makes a repeat idempotent - and an event that carries none, from before the
+  // walk could run, must still leave the row focusable.
+  const { dir, cleanup } = scratch();
+  try {
+    const registry = new SessionRegistry({ dir });
+    const host = { tty: '/dev/ttys004', pid: process.pid };
+    registry.record({
+      session_id: 'p1',
+      hook_event_name: 'session_start',
+      agent: 'pi',
+      cwd: '/repo',
+      host,
+    });
+    registry.record({
+      session_id: 'p1',
+      hook_event_name: 'before_agent_start',
+      agent: 'pi',
+      cwd: '/repo',
+    });
+    registry.record({
+      session_id: 'p1',
+      hook_event_name: 'agent_settled',
+      agent: 'pi',
+      cwd: '/repo',
+      host,
+    });
+
+    const record = registry.get('p1');
+    assert.equal(record.host.tty, '/dev/ttys004');
+    assert.equal(record.host.pid, process.pid);
     assert.equal(record.state, 'idle');
   } finally {
     cleanup();

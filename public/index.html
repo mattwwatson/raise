@@ -351,7 +351,7 @@
       .event-who.you {
         color: var(--working);
       }
-      .event-who.claude {
+      .event-who.agent {
         color: var(--muted);
       }
       .event-who.tool {
@@ -584,6 +584,19 @@
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         font-size: 11px;
       }
+      /*
+       * Which agent is running the session. Outlined rather than coloured: it
+       * is provenance, not attention, and nothing on this page may compete with
+       * the states that mean somebody is waiting.
+       */
+      .agent-chip {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 11px;
+        padding: 0 4px;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        color: var(--faint);
+      }
       a.pr {
         display: inline-flex;
         align-items: baseline;
@@ -720,6 +733,28 @@
        * claim about a terminal.
        */
       const HOST_LABELS = { tmux: 'tmux', tab: 'tab', app: 'desktop', unknown: 'no window' };
+
+      /*
+       * Which agent, named only when it is worth naming. Claude Code has no
+       * entry on purpose: it is most of the rows, and a chip on every card
+       * saying so is noise on a page whose whole job is to be scannable - the
+       * same reason `mode` hides 'normal'. A pi row is the exception worth
+       * marking, because what its state can and cannot mean differs: pi has no
+       * permission prompt, so a pi row never turns red for one.
+       *
+       * No fallback, exactly as with HOST_LABELS. An agent we do not recognise
+       * gets no chip rather than a confident wrong name.
+       */
+      const AGENT_LABELS = { pi: 'pi' };
+
+      /*
+       * The same agents, for the one place that has to name somebody rather
+       * than stay silent: an expanded panel labels every line with who wrote
+       * it. Claude Code appears here and not in AGENT_LABELS because a label
+       * on a line is required and a chip on a card is not. An agent neither
+       * map knows falls back to the neutral word rather than to a name.
+       */
+      const AGENT_NAMES = { claude: 'claude', pi: 'pi' };
 
       /*
        * The favicon carries the one thing worth knowing from a background tab:
@@ -921,7 +956,15 @@
 
           const who = document.createElement('span');
           who.className = 'event-who ' + event.kind;
-          who.textContent = event.kind === 'tool' ? event.label || 'tool' : event.kind;
+          // An `agent` line is named after the agent that actually wrote it.
+          // The record cannot say - it is parsed from a file, and both agents
+          // write the same shape - so the row is what knows.
+          who.textContent =
+            event.kind === 'tool'
+              ? event.label || 'tool'
+              : event.kind === 'agent'
+                ? AGENT_NAMES[row.agentKind] || 'agent'
+                : event.kind;
           if (event.kind === 'tool' && event.label) who.title = event.label;
           line.appendChild(who);
 
@@ -1113,6 +1156,12 @@
           t.title =
             (since ? 'Waiting since ' : 'Last activity ') + new Date(stamp).toLocaleString();
           meta.appendChild(t);
+        }
+        if (AGENT_LABELS[row.agentKind]) {
+          const agent = document.createElement('span');
+          agent.className = 'agent-chip';
+          agent.textContent = AGENT_LABELS[row.agentKind];
+          meta.appendChild(agent);
         }
         if (HOST_LABELS[row.hostKind]) {
           const host = document.createElement('span');
