@@ -65,7 +65,7 @@ Four sources of truth, joined into one list:
 | `src/lavish.js` | resolving a Lavish artifact to the page waiting on you |
 | `src/poll-watch.js` | which sessions are in a `lavish-axi poll`, and which have a pipeline running |
 | `src/dashboard.js` | joins them all into ranked rows (pure) |
-| `src/focus/` | tmux resolution, per-terminal adapters, and the Claude Desktop deep link |
+| `src/focus/` | tmux resolution, per-terminal adapters, and raising Claude Desktop |
 | `src/process-tree.js` | which terminal or app, and which agent process, a hook is running under |
 | `src/security.js` | token, Host and Origin checks (pure) |
 | `src/health.js` | probing a port to find out whether nmmon is behind it |
@@ -303,16 +303,43 @@ paths only the app can occupy: the Electron binary above the session, or the Cla
 bundles under `Application Support/Claude/claude-code/`. **Never inferred from the absence of
 a terminal**, even though that absence is what makes the session distinctive - a no-mistakes
 agent under the daemon looks identical by that measure, and acting on the guess is not a
-harmless miss. `claude://resume?session=<uuid>` *imports* a session the app has not seen, so
-a misidentified terminal session would have its conversation dragged into an app the user
-never involved. Matching a path rather than the word "Claude" is the whole guard.
+harmless miss. Matching a path rather than the word "Claude" is the whole guard.
 
 Focusing is a branch of its own in `focus/index.js` and a sibling module, not an entry in
 `terminals.js`, because the `Terminal` interface is `{sessionUuid, tty}` and this host has
-neither. Checked before every other branch, since all of them would fall through. The
-adapter's honest limit is that `open` returns once Launch Services accepts the URL: the app
-handles it afterwards and its own failures (expired sign-in, deleted transcript) surface as a
-toast that never reaches us, so `ok` here means *handed over*, not *raised*.
+neither. Checked before every other branch, since all of them would fall through.
+
+**Claude Desktop cannot be asked to select a session it is already hosting, and the link that
+looks like it does something else.** `claude://resume?session=<uuid>` is an *import*, and its
+only guard against doing it twice is `if (sessions.get('local_' + idFromTheUrl))`. The app
+names its own sessions after a uuid it mints itself and spawns the CLI with a *different* one
+- of 197 records in a real store, 189 had a `sessionId` and a `cliSessionId` that disagreed -
+so the id we hold is never the id that lookup wants. Resuming a natively hosted session
+therefore imported a second entry over the same transcript: two rows in the app's sidebar, one
+of them untitled, mirroring each other keystroke for keystroke, and two Claude Code processes
+resuming the same session id. Observed three times over two days before anyone connected it to
+the click.
+
+There is no other route: `claude://code/...` matches `/^(cse|session)_/`, which is cloud
+session ids, and is behind a feature flag. So **raising the app and saying so is the whole
+behaviour** - `open -b com.anthropic.claudefordesktop`, plus a `note` on the `FocusResult`
+that the page toasts.
+
+**The link is not used even where that dedupe would fire**, and this is the half that took a
+second pass to see. A record filed under the id we hold is, by those same numbers, one an
+earlier click imported - so resuming it lands on the *copy* rather than the session, and both
+such records in the real store were archived, which takes the "unarchive and reuse" branch and
+can put a second Claude Code process on the one transcript. The original symptom, reached by
+the path meant to avoid it. Consulting the app's own store to tell the two apart was tried and
+removed: nothing in a record distinguishes a prior import from the rare case where the app's
+uuid and the CLI's coincide, so there is no test that could make the link safe. **Do not
+reintroduce a precise path without one.**
+
+Two honest limits remain, and both belong on the page rather than in a comment. `open` returns
+once Launch Services accepts, so the app's own failures (expired sign-in, deleted transcript)
+surface as a toast inside it and never reach us. And the app opens wherever it left off, which
+is usually the session you clicked and sometimes is not - hence the note. `ok` here means
+*raised*, never *showing what you asked for*.
 
 **The host terminal for a tmux session is deliberately not stored.** A tmux session can be
 detached and reattached in a different terminal entirely, so it is resolved fresh on every
@@ -373,6 +400,13 @@ Keep it that way - it has no build step and must open as a file.
 - **Affordance must match capability.** A focusable row is a `<button>` and says `Focus ↗`; a
   row with no live session behind it is plain and does nothing. Never render a control that
   might not work.
+- **The host chip states what we know, and `HOST_LABELS` has no fallback.** A kind with no
+  entry renders no chip at all. It used to default to `tab`, which turned every host we failed
+  to recognise - a Claude Desktop session included - into a confident claim about a terminal
+  window that was not there. An unplaceable session says `no window`.
+- Focusing succeeds silently: the window arriving in front of you is the feedback. A
+  `FocusResult.note` is the exception - it means we raised something less than what you
+  clicked, and it gets a neutral toast.
 - The liveness dot is positive evidence (a `ping` within `STALE_AFTER_MS`), never the absence
   of an error. When stale, dim the page - it is a snapshot of the past.
 - Density over decoration. This is a page you leave pinned and glance at.
@@ -380,7 +414,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 315 tests, no network, no dependencies, ~1s
+npm test          # 314 tests, no network, no dependencies, ~1s
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
 
@@ -446,7 +480,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 ## Commands
 
 ```sh
-npm test                       # 315 tests, ~1s
+npm test                       # 314 tests, ~1s
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
 ```

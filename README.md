@@ -184,6 +184,11 @@ Any row that can be focused is a button, says `Focus ↗` on the right, and rais
 when you click it. Rows without a live Claude session behind them - a pipeline running with
 no session attached - are plain and do nothing.
 
+The chip beside a row says where the session lives - `tmux`, `tab`, `desktop` - and a session
+whose window nmmon could not place says `no window` rather than guessing at one. Focusing is
+otherwise silent, since the window arriving in front of you is the answer; a short message
+means you were raised onto something less than the row you clicked.
+
 The dot in the header is **positive evidence, not the absence of an error**. The server sends
 a `ping` event every 20 seconds; if nothing arrives for 50 the dot goes red, the header reads
 `no response for 2m`, and the whole page dims, because everything on it is now a snapshot of
@@ -222,10 +227,14 @@ rather than `tab`, and everything else about them is ordinary: the repo, the bra
 is working on, its pull request, and any no-mistakes run in that checkout all appear exactly
 as they do for a terminal session.
 
-Focusing one brings the app to the front **with that session open**, rather than just
-activating it - nmmon hands the session to the app's own `claude://resume` link. Claude
-Desktop handles that asynchronously, so if it cannot open the session (a lapsed sign-in, say)
-the reason appears in the app rather than on the dashboard.
+Focusing one brings the app to the front, and says so in a toast: nmmon cannot reach inside
+Claude Desktop to select a session, so it raises the app and leaves the sidebar to you. The
+app's `claude://resume` link looks like the answer and is not - it *imports* a session rather
+than switching to one, and because the app files its sessions under an id of its own, resuming
+one it is already running leaves you with two entries over the same conversation. The one case
+where the app would recognise the id instead of copying is a session an earlier such click
+already imported, so the link would land on that duplicate rather than the session you clicked
+- which is why nmmon never uses it.
 
 ## Security
 
@@ -270,7 +279,7 @@ updated.
 ## Development
 
 ```sh
-npm test          # 315 tests, no network, no build step, ~1s
+npm test          # 314 tests, no network, no build step, ~1s
 npm run typecheck
 ```
 

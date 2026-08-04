@@ -344,7 +344,7 @@ async function cmdFocus(positional) {
   }
   const result = await focusSession(record, { exec: execAsync });
   if (result.ok) {
-    console.log(`Focused via ${result.adapter}.`);
+    console.log(result.note || `Focused via ${result.adapter}.`);
   } else {
     console.error(result.reason || 'Could not focus that session.');
     if (result.hint) console.error(`  Try: ${bold(result.hint)}`);

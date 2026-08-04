@@ -37,7 +37,6 @@ import { focusClaudeDesktop } from './claude-desktop.js';
  * @property {string|null} [tty] tab only
  * @property {string|null} [termProgram] which adapter to try first
  * @property {'claude-desktop'} [app] app only, which application hosts it
- * @property {string|null} [sessionId] app only, the handle the app resolves
  * @property {string} [reason] unfocusable only, phrased for the user
  */
 
@@ -49,6 +48,7 @@ import { focusClaudeDesktop } from './claude-desktop.js';
  * @property {string} [adapter] which terminal claimed it
  * @property {string} [reason] why not, phrased for the user
  * @property {string} [hint] a command the user can run instead
+ * @property {string} [note] raised, but not onto the thing you asked for - say so
  * @property {string} [tmuxSession]
  * @property {boolean} [ambiguous] more than one window matched, so none was raised
  */
@@ -119,7 +119,7 @@ export function planFocus(record) {
   // terminal UUID, so every branch below it would fall through to
   // "unfocusable" - which is exactly the dead card this branch exists to fix.
   if (host.app === 'claude-desktop') {
-    return { kind: 'app', app: 'claude-desktop', sessionId: record?.sessionId || null };
+    return { kind: 'app', app: 'claude-desktop' };
   }
   if (host.tmux_pane) {
     return {
@@ -205,7 +205,7 @@ export async function focusSession(record, { exec, terminals = ALL_TERMINALS }) 
   }
 
   if (plan.kind === 'app') {
-    return focusClaudeDesktop(exec, { sessionId: plan.sessionId ?? null });
+    return focusClaudeDesktop(exec);
   }
 
   if (plan.kind === 'tab') {

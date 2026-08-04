@@ -2,7 +2,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { planFocus, itermUuid, focusSession, titleNeedle } from '../src/focus/index.js';
-import { resumeUrl } from '../src/focus/claude-desktop.js';
 import { orderedTerminals, ALL_TERMINALS } from '../src/focus/terminals.js';
 import { socketArgs, resolveTmuxTarget, parseClients } from '../src/focus/tmux.js';
 import {
@@ -67,7 +66,6 @@ test('planFocus routes a Claude Desktop session to the app path', () => {
     host: { app: 'claude-desktop', tty: null, term_program: null },
   });
   assert.equal(plan.kind, 'app');
-  assert.equal(plan.sessionId, '2205e739-08bc-4ee6-a8d4-b15204bab998');
 });
 
 test('planFocus prefers the desktop app over any terminal identity on the record', () => {
@@ -81,43 +79,39 @@ test('planFocus prefers the desktop app over any terminal identity on the record
   assert.equal(plan.kind, 'app');
 });
 
-test('resumeUrl only builds a link for an id the app can resolve', () => {
-  assert.equal(
-    resumeUrl('2205e739-08bc-4ee6-a8d4-b15204bab998'),
-    'claude://resume?session=2205e739-08bc-4ee6-a8d4-b15204bab998',
-  );
-  assert.equal(resumeUrl('not-a-uuid'), null);
-  assert.equal(resumeUrl(null), null);
-});
-
-test('focusing a desktop session hands it to the app by deep link', async () => {
-  const exec = fakeExec({ open: '' });
-  const result = await focusSession(
-    {
-      sessionId: '2205e739-08bc-4ee6-a8d4-b15204bab998',
-      host: { app: 'claude-desktop' },
-    },
-    { exec },
-  );
-  assert.equal(result.ok, true);
-  assert.equal(result.adapter, 'claude-desktop');
-  assert.deepEqual(exec.calls, ['open claude://resume?session=2205e739-08bc-4ee6-a8d4-b15204bab998']);
-});
-
-test('a desktop session with an id the app cannot resolve is refused, not guessed at', async () => {
-  // The deep link imports a session the app has never seen, so a wrong or
-  // malformed id is not a harmless miss. Nothing is run at all.
-  const exec = fakeExec({});
-  const result = await focusSession(
+test('focusing a desktop session never imports it into the app', async () => {
+  // The regression this file exists for. `claude://resume` is an *import*: its
+  // only dedupe is on `local_<the id we pass>`, and a session the app hosts
+  // natively is filed under `local_<the app's own uuid>` instead. So resuming
+  // one gave the user two sidebar entries over one transcript, mirroring each
+  // other. Raising the app is the only thing that cannot do that.
+  //
+  // Every shape of id, because the point is that none of them reaches a link:
+  // a uuid the app would accept, one an earlier buggy click already imported,
+  // something that is not a uuid at all, and nothing.
+  const records = [
+    { sessionId: '2205e739-08bc-4ee6-a8d4-b15204bab998', host: { app: 'claude-desktop' } },
+    { sessionId: 'ec9c2da1-1f5b-4a3e-9c77-0f6b2a4d81c3', host: { app: 'claude-desktop' } },
     { sessionId: 'run-42', host: { app: 'claude-desktop' } },
-    { exec },
-  );
-  assert.equal(result.ok, false);
-  assert.match(result.reason, /did not report an id/);
-  assert.deepEqual(exec.calls, []);
+    { sessionId: null, host: { app: 'claude-desktop', tty: '/dev/ttys004' } },
+  ];
+  for (const record of records) {
+    const exec = fakeExec({ open: '' });
+    const result = await focusSession(record, { exec });
+    assert.equal(result.ok, true);
+    assert.equal(result.adapter, 'claude-desktop');
+    assert.deepEqual(exec.calls, ['open -b com.anthropic.claudefordesktop']);
+    assert.ok(
+      !exec.calls.some((call) => call.includes('claude://')),
+      'no id may produce a deep link, however well formed',
+    );
+    // Raised, not shown: the note is what the page toasts, and it is the only
+    // thing that stops "focused" reading as "you are looking at it".
+    assert.match(result.note, /sidebar/);
+  }
 });
 
-test('a desktop deep link that will not open reports why, with the command to try', async () => {
+test('a desktop app that will not come to the front reports why, with the command to try', async () => {
   const exec = fakeExec({ open: new Error('LSOpenURLsWithRole() failed') });
   const result = await focusSession(
     { sessionId: '2205e739-08bc-4ee6-a8d4-b15204bab998', host: { app: 'claude-desktop' } },
@@ -125,7 +119,7 @@ test('a desktop deep link that will not open reports why, with the command to tr
   );
   assert.equal(result.ok, false);
   assert.match(result.reason, /Claude Desktop/);
-  assert.equal(result.hint, "open 'claude://resume?session=2205e739-08bc-4ee6-a8d4-b15204bab998'");
+  assert.equal(result.hint, 'open -b com.anthropic.claudefordesktop');
 });
 
 test('planFocus routes a plain tab to the tab path', () => {

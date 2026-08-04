@@ -53,7 +53,7 @@ import { pullRequestNumber } from './nm-state.js';
  * @property {number|null} sessionStateSince
  * @property {number|null} waitingForMs how long blocked, for the "2m" column
  * @property {boolean} focusable whether clicking this row can do anything
- * @property {'tmux'|'tab'|'app'|null} hostKind where the session lives
+ * @property {'tmux'|'tab'|'app'|'unknown'|null} hostKind where the session lives
  * @property {Run|null} run
  * @property {number|null} updatedAt
  * @property {string|null} summary what the session is working on, in Claude's
@@ -614,16 +614,20 @@ export function buildRows({
 /**
  * Where the session lives, in the page's words.
  *
- * An unfocusable session still says "tab": it is one, we simply cannot find it.
- * `focusable` is what the page gates the control on, so the two never disagree.
+ * An unfocusable session used to say "tab", on the reasoning that it probably
+ * is one and we simply cannot find it. That was an assertion dressed as a
+ * default: a Claude Desktop session whose host went unrecognised plans as
+ * unfocusable too, and the page then labelled it a terminal tab with complete
+ * confidence. It says "unknown" now, which is the only thing we know.
  *
  * @param {import('./focus/index.js').FocusPlan} plan
- * @returns {'tmux'|'tab'|'app'}
+ * @returns {'tmux'|'tab'|'app'|'unknown'}
  */
 function hostKindFor(plan) {
   if (plan.kind === 'tmux') return 'tmux';
   if (plan.kind === 'app') return 'app';
-  return 'tab';
+  if (plan.kind === 'tab') return 'tab';
+  return 'unknown';
 }
 
 /** @param {Run} run */

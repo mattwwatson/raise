@@ -274,6 +274,15 @@ test('buildRows marks a session with no window identity as not focusable', () =>
   assert.equal(rows[0].focusable, false);
 });
 
+test('buildRows will not call a session it cannot place a tab', () => {
+  // It used to say "tab" here on the reasoning that an unplaceable session is
+  // probably one. It is not: a Claude Desktop session whose host went
+  // unrecognised lands here too, and then the page confidently labels a desktop
+  // session as a terminal tab. Saying nothing is the only honest answer.
+  const rows = buildRows({ sessions: [session({ host: {} })], runs: [], now: 5000 });
+  assert.equal(rows[0].hostKind, 'unknown');
+});
+
 test('buildRows tags a tmux-hosted session', () => {
   const rows = buildRows({
     sessions: [session({ host: { tmux_pane: '%2' } })],
