@@ -37,7 +37,6 @@ import { focusClaudeDesktop } from './claude-desktop.js';
  * @property {string|null} [tty] tab only
  * @property {string|null} [termProgram] which adapter to try first
  * @property {'claude-desktop'} [app] app only, which application hosts it
- * @property {string|null} [sessionId] app only, which session the row is for
  * @property {string} [reason] unfocusable only, phrased for the user
  */
 
@@ -120,7 +119,7 @@ export function planFocus(record) {
   // terminal UUID, so every branch below it would fall through to
   // "unfocusable" - which is exactly the dead card this branch exists to fix.
   if (host.app === 'claude-desktop') {
-    return { kind: 'app', app: 'claude-desktop', sessionId: record?.sessionId || null };
+    return { kind: 'app', app: 'claude-desktop' };
   }
   if (host.tmux_pane) {
     return {

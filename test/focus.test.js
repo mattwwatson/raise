@@ -66,7 +66,6 @@ test('planFocus routes a Claude Desktop session to the app path', () => {
     host: { app: 'claude-desktop', tty: null, term_program: null },
   });
   assert.equal(plan.kind, 'app');
-  assert.equal(plan.sessionId, '2205e739-08bc-4ee6-a8d4-b15204bab998');
 });
 
 test('planFocus prefers the desktop app over any terminal identity on the record', () => {
