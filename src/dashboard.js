@@ -560,8 +560,16 @@ export function buildRows({
       // verified but frozen. The transcript is neither, and is the only one
       // that sees a pull request no-mistakes never opened - which is common
       // enough that leaving it out means no link at all on plain Claude work.
+      //
+      // The run's own pull request has to clear the same branch check as the
+      // other two, for the reason given above `branch`: `matchRunForCwd` places
+      // a run by repo path alone, so a finished run keeps matching this session
+      // for half an hour after the checkout has moved on, and handed over a
+      // link to the branch it ended on. The row then disagreed with itself -
+      // `main` beside another branch's review - which is exactly the confident
+      // wrong link the whole feature is built to avoid.
       pr:
-        (run?.prUrl ? pullRequestForRun(run) : null) ||
+        (run?.prUrl && run.branch === branch ? pullRequestForRun(run) : null) ||
         matchPullRequest(session.cwd, branch, pullRequests) ||
         transcriptPullRequest(summary, run?.repoPath || session.cwd, branch, pullRequests),
       lastActivityAt: summary?.lastActivityAt ?? null,
