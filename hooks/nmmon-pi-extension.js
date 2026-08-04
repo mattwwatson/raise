@@ -19,11 +19,20 @@
  *     above us, which under any terminal is the pi process itself.
  *
  * That walk is a blocking `ps` per ancestor, which is exactly what must not
- * happen in the user's editing loop, so the window identity is collected on
- * `session_start` and nowhere else. It cannot change for the life of a pi
- * process, and the registry merges `host` over the record it already holds - so
- * a later event that omits the field entirely keeps the identity captured at
- * the start rather than erasing it.
+ * happen in the user's editing loop, so it runs at most once per pi process and
+ * only ever inside `post`, past the point where nmmon is known to be running. A
+ * machine that never runs the monitor therefore never pays for it at all, and
+ * the window identity cannot change for the life of the process, so one walk is
+ * all there is to do.
+ *
+ * It is then sent with *every* post rather than only the first, which the cache
+ * makes nearly free. Tying it to one particular event is what makes it losable:
+ * a session that starts while nmmon is down, or whose first post fails at the
+ * network layer, would otherwise spend the rest of its life with no window
+ * identity at all - an unfocusable dead card on the page, and a record the
+ * registry cannot probe for liveness, so it lingers for a fortnight after the
+ * session is gone. Repeating it costs a few bytes and is idempotent, because
+ * the registry merges `host` over the record it already holds.
  *
  * The payload is deliberately the same shape Claude Code's hook posts. One wire
  * format means one parser on the server, one privacy boundary, and one set of
@@ -121,20 +130,25 @@ function collectHost(read) {
   };
 }
 
+/** The one walk this process does, kept for the rest of its life. */
+let host = null;
+
 /**
  * Post one event. Never throws, never awaited by pi, always bounded.
  *
  * @param {object} payload
+ * @param {ReadProcess} read
  */
-function post(payload) {
+function post(payload, read) {
   const info = readServerInfo();
   if (!info?.port || !info?.token) return;
+  host ??= collectHost(read);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   fetch(`http://127.0.0.1:${info.port}/event`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-nmmon-token': info.token },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ ...payload, host }),
     signal: controller.signal,
   })
     .catch(() => {
@@ -184,8 +198,7 @@ export default function (pi, deps) {
           agent: 'pi',
           cwd: ctx?.cwd || process.cwd(),
           transcript_path: sessionFile(ctx),
-          ...(event === 'session_start' ? { host: collectHost(read) } : {}),
-        });
+        }, read);
       } catch {
         // Nothing this module does is worth interrupting a turn for.
       }

@@ -125,19 +125,20 @@ test('window identity captured at session start survives later events', () => {
   }
 });
 
-test('a pi event carrying no host at all keeps the identity from session start', () => {
-  // pi's extension walks the process table once, on session_start, and omits
-  // the field entirely afterwards - so the merge is what keeps the row
-  // focusable for the rest of the session.
+test('a pi session keeps its window whether an event repeats it or omits it', () => {
+  // pi's extension caches the identity and resends it, so the merge is what
+  // makes a repeat idempotent - and an event that carries none, from before the
+  // walk could run, must still leave the row focusable.
   const { dir, cleanup } = scratch();
   try {
     const registry = new SessionRegistry({ dir });
+    const host = { tty: '/dev/ttys004', pid: process.pid };
     registry.record({
       session_id: 'p1',
       hook_event_name: 'session_start',
       agent: 'pi',
       cwd: '/repo',
-      host: { tty: '/dev/ttys004', pid: process.pid },
+      host,
     });
     registry.record({
       session_id: 'p1',
@@ -145,11 +146,18 @@ test('a pi event carrying no host at all keeps the identity from session start',
       agent: 'pi',
       cwd: '/repo',
     });
+    registry.record({
+      session_id: 'p1',
+      hook_event_name: 'agent_settled',
+      agent: 'pi',
+      cwd: '/repo',
+      host,
+    });
 
     const record = registry.get('p1');
     assert.equal(record.host.tty, '/dev/ttys004');
     assert.equal(record.host.pid, process.pid);
-    assert.equal(record.state, 'working');
+    assert.equal(record.state, 'idle');
   } finally {
     cleanup();
   }
