@@ -257,6 +257,15 @@ A live no-mistakes run is being watched right now, so its `pr_state` is real. Th
 history is branch-verified but frozen. The transcript is neither, and is the only one that
 sees a pull request no-mistakes never opened.
 
+**All three are gated on the checkout's branch, the run's own included.** `matchRunForCwd`
+places a run by repo path alone - deliberately, so the row keeps showing the repo's recent
+pipeline - which means a finished run still matches a session for the whole thirty minutes it
+counts as recent, long after the checkout has moved on. Taking its pull request
+unconditionally therefore put another branch's review beside `main`: exactly the confident
+wrong link the rest of this section is built to prevent. A checkout whose branch cannot be
+read is unaffected, because `branch` already falls back to the run's own and the two agree by
+construction.
+
 *The frozen part is the trap.* no-mistakes stops observing a pull request the moment its run
 reaches a terminal state - `pr_state_observed_at` never advances past `updated_at` - so every
 cancelled run in a real database still says `open`, days later. **The link survives the run;

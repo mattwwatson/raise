@@ -211,7 +211,7 @@ stopped answering.
 ## The dashboard is honest about not knowing
 
 Any row that can be focused is a button, says `Focus ↗` on the right, and raises that window
-when you click it. Rows without a live Claude session behind them - a pipeline running with
+when you click it. Rows without a live agent session behind them - a pipeline running with
 no session attached - are plain and do nothing.
 
 The chip beside a row says where the session lives - `tmux`, `tab`, `desktop` - and a session
@@ -278,9 +278,10 @@ Since this server ends up running `osascript` and `tmux`, it also requires
 
 `/health` is the only unauthenticated route, and it returns nothing but liveness.
 
-The hook never sends prompts, transcripts or file contents. It sends the session id, the
-working directory, the event name, a notification message where Claude supplies one, and the
-window identity needed to focus the tab.
+The hook - and pi's extension, which posts the same payload - never sends prompts,
+transcripts or file contents. It sends the session id, the working directory, the event name,
+a notification message where Claude supplies one, and the window identity needed to focus
+the tab.
 
 Expanding a row shows conversation text, and that is the only place it appears. It is read
 from a local file by a local server and rendered in your own browser - it is not in the
@@ -303,7 +304,7 @@ command shown and it becomes focusable.
 **A warning banner about the no-mistakes database.** nmmon probes the schema at startup, and
 if a no-mistakes version moves the columns it depends on, it falls back to reading each repo
 through `no-mistakes axi status` instead of guessing. Pipeline state still works; it is just
-limited to repos that have a live Claude session. Worth reporting so the fast path can be
+limited to repos that have a live agent session. Worth reporting so the fast path can be
 updated.
 
 ## Development
