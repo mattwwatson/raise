@@ -65,7 +65,8 @@ function containsOurHook(group) {
  * `Notification` are still there; the signal just arrives a few seconds later.
  * The re-run still needs asking for, so `missing` names what it will add.
  *
- * @param {object|null|undefined} settings
+ * @param {{hooks?: Record<string, unknown>}|null|undefined} settings a parsed
+ *   settings file, of which only `hooks` is ever read
  * @param {string[]} [events]
  * @returns {{state: 'installed'|'partial'|'missing', missing: string[]}}
  */

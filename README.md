@@ -140,6 +140,11 @@ nmmon serve
 what it will change and asks before writing, keeps a `.nmmon-backup` copy, leaves any hooks
 you already have alone, and is safe to run twice. Undo it with `nmmon uninstall-hooks`.
 
+When a later version of nmmon adds an event to that set, `serve` and `doctor` name the ones
+you are missing rather than calling the hooks uninstalled - what you already have keeps
+working, and the new event only makes the signal arrive sooner. Re-run `install-hooks` when it
+suits you, and restart your sessions then.
+
 **Restart your existing Claude sessions afterwards.** Hooks are read when a session starts, so
 sessions already open will not report themselves until you restart them.
 
