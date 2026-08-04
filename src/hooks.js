@@ -16,19 +16,19 @@ import { dirname } from 'node:path';
  * Which events we listen to, and why.
  *
  * PreToolUse/PostToolUse are deliberately not included: they fire constantly
- * and would add a process spawn to every tool call.
+ * and would add a process spawn to every tool call. `PermissionRequest` is the
+ * exception that proves the rule - it fires only when a tool actually needs a
+ * human, so it is as rare as a `Notification` and says the same thing sooner.
  *
- * They would not be *no* signal, though - `Notification` is the last event of
- * a turn until `Stop`, so nothing here reports that a permission prompt was
- * granted, and the session reads as blocked until the turn ends. That is
- * settled by reading the transcript instead; `registry.js` already maps both
- * events to `working` should this ever be reconsidered. See the "recorded
- * block is disbelieved" note in AGENTS.md for the trade-off.
+ * Nothing here reports that a permission prompt was *granted*, because Claude
+ * Code has no such event to fire. That is settled by reading the transcript
+ * instead. See the "recorded block is disbelieved" note in AGENTS.md.
  */
 export const HOOK_EVENTS = [
   'SessionStart', // register the session and capture its window identity
   'UserPromptSubmit', // you gave it work, so it is now busy
-  'Notification', // Claude wants permission or input: the signal that matters
+  'PermissionRequest', // a tool needs a human, said the moment Claude decides it
+  'Notification', // that same prompt six seconds later, plus the idle nudge
   'Stop', // turn finished, waiting for your next instruction
   'SessionEnd', // deregister
 ];

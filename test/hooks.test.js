@@ -13,6 +13,22 @@ test('mergeHooks adds an entry for every event', () => {
   }
 });
 
+test('the events installed are the ones that are rare and mean something', () => {
+  // Named rather than derived, so that widening the list to a per-tool-call
+  // event has to be a deliberate edit to a test that says why it is not one.
+  assert.deepEqual(HOOK_EVENTS, [
+    'SessionStart',
+    'UserPromptSubmit',
+    'PermissionRequest',
+    'Notification',
+    'Stop',
+    'SessionEnd',
+  ]);
+  for (const perCall of ['PreToolUse', 'PostToolUse', 'PostToolBatch', 'MessageDisplay']) {
+    assert.equal(HOOK_EVENTS.includes(perCall), false, `${perCall} fires inside the editing loop`);
+  }
+});
+
 test('mergeHooks is idempotent', () => {
   const first = mergeHooks({}, COMMAND);
   const second = mergeHooks(first.settings, COMMAND);

@@ -21,6 +21,7 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 import { parsePsLine, inspectHost } from '../src/process-tree.js';
+import { reportablePayload } from '../src/hook-payload.js';
 
 const TIMEOUT_MS = 2000;
 
@@ -96,7 +97,10 @@ async function main() {
   }
   if (!payload?.session_id) quietExit();
 
-  payload.host = collectHost();
+  // Never the payload itself. What Claude Code hands a hook includes prompt
+  // text, assistant messages and, on a PermissionRequest, the contents of the
+  // file it wants to write - see `src/hook-payload.js`.
+  const body = { ...reportablePayload(payload), host: collectHost() };
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -107,7 +111,7 @@ async function main() {
         'content-type': 'application/json',
         'x-nmmon-token': info.token,
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
       signal: controller.signal,
     });
   } catch {

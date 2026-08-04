@@ -183,6 +183,81 @@ test('a notification message is kept while blocked and cleared when it moves on'
   }
 });
 
+test('a PermissionRequest blocks the session before any notification arrives', () => {
+  // Claude Code fires this the moment it decides a tool needs a human, and the
+  // Notification saying so only follows six to twelve seconds later. There is
+  // no message on it, so the row says a human is needed and picks up the reason
+  // when the Notification catches up.
+  const { dir, cleanup } = scratch();
+  try {
+    const registry = new SessionRegistry({ dir });
+    registry.record({ session_id: 's1', hook_event_name: 'UserPromptSubmit' }, 1000);
+    registry.record({ session_id: 's1', hook_event_name: 'PermissionRequest' }, 2000);
+
+    const blocked = registry.get('s1');
+    assert.equal(blocked.state, 'blocked');
+    assert.equal(blocked.message, null);
+    assert.equal(blocked.stateSince, 2000);
+
+    registry.record(
+      {
+        session_id: 's1',
+        hook_event_name: 'Notification',
+        message: 'Claude needs your permission to use Bash',
+        notification_type: 'permission_prompt',
+      },
+      9000,
+    );
+    const named = registry.get('s1');
+    assert.match(named.message, /permission/);
+    assert.equal(
+      named.stateSince,
+      2000,
+      'the wait started when Claude asked, not when it got round to saying so',
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('the notification type rides along with the message, under the same rule', () => {
+  // Claude Code says which kind of notification this is rather than leaving it
+  // to be read out of the message. Stored on the same terms: it is only true
+  // while the block it describes is.
+  const { dir, cleanup } = scratch();
+  try {
+    const registry = new SessionRegistry({ dir });
+    registry.record({
+      session_id: 's1',
+      hook_event_name: 'Notification',
+      message: 'Claude is waiting for your input',
+      notification_type: 'idle_prompt',
+    });
+    assert.equal(registry.get('s1').notificationType, 'idle_prompt');
+
+    registry.record({ session_id: 's1', hook_event_name: 'UserPromptSubmit' });
+    assert.equal(registry.get('s1').notificationType, null);
+  } finally {
+    cleanup();
+  }
+});
+
+test('a Notification from a Claude Code too old to type it is still recorded', () => {
+  const { dir, cleanup } = scratch();
+  try {
+    const registry = new SessionRegistry({ dir });
+    registry.record({
+      session_id: 's1',
+      hook_event_name: 'Notification',
+      message: 'Claude needs your permission to use Bash',
+    });
+    assert.equal(registry.get('s1').state, 'blocked');
+    assert.equal(registry.get('s1').notificationType, null);
+  } finally {
+    cleanup();
+  }
+});
+
 test('stateSince only moves when the state actually changes', () => {
   const { dir, cleanup } = scratch();
   try {

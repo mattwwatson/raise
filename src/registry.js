@@ -73,6 +73,9 @@ import { join } from 'node:path';
  * @property {string} [cwd]
  * @property {string} [transcript_path]
  * @property {string} [message] why Claude wants you, on a Notification
+ * @property {string} [notification_type] which kind of Notification this is -
+ *   `permission_prompt`, `idle_prompt` and friends. Absent on a Claude Code old
+ *   enough not to send it, which is why nothing may require it
  * @property {Host} [host]
  */
 
@@ -96,6 +99,9 @@ import { join } from 'node:path';
  * @property {string} event the hook event that last touched this record
  * @property {SessionState} state
  * @property {string|null} message why Claude wants you; only set while blocked
+ * @property {string|null} notificationType which kind of notification produced
+ *   that message, when Claude Code said. Held on exactly the same terms as
+ *   `message`, because it describes the same block and expires with it
  * @property {Host} host
  * @property {number} startedAt
  * @property {number} updatedAt
@@ -115,6 +121,11 @@ const EVENT_STATES = {
   UserPromptSubmit: 'working',
   PreToolUse: 'working',
   PostToolUse: 'working',
+  // Only ever fired when a tool genuinely needs a human: a rule that approves
+  // the tool, `bypassPermissions`, and the auto-mode classifier all settle it
+  // before this event is reached. It carries no message, so a row shows the
+  // reason once the Notification catches up a few seconds later.
+  PermissionRequest: 'blocked',
   Notification: 'blocked',
   Stop: 'idle',
   SessionEnd: 'ended',
@@ -220,6 +231,10 @@ export class SessionRegistry {
       // while blocked and clear it the moment the session moves on, so the
       // dashboard never shows a stale "needs permission".
       message: state === 'blocked' ? payload.message || null : null,
+      // Claude Code names the kind of notification it is sending, which is what
+      // tells a permission prompt from the sixty-second nudge without reading
+      // the message. Kept and dropped with the message for the same reason.
+      notificationType: state === 'blocked' ? payload.notification_type || null : null,
       host: { ...(previous.host || {}), ...(payload.host || {}) },
       startedAt: previous.startedAt || now,
       updatedAt: now,
