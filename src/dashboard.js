@@ -466,12 +466,17 @@ export function attentionFor({
  * links stay outside this file - it is pure, and all three touch the filesystem
  * or a subprocess.
  *
+ * `runOwners` comes from the process table, for the same reason: knowing which
+ * session launched a pipeline means walking live processes, which this file may
+ * not do.
+ *
  * @param {{sessions: Session[], runs: Run[], now?: number,
  *          summaries?: Map<string, import('./transcript.js').TranscriptSummary>,
  *          reviewUrls?: Map<string, string|null>,
  *          branches?: Map<string, string|null>,
  *          pullRequests?: PullRequest[],
- *          pipelines?: Set<string>}} input
+ *          pipelines?: Set<string>,
+ *          runOwners?: Map<string, string>}} input
  * @returns {Row[]}
  */
 export function buildRows({
@@ -483,6 +488,7 @@ export function buildRows({
   branches = new Map(),
   pullRequests = [],
   pipelines = new Set(),
+  runOwners = new Map(),
 }) {
   /** @type {Row[]} */
   const rows = [];
@@ -527,7 +533,22 @@ export function buildRows({
     });
   }
   for (const session of human) {
-    const run = matchRunForCwd(session.cwd, runs);
+    // A matched run answers two different questions, and only one of them is
+    // shared. `matchRunForCwd` places a run by repo path alone, so every
+    // session open on a checkout matches the same one - which is right for
+    // *identity* (the repo's name, the path a title grows from) and wrong for
+    // *state*: three sessions in one repo each carried the pipeline's step and
+    // its parked gate, and each offered a Focus button to a window that could
+    // not answer it.
+    //
+    // `runOwners` is what the process table saw: the session with a live
+    // `no-mistakes axi run` underneath it. It narrows and never widens - a run
+    // nobody was observed to own stays on every session in its repo, exactly as
+    // before, because an unattributed pipeline is better shown three times than
+    // not at all.
+    const repo = matchRunForCwd(session.cwd, runs);
+    const owner = repo ? runOwners.get(repo.runId) || null : null;
+    const run = !owner || owner === session.sessionId ? repo : null;
     if (run) claimedRuns.add(run.runId);
     const summary = summaries.get(session.sessionId) || null;
     const agent = (run && agents.get(run.runId)) || null;
@@ -538,17 +559,20 @@ export function buildRows({
     // The checkout's own branch is the truth about where this session is. The
     // run's is a second choice: it belongs to a pipeline that may have finished
     // on a branch that has since been left behind.
-    const branch = branches.get(session.sessionId) || run?.branch || null;
+    const branch = branches.get(session.sessionId) || repo?.branch || null;
     rows.push({
       id: `session:${session.sessionId}`,
       kind: 'session',
       sessionId: session.sessionId,
       cwd: session.cwd,
-      title: run?.repoName || basename(session.cwd || '') || 'unknown',
+      // Identity follows the repo the session is in, never the run it owns. A
+      // bystander session titled after its own subdirectory would stop looking
+      // like the same checkout as the one running the pipeline.
+      title: repo?.repoName || basename(session.cwd || '') || 'unknown',
       // The path the title was taken from, which is what disambiguation grows.
       // For a session inside a registered repo that is the repo, not the
       // session's own directory.
-      titlePath: (run?.repoName ? run.repoPath : session.cwd) || null,
+      titlePath: (repo?.repoName ? repo.repoPath : session.cwd) || null,
       branch,
       attention,
       attentionLabel: attentionLabel(attention),
@@ -600,10 +624,15 @@ export function buildRows({
       // link to the branch it ended on. The row then disagreed with itself -
       // `main` beside another branch's review - which is exactly the confident
       // wrong link the whole feature is built to avoid.
+      //
+      // A pull request belongs to the branch, not to whoever started the run,
+      // so the two branch-verified sources stay on every session in the
+      // checkout. Only the first is the run's own to lend, and only its owner
+      // may take it.
       pr:
         (run?.prUrl && run.branch === branch ? pullRequestForRun(run) : null) ||
         matchPullRequest(session.cwd, branch, pullRequests) ||
-        transcriptPullRequest(summary, run?.repoPath || session.cwd, branch, pullRequests),
+        transcriptPullRequest(summary, repo?.repoPath || session.cwd, branch, pullRequests),
       lastActivityAt: summary?.lastActivityAt ?? null,
       agent,
     });

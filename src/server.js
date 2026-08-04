@@ -18,7 +18,8 @@ import { TranscriptReader, defaultFileAccess } from './transcript-reader.js';
 import { GitBranch, defaultGitAccess } from './git-branch.js';
 import { LavishState } from './lavish.js';
 import { PollWatch } from './poll-watch.js';
-import { buildRows, summarise } from './dashboard.js';
+import { buildRows, matchRunForCwd, summarise } from './dashboard.js';
+import { RunOwners } from './run-owner.js';
 import { focusSession } from './focus/index.js';
 import { checkRequest } from './security.js';
 import { exec as defaultExec, execAsync as defaultExecAsync } from './exec.js';
@@ -96,6 +97,9 @@ export function createMonitorServer({
   const branches = new GitBranch({ files: gitFiles });
   const lavish = new LavishState({ execAsync });
   const polls = new PollWatch({ execAsync });
+  // Outlives a poll on purpose: `axi run` returns at every gate, so the process
+  // that proves ownership is absent for exactly as long as the run is parked.
+  const runOwners = new RunOwners();
   const probe = nmState.probe();
 
   /** @type {Set<import('node:http').ServerResponse>} */
@@ -132,6 +136,16 @@ export function createMonitorServer({
       // Same scan, second question: a backgrounded pipeline is what makes
       // Claude Code's "waiting for your input" a lie.
       if (polls.pipelineFor(session.host?.pid, agentPids)) pipelines.add(session.sessionId);
+      // Third question off the same scan: whose run it is. Several sessions can
+      // be open on one checkout, and only the one driving the pipeline should
+      // carry it - the others cannot answer its gate, so summoning anyone to
+      // them is a wrong answer with a Focus button attached.
+      if (polls.ownsRunFor(session.host?.pid, agentPids)) {
+        const owned = matchRunForCwd(session.cwd, runs);
+        // Only a live run can be owned by a live process. A driving command run
+        // while the newest match is a finished run would otherwise claim it.
+        if (owned?.active) runOwners.observe(owned.runId, session.sessionId);
+      }
       const summary = polledFile ? { ...read, lavishFile: polledFile } : read;
       summaries.set(session.sessionId, summary);
       // Only ask Lavish about sessions that say they are polling it. Asking is
@@ -143,6 +157,7 @@ export function createMonitorServer({
     }
     transcripts.prune(new Set(sessions.map((s) => s.transcriptPath).filter(Boolean)));
     branches.prune(new Set(candidateDirs));
+    runOwners.prune(new Set(runs.map((r) => r.runId)));
 
     const rows = buildRows({
       sessions,
@@ -152,6 +167,7 @@ export function createMonitorServer({
       branches: sessionBranches,
       pullRequests,
       pipelines,
+      runOwners: runOwners.owners,
     });
     return {
       rows,

@@ -42,7 +42,8 @@ import {
   ensureDirs,
   piSettingsPath,
 } from '../src/config.js';
-import { buildRows } from '../src/dashboard.js';
+import { buildRows, matchRunForCwd } from '../src/dashboard.js';
+import { RunOwners } from '../src/run-owner.js';
 import { parseArgv } from '../src/cli-args.js';
 import { probeHealth } from '../src/health.js';
 
@@ -281,6 +282,15 @@ async function cmdStatus() {
   const pipelines = new Set(
     sessions.filter((s) => polls.pipelineFor(s.host?.pid, agentPids)).map((s) => s.sessionId),
   );
+  // One shot, so ownership is only what is running this instant - a run parked
+  // between `axi run` and `axi respond` has nothing to observe and shows on
+  // every session in its repo. The server, which polls, remembers instead.
+  const runOwners = new RunOwners();
+  for (const s of sessions) {
+    if (!polls.ownsRunFor(s.host?.pid, agentPids)) continue;
+    const owned = matchRunForCwd(s.cwd, runs);
+    if (owned?.active) runOwners.observe(owned.runId, s.sessionId);
+  }
 
   // Asking Lavish costs a second or two, so it is only worth it when something
   // is actually waiting on a review.
@@ -303,6 +313,7 @@ async function cmdStatus() {
     branches,
     pullRequests,
     pipelines,
+    runOwners: runOwners.owners,
   });
 
   if (warning) console.log(`${yellow('Note')} ${warning}\n`);

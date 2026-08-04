@@ -7,6 +7,8 @@ import {
   PollWatch,
   isPipelineCommand,
   pipelinesBySession,
+  isRunOwnerCommand,
+  runOwnersBySession,
 } from '../src/poll-watch.js';
 
 // The real chain, taken from a live session: the poll, the shell Claude Code
@@ -177,4 +179,69 @@ test('a pipeline under nobody we know is nobody"s', () => {
   const table = parseProcessTable('  400     1 /usr/local/bin/no-mistakes axi respond');
   assert.deepEqual([...pipelinesBySession(table, new Set([200]))], []);
   assert.deepEqual([...pipelinesBySession(table, new Set())], []);
+});
+
+test('driving a run is ownership; reading one is not', () => {
+  // The whole point of the distinction: several sessions sit in one checkout,
+  // and any of them may glance at the pipeline. Only the one steering it owns
+  // the row, because only it can answer the gate.
+  assert.equal(isRunOwnerCommand('/usr/local/bin/no-mistakes axi run --intent "..."'), true);
+  assert.equal(isRunOwnerCommand('no-mistakes axi respond --action fix'), true);
+  assert.equal(isRunOwnerCommand('no-mistakes axi abort'), true);
+  assert.equal(isRunOwnerCommand('no-mistakes rerun'), true);
+
+  assert.equal(isRunOwnerCommand('no-mistakes axi status'), false);
+  assert.equal(isRunOwnerCommand('no-mistakes axi logs --step review'), false);
+  assert.equal(isRunOwnerCommand('no-mistakes runs'), false);
+  assert.equal(isRunOwnerCommand('no-mistakes status'), false);
+  // Still a pipeline command for the idle-nudge question, and still not
+  // ownership - the two answers are deliberately different.
+  assert.equal(isPipelineCommand('no-mistakes axi status'), true);
+});
+
+test('a verb is found past global flags, and free text cannot supply one', () => {
+  assert.equal(isRunOwnerCommand('no-mistakes --skip lint axi run'), true);
+  // `axi run --intent` carries paragraphs of English that mention these words
+  // constantly - this repo's own runs describe running, aborting and rerunning.
+  // The real verb always comes first, so the first recognised word settles it.
+  assert.equal(
+    isRunOwnerCommand('no-mistakes axi status --note "rerun the abort and respond"'),
+    false,
+  );
+  assert.equal(isRunOwnerCommand('no-mistakes'), false);
+  assert.equal(isRunOwnerCommand('no-mistakes daemon run --root /Users/x/.no-mistakes'), false);
+});
+
+test('a run is attributed to the session driving it, and to no other', () => {
+  const table = parseProcessTable(
+    [
+      '  100     1 /Applications/iTerm.app/Contents/MacOS/iTerm2',
+      '  200   100 claude',
+      '  300   200 /bin/zsh -c eval no-mistakes axi run',
+      '  400   300 /usr/local/bin/no-mistakes axi run --intent "ship it"',
+      // A second session in the same checkout, merely looking.
+      '  500   100 claude',
+      '  600   500 /usr/local/bin/no-mistakes axi status',
+    ].join('\n'),
+  );
+  const pids = new Set([200, 500]);
+  assert.deepEqual([...runOwnersBySession(table, pids)], [200]);
+  // Both are running no-mistakes, which is the other question and a different
+  // answer: either one may have backgrounded work disproving an idle nudge.
+  assert.deepEqual([...pipelinesBySession(table, pids)].sort(), [200, 500]);
+});
+
+test('ownsRunFor answers off the same scan as everything else', async () => {
+  const calls = [];
+  const watch = new PollWatch({
+    execAsync: async (cmd, args) => {
+      calls.push(cmd);
+      return '  200   100 claude\n  400   200 /usr/local/bin/no-mistakes axi run\n';
+    },
+  });
+  await watch.load(new Set([200]));
+  assert.equal(watch.ownsRunFor(200, new Set([200]), 1000), true);
+  assert.equal(watch.ownsRunFor(999, new Set([200]), 1000), false);
+  assert.equal(watch.ownsRunFor(null, new Set([200]), 1000), false);
+  assert.equal(calls.length, 1, 'one ps answers all three questions');
 });

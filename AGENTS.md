@@ -50,7 +50,7 @@ Four sources of truth, joined into one list:
 | no-mistakes SQLite DB (polled, 1s) | `src/nm-state.js` | is a pipeline run parked, working, failed? |
 | agent hooks (pushed) | `src/registry.js` | is the agent blocked waiting for a human? |
 | the session's own transcript (tail, on change) | `src/transcript.js` | what is it working on, what is it doing right now, and did it open a pull request? |
-| the process table (one `ps`, every 3s) | `src/poll-watch.js` | is a review still open, and is a pipeline still running? |
+| the process table (one `ps`, every 3s) | `src/poll-watch.js` | is a review still open, is a pipeline still running, and whose is it? |
 
 | Path | What |
 | --- | --- |
@@ -63,7 +63,8 @@ Four sources of truth, joined into one list:
 | `src/transcript-reader.js` | the tail read behind that, cached on mtime, branch and agent |
 | `src/git-branch.js` | the branch a checkout is on, read from `.git/HEAD` |
 | `src/lavish.js` | resolving a Lavish artifact to the page waiting on you |
-| `src/poll-watch.js` | which sessions are in a `lavish-axi poll`, and which have a pipeline running |
+| `src/poll-watch.js` | which sessions are in a `lavish-axi poll`, which have a pipeline running, and which are driving one |
+| `src/run-owner.js` | which session started which run, remembered across the gaps |
 | `src/dashboard.js` | joins them all into ranked rows (pure) |
 | `src/focus/` | tmux resolution, per-terminal adapters, and raising Claude Desktop |
 | `src/process-tree.js` | which terminal or app, and which agent process, a hook is running under |
@@ -285,6 +286,43 @@ matched and does not need to be, because the actual `no-mistakes axi status` chi
 walk up to the same session. The permanently running `daemon` is excluded explicitly as well -
 the ancestor walk already drops it, but a rule that depends on the walk alone is one refactor
 away from claiming every session on the machine.
+
+**A run belongs to the session that started it, and only the process table knows which.**
+`matchRunForCwd` places a run by repo path alone. That is deliberate and right for *identity* -
+the row keeps showing the repo's recent pipeline - but several sessions open on one checkout is
+an ordinary day, and every one of them matched the same run. Three cards then carried the same
+step, the same parked gate and the same folded agent, each with a `Focus ↗` to a window that
+could not answer it. Seen with three sessions on this repo: one driving `axi run`, two with
+nothing under them at all.
+
+Nothing in no-mistakes' database says whose run it is - `runs.intent_session_id` is empty on
+every row, the same field that already fails to place the pipeline's own agents. The answer
+comes from where the poll gate's does: walk the live process up to the `host.pid` the registry
+records for focusing. Same `ps`, third question.
+
+Two rules keep it from becoming a confident wrong answer of its own:
+
+- **Driving a run is ownership; reading one is not.** `isRunOwnerCommand` allows `run`,
+  `rerun`, `respond` and `abort` and refuses `status`, `logs` and the rest, so a session that
+  merely glanced at the pipeline cannot take the row off the one running it. It is an
+  allowlist, and it fails the safe way: a driving verb a later no-mistakes adds goes
+  unrecognised, the run goes unattributed, and the page behaves as it did before attribution
+  existed. The verb is found by scanning rather than by position, because global flags precede
+  it and `--intent` follows it with paragraphs of English - the five most recent real intents
+  on this machine run to 5.6KB and use the words "run", "abort" and "status" throughout.
+- **Ownership narrows and never widens.** A run nobody was observed to own stays on every
+  session in its repo, exactly as before. This is the same shape as the transcript being
+  allowed to clear a block but never assert one.
+
+**`RunOwners` is a memory because the evidence is intermittent, not because it is expensive.**
+`axi run` *returns* at every approval gate and does not run again until the agent answers with
+`axi respond`, so there is no process to walk up from for exactly as long as a run is parked -
+which is when the dashboard matters most. Without the memory the row would scatter back across
+every session in the repo at the gate, and again for the half hour a finished run stays
+visible. First observation wins: a run does not change hands. Verified live - with the run
+parked, `ps` showed only the daemon, and `nmmon status`, which is one-shot and has no memory,
+still reported all three rows. The server polls, so it catches `axi run` within a second of
+it starting and holds the answer.
 
 **no-mistakes' own agent sessions are folded into the repo's row, never given one.**
 no-mistakes runs its pipeline steps as Claude sessions in a worktree at
@@ -558,7 +596,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 384 tests, no network, no dependencies, ~2s
+npm test          # 379 tests, no network, no dependencies, ~2s
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
 
@@ -641,7 +679,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 ## Commands
 
 ```sh
-npm test                       # 384 tests, ~2s
+npm test                       # 379 tests, ~2s
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
 ```

@@ -379,6 +379,128 @@ test('buildRows does not duplicate a run that a session already claimed', () => 
   assert.equal(rows.length, 1);
 });
 
+// Three Claude sessions open on one checkout is an ordinary day, and
+// `matchRunForCwd` places a run by repo path alone - so the pipeline landed on
+// all three cards, and clicking any of them focused a window with nothing to do
+// with it. The process table knows which session launched the run; these pin
+// what the dashboard does with that answer.
+test('a run belongs to the session that started it, not to every session in the repo', () => {
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'owner', state: 'working' }),
+      session({ sessionId: 'bystander', state: 'idle', host: { tty: '/dev/ttys005' } }),
+    ],
+    runs: [run({ runId: 'r1', parked: true })],
+    runOwners: new Map([['r1', 'owner']]),
+    now: 5000,
+  });
+  const byId = new Map(rows.map((r) => [r.sessionId, r]));
+  assert.equal(byId.get('owner').run?.runId, 'r1');
+  assert.equal(byId.get('owner').attention, 'parked');
+  // The bystander is idle, and saying so is the whole point: a parked pipeline
+  // on this row would summon someone to a window that cannot answer the gate.
+  assert.equal(byId.get('bystander').run, null);
+  assert.equal(byId.get('bystander').attention, 'idle');
+});
+
+test('a run nobody was seen to own still shows on every session in its repo', () => {
+  // Ownership narrows and never widens. A session restarted since the pipeline
+  // began, or a run started by hand, leaves no process to walk up from - and an
+  // unattributed run is better on all three rows than on none.
+  const rows = buildRows({
+    sessions: [session({ sessionId: 'a' }), session({ sessionId: 'b' })],
+    runs: [run({ runId: 'r1' })],
+    runOwners: new Map(),
+    now: 5000,
+  });
+  assert.deepEqual(
+    rows.map((r) => r.run?.runId),
+    ['r1', 'r1'],
+  );
+});
+
+test('a session that does not own the run is still titled after the repo it is in', () => {
+  // The run says where a session *is* even when it says nothing about what the
+  // pipeline is doing. Dropping it wholesale retitled a subdirectory session
+  // after that subdirectory, so two cards on one repo stopped looking alike.
+  const rows = buildRows({
+    sessions: [session({ sessionId: 'bystander', cwd: '/Users/x/work/repo/src' })],
+    runs: [run({ runId: 'r1' })],
+    runOwners: new Map([['r1', 'owner']]),
+    now: 5000,
+  });
+  const row = rows.find((r) => r.sessionId === 'bystander');
+  assert.equal(row.title, 'repo');
+  assert.equal(row.titlePath, '/Users/x/work/repo');
+  assert.equal(row.run, null);
+});
+
+test("a bystander keeps the branch's pull request, which is not the run's to lend", () => {
+  // A pull request belongs to the checkout's branch, so every session on that
+  // branch is waiting on the same review. Only the pipeline state is exclusive.
+  const rows = buildRows({
+    sessions: [session({ sessionId: 'bystander' })],
+    runs: [run({ runId: 'r1' })],
+    runOwners: new Map([['r1', 'owner']]),
+    branches: new Map([['bystander', 'main']]),
+    pullRequests: [
+      {
+        url: 'https://github.com/x/repo/pull/7',
+        number: 7,
+        state: 'open',
+        observedAt: 900,
+        branch: 'main',
+        repoPath: '/Users/x/work/repo',
+        live: true,
+      },
+    ],
+    now: 5000,
+  });
+  assert.equal(rows[0].pr?.number, 7);
+});
+
+test("the pipeline's own agent is folded into the owner's row alone", () => {
+  const agentSession = session({
+    sessionId: 'agent',
+    cwd: '/Users/mattw/.no-mistakes/worktrees/ab12/r1',
+    state: 'blocked',
+    message: 'Claude needs your permission to use Bash',
+  });
+  const rows = buildRows({
+    sessions: [
+      agentSession,
+      session({ sessionId: 'owner' }),
+      session({ sessionId: 'bystander', state: 'idle' }),
+    ],
+    runs: [run({ runId: 'r1' })],
+    runOwners: new Map([['r1', 'owner']]),
+    now: 5000,
+  });
+  const byId = new Map(rows.map((r) => [r.sessionId, r]));
+  // A blocked pipeline agent has stalled the run, so the owner goes red.
+  assert.equal(byId.get('owner').attention, 'blocked');
+  assert.equal(byId.get('owner').agent?.state, 'blocked');
+  // The bystander cannot free it and must not be summoned for it.
+  assert.equal(byId.get('bystander').agent, null);
+  assert.equal(byId.get('bystander').attention, 'idle');
+});
+
+test('a run whose owner is no longer registered gets a row of its own', () => {
+  // The owning session ended while the pipeline carried on. Nobody claims the
+  // run, so it falls through to the unattached-run pass rather than attaching
+  // itself to whichever other session happens to share the directory.
+  const rows = buildRows({
+    sessions: [session({ sessionId: 'bystander' })],
+    runs: [run({ runId: 'r1' })],
+    runOwners: new Map([['r1', 'gone']]),
+    now: 5000,
+  });
+  assert.equal(rows.length, 2);
+  const runRow = rows.find((r) => r.kind === 'run');
+  assert.equal(runRow.run.runId, 'r1');
+  assert.equal(runRow.focusable, false);
+});
+
 test('rows sort by urgency, then by recency', () => {
   const rows = sortRows([
     { attention: 'idle', updatedAt: 100 },
