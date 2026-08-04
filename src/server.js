@@ -121,7 +121,18 @@ export function createMonitorServer({
     // so summoning anyone to them is a wrong answer with a Focus button
     // attached. Departed owners let go first, or a new driver's sighting would
     // be discarded on the very tick the old owner disappeared.
-    runOwners.release(new Set(sessions.map((s) => s.sessionId)));
+    //
+    // Guarded on a non-empty reading, exactly as the prune below is: an empty
+    // session list is not evidence that every owner departed, it is also what
+    // `registry.list()` returns when `readdirSync` on the sessions directory
+    // throws - a transient filesystem error rather than a real absence. Letting
+    // one of those release everything would scatter a parked run back across
+    // its repo, the failure this memory exists to prevent, and a parked run has
+    // no live process to be re-observed from. Skipping the release costs
+    // nothing when the list is legitimately empty: there are no session rows
+    // for ownership to affect on such a tick, and prune still retires the entry
+    // once the run leaves the reading.
+    if (sessions.length > 0) runOwners.release(new Set(sessions.map((s) => s.sessionId)));
     runOwners.observeFrom(sessions, runs, (s) => polls.ownsRunFor(s.host?.pid, agentPids));
 
     const summaries = new Map();

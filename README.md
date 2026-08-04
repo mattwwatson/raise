@@ -109,6 +109,12 @@ PIPELINE PARKED
 If one of those agents ever stops for a permission prompt, the repo's row goes red and says so
 - the pipeline has stalled and only you can free it.
 
+**The pipeline lands on the session that started it.** Several sessions open on one checkout
+is an ordinary day, and only one of them can answer a gate - so the other cards show nothing
+about the pipeline at all: no step, no parked gate, no `NO-MISTAKES` line. They still name the
+same repo and branch, and they still link its pull request. When nmmon cannot tell which
+session started a run, the run shows on every session in that repo, as it always did.
+
 **A session waiting on a Lavish review says so, and gives you the link back.** An agent
 sitting in a `lavish-axi poll` has stopped and is waiting for you to open a page you opened a
 while ago and have since buried under thirty tabs. The hooks see a busy session, so this used

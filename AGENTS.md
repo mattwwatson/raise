@@ -617,7 +617,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 410 tests, no network, no dependencies, ~2s
+npm test          # 411 tests, no network, no dependencies, ~2s
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
 
@@ -700,7 +700,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 ## Commands
 
 ```sh
-npm test                       # 410 tests, ~2s
+npm test                       # 411 tests, ~2s
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
 ```

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -679,6 +679,108 @@ test('one empty reading does not forget who owns what', async () => {
     // pipeline would be back on both cards, which is the bug this whole change
     // exists to fix.
     insertRun('completed');
+    const rows = await state();
+    const byId = new Map(rows.map((r) => [r.sessionId, r]));
+    assert.equal(byId.get('driver')?.run?.runId, 'run-1');
+    assert.equal(byId.get('neighbour')?.run, null);
+    assert.equal(rows.length, 2);
+    db.close();
+  } finally {
+    await monitor?.stop();
+    if (previousHome === undefined) delete process.env.NMMON_HOME;
+    else process.env.NMMON_HOME = previousHome;
+    cleanup();
+  }
+});
+
+test('a session reading we did not get releases nobody', async () => {
+  // The twin of the guard above, and the same rule: `registry.list()` returns
+  // an empty list when `readdirSync` on the sessions directory throws, so one
+  // transient filesystem error would look like every owner having departed and
+  // let go of the lot in a single tick. A parked run has no live process to be
+  // re-observed from, so it would scatter back across its repo for good.
+  const { dir, cleanup } = scratch();
+  const previousHome = process.env.NMMON_HOME;
+  process.env.NMMON_HOME = dir;
+  const repo = join(dir, 'repo');
+  const sessionsPath = join(dir, 'sessions');
+  const hidden = join(dir, 'sessions-unreadable');
+  let monitor = null;
+  try {
+    const dbPath = join(dir, 'state.sqlite');
+    const db = new DatabaseSync(dbPath);
+    db.exec(
+      'CREATE TABLE repos (id TEXT, working_path TEXT);' +
+        'CREATE TABLE runs (id TEXT, repo_id TEXT, branch TEXT, status TEXT,' +
+        ' awaiting_agent_since INTEGER, created_at INTEGER, updated_at INTEGER,' +
+        ' pr_url TEXT, pr_state TEXT, pr_state_observed_at INTEGER, head_sha TEXT, error TEXT);' +
+        'CREATE TABLE step_results (run_id TEXT, step_name TEXT, status TEXT, step_order INTEGER,' +
+        ' findings_json TEXT, last_activity TEXT, last_activity_at INTEGER, log_path TEXT);',
+    );
+    const seconds = Math.floor(Date.now() / 1000);
+    db.prepare('INSERT INTO repos VALUES (?, ?)').run('repo-1', repo);
+    db.prepare(
+      'INSERT INTO runs VALUES (?, ?, ?, ?, NULL, ?, ?, NULL, NULL, NULL, NULL, NULL)',
+    ).run('run-1', 'repo-1', 'main', 'running', seconds, seconds);
+
+    const driverPid = process.pid;
+    const neighbourPid = process.ppid;
+    const ps = [
+      '  100     1 /Applications/iTerm.app/Contents/MacOS/iTerm2',
+      `  ${driverPid}   100 claude`,
+      `  999999   ${driverPid} /usr/local/bin/no-mistakes axi run --intent "ship it"`,
+      `  ${neighbourPid}   100 claude`,
+      `  999998   ${neighbourPid} /usr/local/bin/no-mistakes axi status`,
+    ].join('\n');
+
+    const port = await freePort();
+    monitor = createMonitorServer({
+      port,
+      token: 'test-token',
+      dbPath,
+      sessionsPath,
+      exec: () => assert.fail('no blocking commands from the server'),
+      execAsync: async (command) => (command === 'ps' ? ps : ''),
+    });
+    await monitor.start();
+
+    for (const [sessionId, pid] of [
+      ['driver', driverPid],
+      ['neighbour', neighbourPid],
+    ]) {
+      const registered = await fetch(`http://127.0.0.1:${port}/event`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-nmmon-token': 'test-token' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          hook_event_name: 'SessionStart',
+          cwd: repo,
+          host: { tty: '/dev/ttys004', term_program: 'iTerm.app', pid },
+        }),
+      });
+      assert.equal(registered.status, 204);
+    }
+
+    const state = async () =>
+      (await (await fetch(`http://127.0.0.1:${port}/state?t=test-token`)).json()).rows;
+    // Asking is what schedules the scan, so the first reading predates it.
+    await state();
+    for (let i = 0; i < 10; i += 1) await nextTick();
+    assert.equal((await state()).find((r) => r.sessionId === 'driver')?.run?.runId, 'run-1');
+
+    // Finished before the bad reading, so nothing can be re-observed driving it
+    // afterwards - only the memory can still say whose run it was.
+    db.prepare("UPDATE runs SET status = 'completed'").run();
+
+    // The unreadable tick: no sessions come back at all, so the run stands
+    // alone and there are no session rows for ownership to affect anyway.
+    renameSync(sessionsPath, hidden);
+    assert.deepEqual(
+      (await state()).map((r) => r.sessionId),
+      [null],
+    );
+
+    renameSync(hidden, sessionsPath);
     const rows = await state();
     const byId = new Map(rows.map((r) => [r.sessionId, r]));
     assert.equal(byId.get('driver')?.run?.runId, 'run-1');
