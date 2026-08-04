@@ -184,6 +184,11 @@ Any row that can be focused is a button, says `Focus ↗` on the right, and rais
 when you click it. Rows without a live Claude session behind them - a pipeline running with
 no session attached - are plain and do nothing.
 
+The chip beside a row says where the session lives - `tmux`, `tab`, `desktop` - and a session
+whose window nmmon could not place says `no window` rather than guessing at one. Focusing is
+otherwise silent, since the window arriving in front of you is the answer; a short message
+means you were raised onto something less than the row you clicked.
+
 The dot in the header is **positive evidence, not the absence of an error**. The server sends
 a `ping` event every 20 seconds; if nothing arrives for 50 the dot goes red, the header reads
 `no response for 2m`, and the whole page dims, because everything on it is now a snapshot of
