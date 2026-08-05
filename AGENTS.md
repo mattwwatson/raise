@@ -505,8 +505,10 @@ pipeline - which means a finished run still matches a session for the whole thir
 counts as recent, long after the checkout has moved on. Taking its pull request
 unconditionally therefore put another branch's review beside `main`: exactly the confident
 wrong link the rest of this section is built to prevent. A checkout whose branch cannot be
-read is unaffected, because `branch` already falls back to the run's own and the two agree by
-construction.
+read is unaffected, because `branch` falls back to the run's own and the two agree by
+construction - but only for a session sitting inside the run's repo, never for one that
+reached the run through a worktree's link, where they are known to differ. See the branch
+bullet above.
 
 *The frozen part is the trap.* no-mistakes stops observing a pull request the moment its run
 reaches a terminal state - `pr_state_observed_at` never advances past `updated_at` - so every
