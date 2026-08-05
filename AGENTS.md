@@ -454,6 +454,7 @@ Five things it deliberately does not do:
   common cause is this branch's own premise: every worktree's run registers against the one
   main checkout, so **several runs per `repoPath` is now the ordinary reading, not an unusual
   one**, and anything that resolves a run by rank alone is picking between somebody else's.
+  There was a fourth, and it is what closed the class - see below.
 - **only a common dir named `.git` yields a checkout.** A linked worktree's admin directory is
   always `<common dir>/worktrees/<name>`, and that dir is called `.git` only when the
   repository has a working tree at all. no-mistakes' own gate repos are bare
@@ -474,6 +475,31 @@ Five things it deliberately does not do:
   the other side, since a branchless worktree reaches no run to borrow from; the guard stays
   because the two rules are independent, and it is what keeps this true for any run reached by
   a route other than the session's own cwd.
+
+**Ownership, when it is known, decides which run a session's card shows; rank is the fallback
+for a session that owns nothing.** This is the resolution of the class above rather than a
+fifth rule beside it, and the shape of the mistake is the part worth carrying forward.
+
+`buildRows` used to resolve exactly one run by rank and only then consult `runOwners`, and it
+consulted it as a **veto**: the run was dropped when somebody else owned it. So ownership could
+take a wrong run off a card and never put the right one on it - which is precisely why the same
+failure kept arriving by a new route each time. Through the link, through the sibling fan-out,
+through the sighting, and finally here on the display path, every instance was rank picking
+between runs that ownership already knew the answer for. A session driving `axi run` was handed
+the parked run next to it, `rankRun` putting parked above active, and the run it was actually
+driving fell through to an unfocusable row of its own: this feature's failure mode, reached on
+the one path that had not yet been closed. Inverting the consultation closes all four, because
+there is no longer a place where rank decides something ownership knows.
+
+Two things it deliberately does not change. **Identity still follows the session's own path** -
+`title`, `titlePath` and `branch` all come from the rank-resolved match, so a session that owns
+a run is not retitled after it and two cards on one checkout keep looking alike. And the
+**branch requirement is unmoved**: ownership everywhere, display only through the link.
+
+The consequence is accepted on purpose: a session owning a run on a branch its checkout has
+since left shows *that* run rather than the repo's newest. That is the right answer - it is the
+run this session is answering for, and the only one whose gate it can actually reach - and the
+run it no longer shows is not lost, because an unclaimed run still gets a row of its own.
 
 **no-mistakes' own agent sessions are folded into the repo's row, never given one.**
 no-mistakes runs its pipeline steps as Claude sessions in a worktree at
@@ -751,7 +777,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 441 tests, no network, no dependencies, ~2s
+npm test          # 443 tests, no network, no dependencies, ~2s
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
 
@@ -834,7 +860,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 ## Commands
 
 ```sh
-npm test                       # 441 tests, ~2s
+npm test                       # 443 tests, ~2s
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
 ```

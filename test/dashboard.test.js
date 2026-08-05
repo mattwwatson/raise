@@ -468,6 +468,57 @@ test('a run started in a worktree belongs to the worktree session', () => {
   assert.equal(byId.get('main').attention, 'idle');
 });
 
+test('a session shows the run it owns, not the higher-ranked one on the same path', () => {
+  // Several runs on one `repoPath` is the ordinary reading now that every
+  // worktree's run registers against the main checkout. Ownership was only ever
+  // consulted as a veto - it could take a wrong run off a card and never put the
+  // right one on it - so the driver was handed the parked run it has nothing to
+  // do with (`rankRun` puts parked above active) and its own run fell through to
+  // an unfocusable row of its own.
+  const rows = buildRows({
+    sessions: [session({ sessionId: 'driver' })],
+    runs: [
+      run({ runId: 'parked', branch: 'feat/other', parked: true, updatedAt: 2000 }),
+      run({ runId: 'mine', branch: 'feat/mine' }),
+    ],
+    branches: new Map([['driver', 'feat/mine']]),
+    runOwners: new Map([['mine', 'driver']]),
+    now: 5000,
+  });
+  const byId = new Map(rows.map((r) => [r.sessionId, r]));
+  assert.equal(byId.get('driver').run?.runId, 'mine');
+  // And the run it owns is claimed, so it is not also shown as an orphan.
+  assert.equal(
+    rows.find((r) => r.kind === 'run' && r.run.runId === 'mine'),
+    undefined,
+  );
+  // The run nobody owns is still on the page, just not on this card.
+  assert.equal(
+    rows.find((r) => r.kind === 'run')?.run.runId,
+    'parked',
+  );
+});
+
+test('owning a run moves the pipeline onto the card and leaves identity alone', () => {
+  // Only `run` may follow ownership. `title` and `titlePath` keep coming from
+  // the rank-resolved match on the session's own path - a session titled after
+  // the run it owns would stop looking like the checkout it is sitting in.
+  const rows = buildRows({
+    sessions: [session({ sessionId: 'driver', cwd: '/Users/x/work/repo/src' })],
+    runs: [
+      run({ runId: 'parked', branch: 'feat/other', parked: true, updatedAt: 2000 }),
+      run({ runId: 'mine', branch: 'feat/mine' }),
+    ],
+    branches: new Map([['driver', 'feat/mine']]),
+    runOwners: new Map([['mine', 'driver']]),
+    now: 5000,
+  });
+  const row = rows.find((r) => r.sessionId === 'driver');
+  assert.equal(row.run?.runId, 'mine');
+  assert.equal(row.title, 'repo');
+  assert.equal(row.titlePath, '/Users/x/work/repo');
+});
+
 test('a worktree session keeps its own path, so two checkouts stay tellable apart', () => {
   // Identity must not follow the run match here. Borrowing the repo's path for
   // `titlePath` would give the worktree and the checkout it is linked to the

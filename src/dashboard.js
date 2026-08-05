@@ -569,6 +569,24 @@ export function buildRows({
   const rows = [];
   const claimedRuns = new Set();
 
+  // Which run each session owns, inverted out of the ownership map and resolved
+  // against this reading, because a card shows the run its session is answering
+  // for whenever we know which that is. Ownership used only as a veto could
+  // take a wrong run off a card and never put the right one on it, which is the
+  // shape of every failure this attribution has produced.
+  //
+  // A session can hold more than one - it drove a run that has since finished
+  // and is still in the window, then drove another - so rank picks between
+  // them, exactly as it does for a session that owns nothing.
+  /** @type {Map<string, Run>} */
+  const ownedRuns = new Map();
+  for (const run of runs) {
+    const owner = runOwners.get(run.runId);
+    if (!owner) continue;
+    const best = ownedRuns.get(owner);
+    if (!best || rankRun(run) > rankRun(best)) ownedRuns.set(owner, run);
+  }
+
   // The pipeline's own sessions are folded into the row of the repo they are
   // working on, never given one of their own: two `hexbattle` rows, one of
   // which you cannot act on, is worse than one row that says what the pipeline
@@ -617,10 +635,17 @@ export function buildRows({
     // not answer it.
     //
     // `runOwners` is what the process table saw: the session with a live
-    // `no-mistakes axi run` underneath it. It narrows and never widens - a run
-    // nobody was observed to own stays on every session in its repo, exactly as
-    // before, because an unattributed pipeline is better shown three times than
-    // not at all.
+    // `no-mistakes axi run` underneath it, and when it names a run for this
+    // session that is the run the card shows. Rank is the fallback for a
+    // session that owns nothing, and there it still narrows and never widens -
+    // a run nobody was observed to own stays on every session in its repo,
+    // exactly as before, because an unattributed pipeline is better shown three
+    // times than not at all.
+    //
+    // A session owning a run on a branch its checkout has since left therefore
+    // shows that run rather than the repo's newest. That is the point: it is the
+    // run this session is answering for, and the only one whose gate it can
+    // reach.
     //
     // The checkout's own branch is resolved first because it is not only shown:
     // through a worktree's link it is what says which of the checkout's runs is
@@ -628,8 +653,9 @@ export function buildRows({
     const mainCheckout = mainCheckouts.get(session.sessionId) || null;
     const checkoutBranch = branches.get(session.sessionId) || null;
     const repo = matchRunForCheckout(session.cwd, mainCheckout, checkoutBranch, runs);
+    const owned = ownedRuns.get(session.sessionId) || null;
     const owner = repo ? runOwners.get(repo.runId) || null : null;
-    const run = !owner || owner === session.sessionId ? repo : null;
+    const run = owned || (!owner || owner === session.sessionId ? repo : null);
     if (run) claimedRuns.add(run.runId);
     const summary = summaries.get(session.sessionId) || null;
     const agent = (run && agents.get(run.runId)) || null;
