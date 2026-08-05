@@ -65,18 +65,27 @@ export class RunOwners {
    * Only an active run can be owned. A driving command seen while the newest
    * match for that directory is a finished run would otherwise claim it.
    *
-   * The run has to be matched the same way `buildRows` matches it, or the two
-   * disagree about which run a sighting was of. That is not a theoretical
+   * The run has to be resolved through the same match `buildRows` uses, or the
+   * two disagree about which run a sighting was of. That is not a theoretical
    * tidiness: a session driving a pipeline from a worktree was seen driving all
    * along, and the sighting was discarded here because a worktree's cwd matches
    * no run by prefix - so the run stayed unowned and landed on a bystander.
    *
-   * The branch is part of that match, which is why it is asked for here rather
-   * than left to the page. Sibling worktrees of one checkout all resolve to the
-   * same path, so without it a genuine sighting from the worktree driving the
-   * *second* run resolves to the first, is discarded as already owned, and the
-   * run it was actually of is left to fall through to a bystander - the very
-   * failure the link was added to fix, reached through the link.
+   * **The branch narrows the sighting on every path, including the session's
+   * own.** That is where ownership parts company with the page: `buildRows` asks
+   * what pipeline a checkout has recently seen and deliberately keeps showing it
+   * after the checkout moves on, while this asks which run a session is
+   * *driving*, and `axi run` and `axi respond` both act on the branch they are
+   * issued from - so a session cannot be driving a run for a branch it is not
+   * on. Narrowing here is the definition, not a heuristic. Without it a session
+   * in the main checkout driving its own run claims a *parked* run on the same
+   * path instead, since `matchRunForCwd` ranks parked above active and a parked
+   * run is an active one, so the guard below cannot catch it.
+   *
+   * A session whose branch cannot be read - a detached HEAD, which Treehouse
+   * produces routinely - therefore owns nothing, rather than falling back to a
+   * guess by rank. The run stays unowned and shows on every session in its repo,
+   * which is exactly how the page behaved before ownership existed.
    *
    * @param {Session[]} sessions every live session
    * @param {Run[]} runs the current reading
@@ -90,9 +99,11 @@ export class RunOwners {
   observeFrom(sessions, runs, isDriving, mainCheckouts = new Map(), branches = new Map()) {
     for (const session of sessions) {
       if (!isDriving(session)) continue;
-      const linked = mainCheckouts.get(session.sessionId) || null;
       const branch = branches.get(session.sessionId) || null;
-      const owned = matchRunForCheckout(session.cwd, linked, branch, runs);
+      if (!branch) continue;
+      const linked = mainCheckouts.get(session.sessionId) || null;
+      const onBranch = runs.filter((run) => run.branch === branch);
+      const owned = matchRunForCheckout(session.cwd, linked, branch, onBranch);
       if (owned?.active) this.observe(owned.runId, session.sessionId);
     }
   }

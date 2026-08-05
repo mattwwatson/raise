@@ -525,6 +525,10 @@ test('a pipeline lands on the session that started it, not on its neighbours', a
       'INSERT INTO runs VALUES (?, ?, ?, ?, NULL, ?, ?, NULL, NULL, NULL, NULL, NULL)',
     ).run('run-1', 'repo-1', 'main', 'running', seconds, seconds);
     db.close();
+    // A real checkout, because a sighting is resolved by branch: `axi run` acts
+    // on the branch it is issued from, so a session with none owns nothing.
+    mkdirSync(join(repo, '.git'), { recursive: true });
+    writeFileSync(join(repo, '.git', 'HEAD'), 'ref: refs/heads/main\n');
 
     // The registry prunes a session whose agent pid is not alive, so these have
     // to be real - our own process and its parent, standing in for two agents.
@@ -752,6 +756,8 @@ test('one empty reading does not forget who owns what', async () => {
         .run('run-1', 'repo-1', 'main', status, seconds, seconds);
     db.prepare('INSERT INTO repos VALUES (?, ?)').run('repo-1', repo);
     insertRun('running');
+    mkdirSync(join(repo, '.git'), { recursive: true });
+    writeFileSync(join(repo, '.git', 'HEAD'), 'ref: refs/heads/main\n');
 
     const driverPid = process.pid;
     const neighbourPid = process.ppid;
@@ -853,6 +859,8 @@ test('a session reading we did not get releases nobody', async () => {
     db.prepare(
       'INSERT INTO runs VALUES (?, ?, ?, ?, NULL, ?, ?, NULL, NULL, NULL, NULL, NULL)',
     ).run('run-1', 'repo-1', 'main', 'running', seconds, seconds);
+    mkdirSync(join(repo, '.git'), { recursive: true });
+    writeFileSync(join(repo, '.git', 'HEAD'), 'ref: refs/heads/main\n');
 
     const driverPid = process.pid;
     const neighbourPid = process.ppid;

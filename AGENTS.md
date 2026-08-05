@@ -429,15 +429,31 @@ Five things it deliberately does not do:
   worktree with no branch to match on - a detached HEAD, which Treehouse produces routinely -
   gets no run at all rather than a guess.
 
-  The branch requirement stops at the link. A session physically inside the checkout still
-  matches by repo path alone, whatever branch it has since moved to, because that row is meant
-  to keep showing the repo's recent pipeline. Narrowing there would take the pipeline off
-  every session that changed branch after running it.
+  **For display the branch requirement stops at the link; for ownership it applies
+  everywhere.** They differ because they are different questions. Display asks what pipeline
+  this checkout has recently seen, so a session physically inside the checkout still matches
+  by repo path alone, whatever branch it has since moved to - narrowing there would take the
+  pipeline off every session that changed branch after running it. Ownership asks which run
+  this session is *driving*, and `axi run` and `axi respond` both act on the branch they are
+  issued from, so a session cannot be driving a run for a branch it is not on. Narrowing a
+  sighting by branch is the definition of the question, not a heuristic answer to it.
 
-  `RunOwners.observeFrom` resolves a sighting through the same function for the same reason it
-  was given the link in the first place: if the two disagree about which run was seen, a
-  genuine `axi run` from the second tree claims the first tree's run, is discarded as already
-  owned, and the run it was really of falls through to a bystander.
+  `RunOwners.observeFrom` therefore resolves a sighting through the same function - for the
+  same reason it was given the link in the first place: if the two disagree about which run
+  was seen, a genuine `axi run` from the second tree claims the first tree's run, is discarded
+  as already owned, and the run it was really of falls through to a bystander - but it hands
+  that function only the runs on the session's own branch, and a session with no branch to
+  read owns nothing at all. An unowned run still shows on every session in its repo, which is
+  the documented degradation rather than a new failure.
+
+  **That was the third instance of one class, and the class is worth naming: rank standing in
+  for the branch.** The link picked a run by rank; the link then fanned one run out across
+  sibling trees; and a sighting on a session's *own* path was resolved by rank while a parked
+  run sat on the same `repoPath` - `rankRun` puts parked above active and `run.parked` implies
+  `run.active`, so `observeFrom`'s "only an active run can be owned" guard let it through. The
+  common cause is this branch's own premise: every worktree's run registers against the one
+  main checkout, so **several runs per `repoPath` is now the ordinary reading, not an unusual
+  one**, and anything that resolves a run by rank alone is picking between somebody else's.
 - **only a common dir named `.git` yields a checkout.** A linked worktree's admin directory is
   always `<common dir>/worktrees/<name>`, and that dir is called `.git` only when the
   repository has a working tree at all. no-mistakes' own gate repos are bare
@@ -735,7 +751,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 439 tests, no network, no dependencies, ~2s
+npm test          # 441 tests, no network, no dependencies, ~2s
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
 
@@ -818,7 +834,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 ## Commands
 
 ```sh
-npm test                       # 439 tests, ~2s
+npm test                       # 441 tests, ~2s
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
 ```
