@@ -43,7 +43,8 @@ no-mistakes-monitor     unique already, so left alone
 ```
 
 Rows for the *same* place keep one name - two sessions in one repo, say. No amount of path
-would separate them, so they are told apart by their branch and state instead.
+would separate them, so they are told apart by their branch, their state, and the name you
+gave the session, if you gave it one.
 
 ## Every row says what it is about
 

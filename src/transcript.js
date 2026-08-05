@@ -10,9 +10,10 @@
  * Claude Code already writes what we need into its transcript, so nothing here
  * is inferred from prose:
  *
- *   ai-title    a generated name for the session, refreshed as it goes
- *   mode        normal, plan, and so on
- *   tool_use    every tool call, with the id its result later refers back to
+ *   ai-title      a generated name for the session, refreshed as it goes
+ *   custom-title  the name a human gave it, with `/rename`
+ *   mode          normal, plan, and so on
+ *   tool_use      every tool call, with the id its result later refers back to
  *
  * The last tool_use with no matching tool_result is the one running *now* -
  * that is the whole trick, and it is what makes the difference between "this
