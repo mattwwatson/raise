@@ -128,11 +128,15 @@ function assistantContent(content) {
  * @returns {object|null}
  */
 export function normalisePiEntry(entry) {
-  // The name a human gave this session with `/name`. pi writes no equivalent of
-  // Claude Code's `ai-title` - it does not generate one - so this is the only
-  // title a pi session can have, and it is rendered through the same field.
+  // The name a human gave this session with `/name`, which is the same thing
+  // Claude Code's `/rename` writes - so it is normalised onto the same record
+  // and lands in the same place on the card. It used to be rewritten as an
+  // `ai-title` instead, for want of anywhere better: pi generates no title of
+  // its own, so that was the only field a pi name could reach. Now that a name
+  // has a field, sending it through the title one would put the one concept on
+  // line 1 for Claude Code and line 3 for pi.
   if (entry?.type === 'session_info') {
-    return entry.name ? { type: 'ai-title', aiTitle: entry.name } : null;
+    return entry.name ? { type: 'custom-title', customTitle: entry.name } : null;
   }
   if (entry?.type !== 'message') return null;
   const message = entry.message;

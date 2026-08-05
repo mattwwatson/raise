@@ -164,16 +164,24 @@ test('pi generates no title, and the summary invents nothing', () => {
   const summary = summariseTranscript(records);
   assert.equal(summary.title, null);
   assert.equal(summary.mode, null);
+  // And nothing invents a name for a session nobody named either.
+  assert.equal(summary.sessionName, null);
 });
 
-test('a name the human gave the session is its title', () => {
+test('a name the human gave the session lands where Claude Code`s does', () => {
+  // pi`s `/name` and Claude Code`s `/rename` are the same act, so they must
+  // reach the same field - otherwise the one concept renders in two places
+  // depending on which agent wrote the transcript. It is not a title: pi
+  // generates none, and `title` stays null rather than borrowing this.
   const records = parsePiTranscriptTail(
     [
       '{"partial":"line"}',
       JSON.stringify({ type: 'session_info', id: 'k', timestamp: '2026-08-04T05:00:00.000Z', name: 'Refactor auth' }),
     ].join('\n'),
   );
-  assert.equal(summariseTranscript(records).title, 'Refactor auth');
+  const summary = summariseTranscript(records);
+  assert.equal(summary.sessionName, 'Refactor auth');
+  assert.equal(summary.title, null);
 });
 
 test('renaming a session takes the newer name', () => {
@@ -184,7 +192,7 @@ test('renaming a session takes the newer name', () => {
       JSON.stringify({ type: 'session_info', timestamp: '2026-08-04T05:10:00.000Z', name: 'Second' }),
     ].join('\n'),
   );
-  assert.equal(summariseTranscript(records).title, 'Second');
+  assert.equal(summariseTranscript(records).sessionName, 'Second');
 });
 
 test('a name is not evidence that anything happened', () => {

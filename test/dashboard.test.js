@@ -248,6 +248,34 @@ test('buildRows carries the transcript summary onto a working row', () => {
   assert.equal(rows[0].attention, 'working');
 });
 
+test('a session keeps both the name you gave it and the title Claude guessed', () => {
+  // They answer different questions - what you meant it for, and what it is
+  // actually doing - and they drift apart over a long session.
+  const rows = buildRows({
+    sessions: [session()],
+    runs: [],
+    now: 5000,
+    summaries: new Map([
+      ['s1', { title: 'add-pi-support', sessionName: 'Open Source Planning', mode: null, activity: null, lavishFile: null }],
+    ]),
+  });
+  assert.equal(rows[0].sessionName, 'Open Source Planning');
+  assert.equal(rows[0].summary, 'add-pi-support');
+});
+
+test('an unnamed session, and a run with no session, carry no name at all', () => {
+  // Most sessions are unnamed, and a run nobody is sitting in front of cannot
+  // have been named by anyone. Both must be null rather than absent, or the two
+  // row shapes diverge and the page has to guard for it.
+  const rows = buildRows({
+    sessions: [session()],
+    runs: [run({ runId: 'r-orphan', repoPath: '/Users/x/work/other', repoName: 'other' })],
+    now: 5000,
+    summaries: new Map([['s1', { title: 't', mode: null, activity: null, lavishFile: null }]]),
+  });
+  for (const row of rows) assert.equal(row.sessionName, null);
+});
+
 test('a review row carries the link and drops the tool it is blocked in', () => {
   // "Running lavish-axi" beside "Waiting on your review" reads as work in
   // progress, which is the exact impression this state exists to correct.

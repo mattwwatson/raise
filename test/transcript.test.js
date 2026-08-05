@@ -121,6 +121,42 @@ test('summariseTranscript reads the latest title and mode, not the first', () =>
   assert.equal(summary.mode, 'plan');
 });
 
+test('summariseTranscript reads the name a human gave the session', () => {
+  const records = parseTranscriptTail(
+    jsonl(
+      { type: 'ai-title', aiTitle: 'add-pi-support' },
+      { type: 'custom-title', customTitle: 'Open Source Planning' },
+    ),
+    false,
+  );
+  const summary = summariseTranscript(records);
+  // Both, not one instead of the other: the name is what you meant, the title
+  // is what it turned out to be doing.
+  assert.equal(summary.sessionName, 'Open Source Planning');
+  assert.equal(summary.title, 'add-pi-support');
+});
+
+test('summariseTranscript takes the last session name, not the first', () => {
+  // This is the real shape of the record rather than a contrived case: Claude
+  // Code re-appends `custom-title` on every metadata flush, so a renamed
+  // session's tail carries several copies, and a second rename several values.
+  const records = parseTranscriptTail(
+    jsonl(
+      { type: 'custom-title', customTitle: 'Open Source Planning' },
+      { type: 'custom-title', customTitle: 'Open Source Planning' },
+      { type: 'custom-title', customTitle: 'Session names on cards' },
+    ),
+    false,
+  );
+  assert.equal(summariseTranscript(records).sessionName, 'Session names on cards');
+});
+
+test('summariseTranscript leaves the name null when nobody set one', () => {
+  // Most sessions. An ai-title is not a stand-in for a name a human typed.
+  const records = parseTranscriptTail(jsonl({ type: 'ai-title', aiTitle: 'add-pi-support' }), false);
+  assert.equal(summariseTranscript(records).sessionName, null);
+});
+
 test('summariseTranscript surfaces a lavish poll as the file it waits on', () => {
   const records = parseTranscriptTail(
     jsonl(
@@ -145,6 +181,7 @@ test('summariseTranscript does not report a lavish poll that has already returne
 test('summariseTranscript claims nothing about an empty transcript', () => {
   assert.deepEqual(summariseTranscript([]), {
     title: null,
+    sessionName: null,
     mode: null,
     activity: null,
     lavishFile: null,

@@ -94,6 +94,20 @@ transcript, so a plain `gh pr create` still gets a link.
 **The branch is always shown**, next to the repo name, read straight from `.git/HEAD` - so it
 is right for worktrees and for sessions that have never run the pipeline.
 
+**If you have named a session, the name is shown too**, between the repo and the branch. Two
+sessions on one repo and one branch is an ordinary day, and nothing else on the row tells them
+apart - so `/rename Open Source Planning` in Claude Code, or `/name` in pi, is the fastest way
+to make the right card obvious:
+
+```
+no-mistakes-monitor  Open Source Planning     feat/session-names   3m  tmux  Focus ↗
+Waiting for you - Claude needs your permission
+Add Pi support and promote session monitoring tool
+```
+
+The AI-generated title stays on its own line underneath. The name is what you meant the session
+for; the title is what it turned out to be doing, and over a long session the two drift apart.
+
 **One row per repo, even while no-mistakes is running.** no-mistakes does its pipeline work in
 its own Claude sessions, in worktrees of their own. Those show up to the hooks like any other
 session, so they used to arrive as extra cards titled with a run id - an unrelated-looking
@@ -200,9 +214,10 @@ and nmmon does not invent one. A pi session that has finished its turn shows as 
 something demanding your attention. It can still reach the top of the page through its
 pipeline: parked, failed, or waiting on a review.
 
-The other small difference: Claude Code writes a short AI-generated title for every session
-and pi generates none, so a pi row shows no summary line unless you have named the session
-yourself. `/name Refactor auth` gives it one, and the page picks it up on the next poll.
+The other small difference: Claude Code writes a short AI-generated title for every session and
+pi generates none, so a pi row shows no summary line. Naming the session with `/name Refactor
+auth` still works and still shows - it appears next to the repo, the same place Claude Code's
+`/rename` does.
 
 ## Commands
 

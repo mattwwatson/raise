@@ -367,8 +367,11 @@ async function cmdStatus() {
           ? yellow
           : dim;
     const step = row.run?.step ? ` ${dim(`step ${row.run.step.name}`)}` : '';
+    // Same place as on the page - between the repo and the branch - so the two
+    // tell one story about which session is which.
+    const name = row.sessionName ? ` ${dim(row.sessionName)}` : '';
     console.log(
-      `${colour(row.attentionLabel.padEnd(26))} ${bold(row.title)} ${dim(row.branch || '')}${step}`,
+      `${colour(row.attentionLabel.padEnd(26))} ${bold(row.title)}${name} ${dim(row.branch || '')}${step}`,
     );
     if (row.message) console.log(`  ${dim(row.message)}`);
     // The summary is what the step line already says when there is a pipeline.
