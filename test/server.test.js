@@ -794,3 +794,56 @@ test('a session reading we did not get releases nobody', async () => {
     cleanup();
   }
 });
+
+test('a machine with neither no-mistakes nor lavish-axi runs quietly', async () => {
+  // Both are optional. The evidence that they are is negative and therefore
+  // easy to lose: no warning on the page, and not one external command run for
+  // either of them. `no-mistakes axi status` would otherwise be spawned per
+  // session directory every fifteen seconds, forever, for a binary that is not
+  // there - and a banner would send the user looking for a fault they do not
+  // have.
+  const { dir, cleanup } = scratch();
+  const previousHome = process.env.NMMON_HOME;
+  process.env.NMMON_HOME = dir;
+  try {
+    const port = await freePort();
+    const ran = [];
+    const monitor = createMonitorServer({
+      port,
+      token: 'test-token',
+      dbPath: join(dir, 'no-such.sqlite'),
+      sessionsPath: join(dir, 'sessions'),
+      exec: () => assert.fail('no blocking commands from the server'),
+      execAsync: async (command) => {
+        ran.push(command);
+        return '';
+      },
+    });
+    assert.equal(monitor.probe.mode, 'absent');
+    assert.equal(monitor.probe.warning, null);
+    await monitor.start();
+
+    // A live session, which is what puts a directory in front of the degraded
+    // path and a transcript in front of the Lavish lookup.
+    await fetch(`http://127.0.0.1:${port}/event`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-nmmon-token': 'test-token' },
+      body: JSON.stringify({ session_id: 'quiet', hook_event_name: 'SessionStart', cwd: dir }),
+    });
+
+    const state = await (await fetch(`http://127.0.0.1:${port}/state?t=test-token`)).json();
+    assert.equal(state.warning, null, 'a missing optional dependency is not a warning');
+    assert.equal(state.source, 'absent');
+    assert.equal(state.rows.length, 1, 'the session itself still shows');
+
+    // Whatever the process scan runs is fair game; these two are not.
+    assert.equal(ran.includes('no-mistakes'), false);
+    assert.equal(ran.includes('lavish-axi'), false);
+
+    await monitor.stop();
+  } finally {
+    if (previousHome === undefined) delete process.env.NMMON_HOME;
+    else process.env.NMMON_HOME = previousHome;
+    cleanup();
+  }
+});

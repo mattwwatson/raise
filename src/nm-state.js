@@ -6,11 +6,34 @@
  * a single query - we never shell out per repo on the happy path.
  *
  * The schema is internal to no-mistakes, so we probe for the columns we depend
- * on at startup. If a future version renames them we degrade to parsing
- * `no-mistakes axi status` per repo rather than reporting confident nonsense.
+ * on before trusting them. If a future version renames them we degrade to
+ * parsing `no-mistakes axi status` per repo rather than reporting confident
+ * nonsense - and re-probe on every read, so an upgrade that restores a schema
+ * we know puts us back on the fast path without a restart.
+ *
+ * **no-mistakes is optional, and its absence is not a degraded state.** nmmon's
+ * other three sources - the hooks, the transcript and the process table - are
+ * complete without it, so a machine that has never installed no-mistakes gets a
+ * working monitor with no pipeline rows and, importantly, no warning: there is
+ * nothing wrong to report. That is what `absent` mode is for, and it is decided
+ * by the database file simply not being there.
+ *
+ * Distinguishing it from `cli` matters twice over. A warning saying the
+ * database could not be opened describes a broken installation, and printing it
+ * to somebody who does not use no-mistakes at all sends them looking for a
+ * fault that does not exist. And the `cli` fallback shells out to
+ * `no-mistakes axi status` once per session directory every fifteen seconds -
+ * a process spawn per repo, forever, for a binary that is not installed.
+ *
+ * A database that is there but carries no schema yet belongs on the same side
+ * of that line: the daemon creates the file on first use and applies its tables
+ * a moment later, and a poll landing in between is watching no-mistakes be
+ * installed, not a version of it we cannot read. So `absent` covers it too, and
+ * the only thing ever remembered between reads is `sqlite`.
  */
 
 import { DatabaseSync } from 'node:sqlite';
+import { statSync } from 'node:fs';
 import { basename } from 'node:path';
 
 /**
@@ -234,9 +257,45 @@ const PR_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
  */
 const CLI_CACHE_MS = 15000;
 
+/** Whether the file is a database carrying any schema at all - see `#tableCount`. */
+const TABLE_COUNT_QUERY = `SELECT count(*) AS n FROM sqlite_master WHERE type = 'table'`;
+
+/**
+ * Which file a handle was opened against. Identity, not a path: the daemon
+ * replaces the database on update or migration, and a path cannot tell you that
+ * happened.
+ *
+ * @typedef {object} DbFile
+ * @property {number} dev
+ * @property {number} ino
+ */
+
+/**
+ * @param {string} path
+ * @returns {DbFile|null} null when there is no file there at all
+ */
+function dbFile(path) {
+  try {
+    const stat = statSync(path);
+    return { dev: stat.dev, ino: stat.ino };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @param {DbFile|null} a
+ * @param {DbFile|null} b
+ * @returns {boolean} true only when both are the same file on the same device
+ */
+function sameFile(a, b) {
+  return Boolean(a && b) && a.dev === b.dev && a.ino === b.ino;
+}
+
 export class NoMistakesState {
   #dbPath;
   #db = null;
+  #file = null;
   #mode = 'unknown';
   #warning = null;
   #exec;
@@ -268,12 +327,34 @@ export class NoMistakesState {
   }
 
   /**
-   * Decide once, at startup, whether the fast path is usable.
+   * Decide whether the fast path is usable, against the file that is there
+   * right now. Always opens a fresh handle, so a probe is also how the reader
+   * moves onto a replaced database.
+   *
+   * The file-not-there check comes first and deliberately does not open
+   * anything. `node:sqlite` reports a missing file as a generic
+   * `ERR_SQLITE_ERROR`, so the error the fallback path would report says
+   * nothing about the one thing worth knowing - that no-mistakes is simply not
+   * installed here.
+   *
    * @returns {{mode: string, warning: string|null}}
    */
   probe() {
+    this.#close();
+    this.#file = dbFile(this.#dbPath);
+    if (!this.#file) {
+      this.#mode = 'absent';
+      this.#warning = null;
+      return { mode: this.#mode, warning: this.#warning };
+    }
     try {
       this.#open();
+      if (this.#tableCount() === 0) {
+        this.#mode = 'absent';
+        this.#warning = null;
+        this.#close();
+        return { mode: this.#mode, warning: this.#warning };
+      }
       const runCols = this.#columns('runs');
       const repoCols = this.#columns('repos');
       const stepCols = this.#columns('step_results');
@@ -316,7 +397,30 @@ export class NoMistakesState {
    *            warning: string|null}}
    */
   read({ candidateDirs = [], now = Date.now(), blocking = false } = {}) {
-    if (this.#mode === 'unknown') this.probe();
+    // Only `sqlite` is ever remembered, and only for as long as the handle
+    // still points at the file it was decided about. One `stat` per read buys
+    // all of that.
+    //
+    // A read-only handle keeps answering happily from an unlinked inode, so
+    // nothing else can tell us the database was deleted (an uninstall) or
+    // swapped for another one (an update, a migration, a restore) - and in both
+    // cases we would go on serving a dead file's frozen runs as current, which
+    // is precisely the quiet staleness this tool exists to avoid. Identity, not
+    // existence, is what closes the second of those.
+    //
+    // Every other mode is re-decided from scratch, because none of them may
+    // latch. `absent` must not, or a monitor left running would stay blind to a
+    // no-mistakes installed under it - the daemon creates the database on first
+    // use. `cli` must not either: a half-applied schema and a genuine version
+    // mismatch are indistinguishable at the moment of probing, and only the
+    // first one fixes itself a moment later. Re-probing costs an open and three
+    // PRAGMAs against a path we are already spawning a process per repo for.
+    if (this.#mode !== 'sqlite' || !sameFile(dbFile(this.#dbPath), this.#file)) {
+      this.probe();
+    }
+    if (this.#mode === 'absent') {
+      return { runs: [], pullRequests: [], source: 'absent', warning: null };
+    }
     if (this.#mode === 'sqlite') {
       const fromDb = () => ({
         runs: this.#readFromDb(now),
@@ -370,6 +474,21 @@ export class NoMistakesState {
       // Already gone; nothing to do.
     }
     this.#db = null;
+  }
+
+  /**
+   * How many tables the database has at all.
+   *
+   * `PRAGMA table_info` on a table that is not there returns no rows rather
+   * than throwing, so a file the daemon has created and not yet applied its
+   * schema to reads as one whose every column has been renamed - reported as a
+   * version mismatch, with the warning banner and the per-repo spawns that go
+   * with it. Nothing distinguishes the two at the moment of probing, so the
+   * empty case is treated as not-yet-installed and settled by the next read.
+   */
+  #tableCount() {
+    const row = this.#open().prepare(TABLE_COUNT_QUERY).get();
+    return Number(row?.n ?? 0);
   }
 
   #columns(table) {

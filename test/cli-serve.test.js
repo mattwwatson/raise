@@ -187,3 +187,22 @@ test('doctor reports a port held by an nmmon it has no record of', async () => {
     ours.cleanup();
   }
 });
+
+test('doctor treats a machine without no-mistakes as a setup, not a failure', async () => {
+  // no-mistakes is optional, so "not installed" is neither a fault nor
+  // something to act on. Reporting it as `fail` - which is what a missing
+  // database used to do, exit code and all - is how a doctor teaches you to
+  // skim it, and the next thing it says is the one that mattered.
+  const { dir, cleanup } = scratch();
+  try {
+    const { code, stdout } = await cli(['doctor'], dir);
+    assert.equal(code, 0, `an optional dependency must not fail the check:\n${stdout}`);
+    assert.match(stdout, /no-mistakes\s+not installed/);
+    assert.ok(!/fail\s+no-mistakes/.test(stdout), `reported as a failure:\n${stdout}`);
+    // And it says what that costs, since a user with no pipeline rows has no
+    // other way to tell an absent integration from a broken one.
+    assert.match(stdout, /no pipeline rows/);
+  } finally {
+    cleanup();
+  }
+});
