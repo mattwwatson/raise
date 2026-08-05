@@ -519,6 +519,32 @@ test('owning a run moves the pipeline onto the card and leaves identity alone', 
   assert.equal(row.titlePath, '/Users/x/work/repo');
 });
 
+test('an ownership that has finished stops outranking the live run beside it', () => {
+  // An ownership outlives its run - it is held for the half hour the run stays
+  // in the reading - and preferring it past that point holds a completed run on
+  // the card while the parked one next to it, the one with a gate open, loses
+  // the only session that could answer it. The preference is over a live run
+  // because the gate is the whole reason for it.
+  const rows = buildRows({
+    sessions: [session({ sessionId: 'driver' })],
+    runs: [
+      run({ runId: 'done', branch: 'feat/mine', status: 'completed', active: false }),
+      run({ runId: 'live', branch: 'feat/other', parked: true, updatedAt: 2000 }),
+    ],
+    branches: new Map([['driver', 'feat/mine']]),
+    runOwners: new Map([['done', 'driver']]),
+    now: 5000,
+  });
+  const row = rows.find((r) => r.sessionId === 'driver');
+  assert.equal(row.run?.runId, 'live');
+  assert.equal(row.attention, 'parked');
+  // And it is claimed, so it is not stranded as a row nobody can focus.
+  assert.equal(
+    rows.find((r) => r.kind === 'run' && r.run.runId === 'live'),
+    undefined,
+  );
+});
+
 test('a worktree session keeps its own path, so two checkouts stay tellable apart', () => {
   // Identity must not follow the run match here. Borrowing the repo's path for
   // `titlePath` would give the worktree and the checkout it is linked to the

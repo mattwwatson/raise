@@ -476,8 +476,8 @@ Five things it deliberately does not do:
   because the two rules are independent, and it is what keeps this true for any run reached by
   a route other than the session's own cwd.
 
-**Ownership, when it is known, decides which run a session's card shows; rank is the fallback
-for a session that owns nothing.** This is the resolution of the class above rather than a
+**Ownership of a *running* run decides which run a session's card shows; rank is the fallback
+for a session that owns nothing live.** This is the resolution of the class above rather than a
 fifth rule beside it, and the shape of the mistake is the part worth carrying forward.
 
 `buildRows` used to resolve exactly one run by rank and only then consult `runOwners`, and it
@@ -497,9 +497,21 @@ a run is not retitled after it and two cards on one checkout keep looking alike.
 **branch requirement is unmoved**: ownership everywhere, display only through the link.
 
 The consequence is accepted on purpose: a session owning a run on a branch its checkout has
-since left shows *that* run rather than the repo's newest. That is the right answer - it is the
-run this session is answering for, and the only one whose gate it can actually reach - and the
-run it no longer shows is not lost, because an unclaimed run still gets a row of its own.
+since left shows *that* run, for as long as it is still going, rather than the repo's newest.
+That is the right answer - it is the run this session is answering for, and the only one whose
+gate it can actually reach - and the run it no longer shows is not lost, because an unclaimed
+run still gets a row of its own.
+
+**The preference ends when the run does, and that qualifier is load-bearing rather than
+tidying.** The whole justification for preferring an owned run is the gate it is holding open,
+and a finished run has none - so there is nothing left to prefer. An ownership outlives its run
+by design (`prune` keeps it for the half hour the run stays in the reading, `release` for as
+long as the session lives), so an unconditional preference would let a *completed* run sit on
+the card while a live or parked one in the same checkout lost the only session that could focus
+it: this branch's own failure, reached from the other side. `run.parked` implies `run.active`,
+so a parked run is still preferred, which is the case with a gate actually waiting. A session
+whose owned run has finished falls back to the rank-resolved match, nulled when somebody else
+owns it, exactly as a session that never owned anything.
 
 **no-mistakes' own agent sessions are folded into the repo's row, never given one.**
 no-mistakes runs its pipeline steps as Claude sessions in a worktree at
@@ -777,7 +789,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 443 tests, no network, no dependencies, ~2s
+npm test          # 444 tests, no network, no dependencies, ~2s
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
 
@@ -860,7 +872,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 ## Commands
 
 ```sh
-npm test                       # 443 tests, ~2s
+npm test                       # 444 tests, ~2s
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
 ```

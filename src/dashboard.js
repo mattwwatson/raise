@@ -569,18 +569,29 @@ export function buildRows({
   const rows = [];
   const claimedRuns = new Set();
 
-  // Which run each session owns, inverted out of the ownership map and resolved
-  // against this reading, because a card shows the run its session is answering
-  // for whenever we know which that is. Ownership used only as a veto could
-  // take a wrong run off a card and never put the right one on it, which is the
-  // shape of every failure this attribution has produced.
+  // The *live* run each session owns, inverted out of the ownership map and
+  // resolved against this reading, because a card shows the run its session is
+  // answering for whenever we know which that is. Ownership used only as a veto
+  // could take a wrong run off a card and never put the right one on it, which
+  // is the shape of every failure this attribution has produced.
   //
-  // A session can hold more than one - it drove a run that has since finished
-  // and is still in the window, then drove another - so rank picks between
-  // them, exactly as it does for a session that owns nothing.
+  // Only while it is still running, though, and the reason is the same one that
+  // makes the preference right in the first place: the owned run is the one
+  // whose gate this session can reach, and a finished run has no gate. An
+  // ownership outlives its run - `prune` holds it for the half hour the run
+  // stays in the reading - so without this a stale one would hide a live or
+  // parked run in the same checkout behind a completed one, which is this
+  // branch's own failure reintroduced from the other side. `run.parked` implies
+  // `run.active`, so a parked run is still preferred: it is precisely the case
+  // with a gate waiting.
+  //
+  // A session can hold more than one, having driven a second while the first
+  // was still going, so rank picks between them exactly as it does for a
+  // session that owns nothing.
   /** @type {Map<string, Run>} */
   const ownedRuns = new Map();
   for (const run of runs) {
+    if (!run.active) continue;
     const owner = runOwners.get(run.runId);
     if (!owner) continue;
     const best = ownedRuns.get(owner);
@@ -635,17 +646,17 @@ export function buildRows({
     // not answer it.
     //
     // `runOwners` is what the process table saw: the session with a live
-    // `no-mistakes axi run` underneath it, and when it names a run for this
-    // session that is the run the card shows. Rank is the fallback for a
-    // session that owns nothing, and there it still narrows and never widens -
-    // a run nobody was observed to own stays on every session in its repo,
-    // exactly as before, because an unattributed pipeline is better shown three
-    // times than not at all.
+    // `no-mistakes axi run` underneath it, and when it names a *running* run for
+    // this session that is the run the card shows. Rank is the fallback for a
+    // session that owns nothing live, and there it still narrows and never
+    // widens - a run nobody was observed to own stays on every session in its
+    // repo, exactly as before, because an unattributed pipeline is better shown
+    // three times than not at all.
     //
     // A session owning a run on a branch its checkout has since left therefore
-    // shows that run rather than the repo's newest. That is the point: it is the
-    // run this session is answering for, and the only one whose gate it can
-    // reach.
+    // shows that run, while it is still going, rather than the repo's newest.
+    // That is the point: it is the run this session is answering for, and the
+    // only one whose gate it can reach.
     //
     // The checkout's own branch is resolved first because it is not only shown:
     // through a worktree's link it is what says which of the checkout's runs is
