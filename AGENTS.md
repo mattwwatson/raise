@@ -361,9 +361,12 @@ Two rules keep it from becoming a confident wrong answer of its own:
   existed. The verb is found by scanning rather than by position, because global flags precede
   it and `--intent` follows it with paragraphs of English - the five most recent real intents
   on this machine run to 5.6KB and use the words "run", "abort" and "status" throughout.
-- **Ownership narrows and never widens.** A run nobody was observed to own stays on every
-  session in its repo, exactly as before. This is the same shape as the transcript being
-  allowed to clear a block but never assert one.
+- **Ownership narrows for every session but the one that owns the run.** A run nobody was
+  observed to own stays on every session in its repo, exactly as before. This is the same
+  shape as the transcript being allowed to clear a block but never assert one. On the owner's
+  own card it is also the positive answer, which is a later change and the resolution of a
+  whole class of failures - see *Ownership of a running run decides which run a session's card
+  shows* below.
 
 **`RunOwners` is a memory because the evidence is intermittent, not because it is expensive.**
 `axi run` *returns* at every approval gate and does not run again until the agent answers with
