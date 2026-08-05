@@ -8,9 +8,24 @@
  * The schema is internal to no-mistakes, so we probe for the columns we depend
  * on at startup. If a future version renames them we degrade to parsing
  * `no-mistakes axi status` per repo rather than reporting confident nonsense.
+ *
+ * **no-mistakes is optional, and its absence is not a degraded state.** nmmon's
+ * other three sources - the hooks, the transcript and the process table - are
+ * complete without it, so a machine that has never installed no-mistakes gets a
+ * working monitor with no pipeline rows and, importantly, no warning: there is
+ * nothing wrong to report. That is what `absent` mode is for, and it is decided
+ * by the database file simply not being there.
+ *
+ * Distinguishing it from `cli` matters twice over. A warning saying the
+ * database could not be opened describes a broken installation, and printing it
+ * to somebody who does not use no-mistakes at all sends them looking for a
+ * fault that does not exist. And the `cli` fallback shells out to
+ * `no-mistakes axi status` once per session directory every fifteen seconds -
+ * a process spawn per repo, forever, for a binary that is not installed.
  */
 
 import { DatabaseSync } from 'node:sqlite';
+import { existsSync } from 'node:fs';
 import { basename } from 'node:path';
 
 /**
@@ -268,10 +283,24 @@ export class NoMistakesState {
   }
 
   /**
-   * Decide once, at startup, whether the fast path is usable.
+   * Decide whether the fast path is usable: at startup, and again on every read
+   * while the answer is `absent`.
+   *
+   * The file-not-there check comes first and deliberately does not open
+   * anything. `node:sqlite` reports a missing file as a generic
+   * `ERR_SQLITE_ERROR`, so the error the fallback path would report says
+   * nothing about the one thing worth knowing - that no-mistakes is simply not
+   * installed here.
+   *
    * @returns {{mode: string, warning: string|null}}
    */
   probe() {
+    if (!existsSync(this.#dbPath)) {
+      this.#mode = 'absent';
+      this.#warning = null;
+      this.#close();
+      return { mode: this.#mode, warning: this.#warning };
+    }
     try {
       this.#open();
       const runCols = this.#columns('runs');
@@ -316,7 +345,22 @@ export class NoMistakesState {
    *            warning: string|null}}
    */
   read({ candidateDirs = [], now = Date.now(), blocking = false } = {}) {
-    if (this.#mode === 'unknown') this.probe();
+    // Whether no-mistakes is installed is re-decided on every read, not
+    // remembered, and one `stat` is what buys both directions of that while the
+    // monitor is running. The database appearing matters because the daemon
+    // creates it on first use, long after a monitor left running - deciding
+    // `absent` once and for good would leave the page quietly blind to every
+    // pipeline until somebody thought to restart it. The database *going away*
+    // matters more: our read-only handle keeps working on the unlinked inode,
+    // so an uninstall would otherwise leave us serving a deleted file's frozen
+    // runs as current, which is exactly the quiet staleness this tool exists to
+    // avoid.
+    if (this.#mode === 'unknown' || this.#mode === 'absent' || !existsSync(this.#dbPath)) {
+      this.probe();
+    }
+    if (this.#mode === 'absent') {
+      return { runs: [], pullRequests: [], source: 'absent', warning: null };
+    }
     if (this.#mode === 'sqlite') {
       const fromDb = () => ({
         runs: this.#readFromDb(now),

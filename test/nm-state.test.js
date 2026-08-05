@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -37,6 +37,19 @@ function makeDb(dir, { omit = [] } = {}) {
   db.exec(`CREATE TABLE repos (${columns('repos', REQUIRED_REPO_COLUMNS)})`);
   db.exec(`CREATE TABLE step_results (${columns('step_results', REQUIRED_STEP_COLUMNS)})`);
   db.close();
+  return path;
+}
+
+/**
+ * A database file that is there and cannot be read.
+ *
+ * The degraded path is for exactly this, and it has to be built rather than
+ * faked with a missing path: a file that is not there means no-mistakes is not
+ * installed, which is a different mode with different behaviour.
+ */
+function unreadableDb(dir) {
+  const path = join(dir, 'state.sqlite');
+  writeFileSync(path, 'this is not a database');
   return path;
 }
 
@@ -269,10 +282,99 @@ test('the step_results columns are probed too', () => {
   }
 });
 
-test('an unreadable database degrades rather than throwing', () => {
+test('a machine without no-mistakes reports absence, not a broken database', () => {
+  // no-mistakes is optional. Reporting its absence as a database that could not
+  // be opened sends somebody who never installed it looking for a fault, and
+  // `node:sqlite` says only ERR_SQLITE_ERROR for a missing file, so the warning
+  // could not even name the real reason.
   const { dir, cleanup } = scratch();
   try {
     const state = new NoMistakesState({ dbPath: join(dir, 'not-there.sqlite') });
+    const probe = state.probe();
+    assert.equal(probe.mode, 'absent');
+    assert.equal(probe.warning, null, 'nothing is wrong, so there is nothing to warn about');
+
+    const read = state.read({ candidateDirs: ['/repo-a'] });
+    assert.deepEqual(read.runs, []);
+    assert.deepEqual(read.pullRequests, []);
+    assert.equal(read.source, 'absent');
+    assert.equal(read.warning, null);
+    state.close();
+  } finally {
+    cleanup();
+  }
+});
+
+test('an absent database never shells out, however often it is read', async () => {
+  // The degraded path spawns `no-mistakes axi status` per session directory
+  // every fifteen seconds. Doing that forever, for a binary that is not
+  // installed, is the cost of confusing "not installed" with "unreadable".
+  const { dir, cleanup } = scratch();
+  try {
+    const state = new NoMistakesState({
+      dbPath: join(dir, 'not-there.sqlite'),
+      exec: () => assert.fail('no-mistakes is not installed; nothing may run it'),
+      execAsync: async () => assert.fail('no-mistakes is not installed; nothing may run it'),
+    });
+    state.probe();
+    for (let i = 0; i < 5; i += 1) state.read({ candidateDirs: ['/repo-a', '/repo-b'] });
+    // The blocking one-shot path is the other caller, and is held to the same rule.
+    state.read({ candidateDirs: ['/repo-a'], blocking: true });
+    await nextTick();
+    await nextTick();
+    state.close();
+  } finally {
+    cleanup();
+  }
+});
+
+test('installing no-mistakes later is picked up without restarting the monitor', () => {
+  // The daemon creates the database on first use, which will usually be long
+  // after a monitor left running. Deciding "absent" once and for good would
+  // leave the page quietly blind to every pipeline until somebody restarted it.
+  const { dir, cleanup } = scratch();
+  try {
+    const state = new NoMistakesState({ dbPath: join(dir, 'state.sqlite') });
+    assert.equal(state.probe().mode, 'absent');
+
+    makeDb(dir);
+    assert.equal(state.read().source, 'sqlite');
+    assert.equal(state.mode, 'sqlite');
+    state.close();
+  } finally {
+    cleanup();
+  }
+});
+
+test('no-mistakes uninstalled under a running monitor goes quiet, not degraded', () => {
+  // Deleting the database is an ordinary thing to do to an optional dependency.
+  // Reporting it as a loss - and then shelling out per repo for a CLI that went
+  // with it - describes a fault where there is only a choice.
+  const { dir, cleanup } = scratch();
+  try {
+    const path = makeDb(dir);
+    const state = new NoMistakesState({
+      dbPath: path,
+      execAsync: async () => assert.fail('the CLI went with the database'),
+    });
+    assert.equal(state.probe().mode, 'sqlite');
+    assert.equal(state.read().source, 'sqlite');
+
+    unlinkSync(path);
+    const read = state.read({ candidateDirs: ['/repo-a'] });
+    assert.equal(read.source, 'absent');
+    assert.equal(read.warning, null);
+    assert.equal(state.warning, null);
+    state.close();
+  } finally {
+    cleanup();
+  }
+});
+
+test('an unreadable database degrades rather than throwing', () => {
+  const { dir, cleanup } = scratch();
+  try {
+    const state = new NoMistakesState({ dbPath: unreadableDb(dir) });
     assert.equal(state.probe().mode, 'cli');
     state.close();
   } finally {
@@ -289,7 +391,7 @@ test('the degraded path never shells out on a server read', async () => {
   try {
     const asyncCalls = [];
     const state = new NoMistakesState({
-      dbPath: join(dir, 'not-there.sqlite'),
+      dbPath: unreadableDb(dir),
       exec: () => assert.fail('the server path must never use the blocking runner'),
       execAsync: async (command, args, options) => {
         asyncCalls.push(options.cwd);
@@ -320,7 +422,7 @@ test('a degraded reading is cached well past the poll interval', async () => {
   try {
     let calls = 0;
     const state = new NoMistakesState({
-      dbPath: join(dir, 'not-there.sqlite'),
+      dbPath: unreadableDb(dir),
       execAsync: async () => {
         calls += 1;
         return `run:\n  id: "r1"\n  branch: main\n  status: running\n`;
@@ -353,7 +455,7 @@ test('a one-shot command may still block for the degraded reading', () => {
   try {
     const calls = [];
     const state = new NoMistakesState({
-      dbPath: join(dir, 'not-there.sqlite'),
+      dbPath: unreadableDb(dir),
       exec: (command, args, options) => {
         calls.push(options.cwd);
         return `run:\n  id: "r1"\n  branch: main\n  status: running\n`;
@@ -374,7 +476,7 @@ test('a repo whose CLI call fails is skipped, not fatal', async () => {
   const { dir, cleanup } = scratch();
   try {
     const state = new NoMistakesState({
-      dbPath: join(dir, 'not-there.sqlite'),
+      dbPath: unreadableDb(dir),
       execAsync: async (command, args, options) => {
         if (options.cwd === '/broken') throw new Error('no-mistakes: not a repo');
         return `run:\n  id: "r1"\n  branch: main\n  status: running\n`;

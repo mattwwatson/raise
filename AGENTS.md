@@ -106,6 +106,35 @@ Rules:
 These were each arrived at the hard way. Changing them is allowed; changing them by accident
 is the thing to avoid.
 
+**no-mistakes and lavish-axi are optional, and their absence is not a degraded state.** Two of
+the four sources are somebody else's tool, and the other two - the hooks and the transcript -
+answer the question this product exists for on their own. So a machine with neither installed
+is a supported setup, not a broken one, and the rule that follows is: **say nothing about an
+integration that is not there, and run nothing looking for it.** No warning banner, no `fail`
+in `doctor`, no subprocess.
+
+`nm-state.js` enforces it with a third mode, `absent`, decided by the database file simply not
+existing. Conflating that with `cli` - which is what a missing file used to fall into - cost
+both halves of the rule at once. It put *"Could not open the no-mistakes database
+(ERR_SQLITE_ERROR). Falling back to reading each repo individually"* on the page of somebody
+who had never installed no-mistakes, which is a fault report for a choice, and the error code
+could not even name the real reason: `node:sqlite` reports a missing file as a generic
+`ERR_SQLITE_ERROR`. And it armed the degraded path, which spawns `no-mistakes axi status` once
+per session directory every fifteen seconds, forever, for a binary that is not on the machine.
+
+**Which of the two it is gets re-decided on every read**, by one `stat`, and both directions
+matter. The database appearing is the daemon creating it on first use, long after a monitor
+was left running - deciding `absent` once and for good would leave the page quietly blind to
+every pipeline until somebody thought to restart it. The database *going away* matters more:
+the read-only handle keeps working on the unlinked inode, so an uninstall would otherwise
+leave the monitor serving a deleted file's frozen runs as current.
+
+Lavish needs no equivalent, and the reason is worth knowing before adding one: the only thing
+that asks `lavish-axi` anything is a session whose transcript or process table shows a live
+`lavish-axi poll`, which cannot happen if Lavish is not installed. It is already inert. The
+guard that keeps it that way is `server.test.js`'s assertion that neither command is ever run
+on a machine without them - negative evidence, so it has to be asserted or it is lost.
+
 **Polling SQLite, not the daemon socket.** The no-mistakes daemon does expose a live event
 stream over its unix socket, but the protocol is private and undocumented. Polling a local
 SQLite file once a second is effectively free and survives no-mistakes upgrades that a
@@ -619,7 +648,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 411 tests, no network, no dependencies, ~2s
+npm test          # 417 tests, no network, no dependencies, ~2s
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
 
@@ -702,7 +731,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 ## Commands
 
 ```sh
-npm test                       # 411 tests, ~2s
+npm test                       # 417 tests, ~2s
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
 ```

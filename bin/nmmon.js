@@ -59,6 +59,19 @@ const red = (s) => `[31m${s}[0m`;
 const yellow = (s) => `[33m${s}[0m`;
 
 /**
+ * What `serve` says it is reading pipeline state from.
+ *
+ * `absent` is not a fallback and must not read like one - no-mistakes is
+ * optional, and a machine without it is a supported setup rather than a
+ * half-working one.
+ */
+const SOURCE_LABELS = {
+  sqlite: 'no-mistakes database',
+  cli: 'per-repo fallback',
+  absent: 'agent sessions only - no-mistakes is not installed',
+};
+
+/**
  * Help must never fail.
  *
  * A malformed NMMON_PORT is a real error for `serve`, which reports it properly
@@ -158,7 +171,7 @@ async function cmdServe(flags) {
 
   console.log(`${bold('nmmon')} is watching.`);
   console.log(`  Dashboard  ${green(monitor.url())}`);
-  console.log(`  Source     ${monitor.probe.mode === 'sqlite' ? 'no-mistakes database' : 'per-repo fallback'}`);
+  console.log(`  Source     ${SOURCE_LABELS[monitor.probe.mode] ?? SOURCE_LABELS.cli}`);
   if (monitor.probe.warning) console.log(`  ${yellow('Note')}       ${monitor.probe.warning}`);
 
   const settings = readSettingsQuietly(DEFAULT_SETTINGS);
@@ -501,6 +514,9 @@ async function cmdDoctor() {
   const ok = (name, detail) => checks.push({ state: 'ok', name, detail });
   const warn = (name, detail) => checks.push({ state: 'warn', name, detail });
   const bad = (name, detail) => checks.push({ state: 'bad', name, detail });
+  // Neither good nor bad: an optional integration that is simply not here, and
+  // nothing to act on. Distinct from `warn`, which always has a next step.
+  const off = (name, detail) => checks.push({ state: 'off', name, detail });
 
   const [major, minor] = process.versions.node.split('.').map(Number);
   if (major > 22 || (major === 22 && minor >= 5)) {
@@ -509,19 +525,29 @@ async function cmdDoctor() {
     bad('Node', `v${process.versions.node} - nmmon needs 22.5 or newer for the built-in SQLite support`);
   }
 
+  // no-mistakes is optional, so its absence is reported rather than failed. A
+  // doctor that says "fail" over something the user never chose to install is
+  // one that gets ignored the next time it says it about something real.
   const dbPath = statePath();
-  if (!existsSync(dbPath)) {
-    bad('no-mistakes database', `not found at ${dbPath} - is no-mistakes installed?`);
+  const state = new NoMistakesState({ dbPath, exec });
+  const probe = state.probe();
+  if (probe.mode === 'absent') {
+    off('no-mistakes', `not installed - no pipeline rows; everything else works (looked in ${dbPath})`);
+  } else if (probe.mode === 'sqlite') {
+    const { runs } = state.read();
+    ok('no-mistakes database', `readable, ${runs.length} run(s) in the current window`);
   } else {
-    const state = new NoMistakesState({ dbPath, exec });
-    const probe = state.probe();
-    if (probe.mode === 'sqlite') {
-      const { runs } = state.read();
-      ok('no-mistakes database', `readable, ${runs.length} run(s) in the current window`);
-    } else {
-      warn('no-mistakes database', probe.warning);
-    }
-    state.close();
+    warn('no-mistakes database', probe.warning);
+  }
+  state.close();
+
+  // Optional in the same way, and worth naming: without it nothing can put a
+  // session into "waiting on your review", because that state is detected by
+  // watching for a live `lavish-axi poll` and by nothing else.
+  if (await tryExecAsync(execAsync, 'lavish-axi', ['--help'])) {
+    ok('lavish-axi', 'available');
+  } else {
+    off('lavish-axi', 'not installed - review gates will not be detected');
   }
 
   const settings = readSettingsQuietly(DEFAULT_SETTINGS);
@@ -607,7 +633,14 @@ async function cmdDoctor() {
 
   console.log(`${bold('nmmon doctor')}   home: ${monitorHome()}\n`);
   for (const check of checks) {
-    const mark = check.state === 'ok' ? green('ok  ') : check.state === 'warn' ? yellow('warn') : red('fail');
+    const mark =
+      check.state === 'ok'
+        ? green('ok  ')
+        : check.state === 'warn'
+          ? yellow('warn')
+          : check.state === 'off'
+            ? dim('--  ')
+            : red('fail');
     console.log(`  ${mark}  ${check.name.padEnd(22)} ${check.detail}`);
   }
   if (checks.some((c) => c.state === 'bad')) process.exitCode = 1;

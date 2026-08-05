@@ -128,9 +128,22 @@ reason the header dot does.
 ## Requirements
 
 - Node 22.5 or newer (`node:sqlite` is used, and it is built in - **there are no runtime dependencies**)
-- `no-mistakes` installed
 - Claude Code, for the "waiting for you" half. pi is supported too, with the caveat below
 - macOS for window focusing. Monitoring itself works anywhere.
+
+Optional, and independently so - nmmon runs with neither, and says nothing about the ones you
+do not have:
+
+| Optional | Without it |
+| --- | --- |
+| `no-mistakes` | No pipeline rows: nothing is parked, failed or running a step, and no pull request comes from the database. Sessions, blocks, reviews and focusing are unaffected. |
+| `lavish-axi` | No "waiting on your review" rows. That state is detected by watching for a live `lavish-axi poll` and by nothing else, so without Lavish there is nothing to detect. |
+
+Absence is not degradation and is never reported as a fault: no warning banner, no `fail` in
+`nmmon doctor`, and nothing shelled out looking for a command that is not there. `nmmon doctor`
+lists each as `--  not installed` so you can tell an integration you skipped from one that
+broke. Install no-mistakes later and a running monitor picks it up within a second - the
+daemon creates its database on first use, and nmmon looks each time it reads.
 
 ## Install
 
@@ -320,10 +333,17 @@ through `no-mistakes axi status` instead of guessing. Pipeline state still works
 limited to repos that have a live agent session. Worth reporting so the fast path can be
 updated.
 
+This banner means a no-mistakes that is installed and cannot be read. Not having no-mistakes
+at all is silent by design - see [Requirements](#requirements).
+
+**No pipeline rows, ever.** Check `nmmon doctor`. If it says `--  no-mistakes  not installed`
+then nmmon is looking in `~/.no-mistakes/state.sqlite` and finding nothing, which is the
+supported no-no-mistakes setup rather than a fault. `NM_HOME` moves where it looks.
+
 ## Development
 
 ```sh
-npm test          # 384 tests, no network, no build step, ~2s
+npm test          # 417 tests, no network, no build step, ~2s
 npm run typecheck
 ```
 
