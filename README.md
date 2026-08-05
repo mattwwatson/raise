@@ -327,11 +327,12 @@ send it anything.
 **"tmux session X is not attached to any window."** Exactly what it says - attach it with the
 command shown and it becomes focusable.
 
-**A warning banner about the no-mistakes database.** nmmon probes the schema at startup, and
-if a no-mistakes version moves the columns it depends on, it falls back to reading each repo
-through `no-mistakes axi status` instead of guessing. Pipeline state still works; it is just
-limited to repos that have a live agent session. Worth reporting so the fast path can be
-updated.
+**A warning banner about the no-mistakes database.** nmmon probes the schema each time it
+reads, and if a no-mistakes version moves the columns it depends on, it falls back to reading
+each repo through `no-mistakes axi status` instead of guessing. Pipeline state still works; it
+is just limited to repos that have a live agent session. Worth reporting so the fast path can
+be updated - and the banner clears itself, with no restart, once the schema is one nmmon
+knows again.
 
 This banner means a no-mistakes that is installed and cannot be read. Not having no-mistakes
 at all is silent by design - see [Requirements](#requirements).

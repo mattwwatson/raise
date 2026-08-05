@@ -6,8 +6,10 @@
  * a single query - we never shell out per repo on the happy path.
  *
  * The schema is internal to no-mistakes, so we probe for the columns we depend
- * on at startup. If a future version renames them we degrade to parsing
- * `no-mistakes axi status` per repo rather than reporting confident nonsense.
+ * on before trusting them. If a future version renames them we degrade to
+ * parsing `no-mistakes axi status` per repo rather than reporting confident
+ * nonsense - and re-probe on every read, so an upgrade that restores a schema
+ * we know puts us back on the fast path without a restart.
  *
  * **no-mistakes is optional, and its absence is not a degraded state.** nmmon's
  * other three sources - the hooks, the transcript and the process table - are
