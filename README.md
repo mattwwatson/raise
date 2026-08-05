@@ -115,6 +115,12 @@ about the pipeline at all: no step, no parked gate, no `NO-MISTAKES` line. They 
 same repo and branch, and they still link its pull request. When nmmon cannot tell which
 session started a run, the run shows on every session in that repo, as it always did.
 
+A session in a git worktree counts here as being in the checkout the worktree was created
+from, because that is the repo no-mistakes registers its runs against - so a pipeline started
+from a Treehouse tree lands on that tree's row rather than on an idle card for the main
+checkout. Sibling worktrees are told apart by their branch, so a worktree left on a detached
+HEAD shows no pipeline rather than the one next door's.
+
 **A session waiting on a Lavish review says so, and gives you the link back.** An agent
 sitting in a `lavish-axi poll` has stopped and is waiting for you to open a page you opened a
 while ago and have since buried under thirty tabs. The hooks see a busy session, so this used
@@ -344,7 +350,7 @@ supported no-no-mistakes setup rather than a fault. `NM_HOME` moves where it loo
 ## Development
 
 ```sh
-npm test          # 420 tests, no network, no build step, ~2s
+npm test          # 444 tests, no network, no build step, ~2s
 npm run typecheck
 ```
 

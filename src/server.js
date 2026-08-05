@@ -133,20 +133,36 @@ export function createMonitorServer({
     // for ownership to affect on such a tick, and prune still retires the entry
     // once the run leaves the reading.
     if (sessions.length > 0) runOwners.release(new Set(sessions.map((s) => s.sessionId)));
-    runOwners.observeFrom(sessions, runs, (s) => polls.ownsRunFor(s.host?.pid, agentPids));
+    // One `.git` resolution per session, up here because ownership is recorded
+    // before anything else needs either answer: a session driving a pipeline
+    // from a worktree can only be tied to that run through the link, and the
+    // branch is what says which of the checkout's runs is this worktree's.
+    // Both come off the same read and the same mtime check, so this is one stat
+    // per session on the happy path, not two.
+    const sessionBranches = new Map();
+    const mainCheckouts = new Map();
+    for (const session of sessions) {
+      const { branch, mainCheckout } = branches.checkoutFor(session.cwd);
+      sessionBranches.set(session.sessionId, branch);
+      mainCheckouts.set(session.sessionId, mainCheckout);
+    }
+    runOwners.observeFrom(
+      sessions,
+      runs,
+      (s) => polls.ownsRunFor(s.host?.pid, agentPids),
+      mainCheckouts,
+      sessionBranches,
+    );
 
     const summaries = new Map();
     const reviewUrls = new Map();
-    const sessionBranches = new Map();
     /** Sessions with a no-mistakes run still going underneath them. */
     const pipelines = new Set();
     for (const session of sessions) {
-      // Resolved before the transcript is read, because the branch is what
-      // decides which pull request in the tail belongs to this session. One
-      // stat per session on the happy path, and never a subprocess: nothing
-      // reachable from here may block the poll loop.
-      const branch = branches.branchFor(session.cwd);
-      sessionBranches.set(session.sessionId, branch);
+      // Already resolved above, and resolved before the transcript is read
+      // because the branch is what decides which pull request in the tail
+      // belongs to this session.
+      const branch = sessionBranches.get(session.sessionId) || null;
       const read = transcripts.read(session.transcriptPath, branch, session.agent);
       // The process table is the authority on whether a poll is still running.
       // A transcript can say the poll returned when only the tool call did -
@@ -183,6 +199,7 @@ export function createMonitorServer({
       summaries,
       reviewUrls,
       branches: sessionBranches,
+      mainCheckouts,
       pullRequests,
       pipelines,
       runOwners: runOwners.owners,

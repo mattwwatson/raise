@@ -122,6 +122,21 @@ export function attentionLabel(attention) {
 }
 
 /**
+ * Whether a directory is the given path or sits inside it.
+ *
+ * A plain `startsWith` on the path alone would make `/work/repo-other` a match
+ * for `/work/repo`, so the separator is part of the test.
+ *
+ * @param {string|null} dir
+ * @param {string|null} path
+ * @returns {boolean}
+ */
+function isInside(dir, path) {
+  if (!dir || !path) return false;
+  return dir === path || dir.startsWith(`${path}/`);
+}
+
+/**
  * Find the run belonging to a working directory.
  *
  * Sessions frequently run in worktrees nested under, or alongside, the path
@@ -137,8 +152,7 @@ export function matchRunForCwd(cwd, runs) {
   let best = null;
   let bestLength = -1;
   for (const run of runs) {
-    if (!run.repoPath) continue;
-    if (cwd !== run.repoPath && !cwd.startsWith(`${run.repoPath}/`)) continue;
+    if (!isInside(cwd, run.repoPath)) continue;
     // Prefer the most specific repo, then an active run over a finished one,
     // then the most recent.
     const length = run.repoPath.length;
@@ -151,6 +165,58 @@ export function matchRunForCwd(cwd, runs) {
     }
   }
   return best;
+}
+
+/**
+ * The run a session's checkout belongs to, following a worktree's link.
+ *
+ * A run started from a git worktree is registered by no-mistakes against the
+ * *main* checkout, because that is where a worktree's repository resolves to.
+ * The session reporting itself to us is in the worktree, so the cwd prefix
+ * `matchRunForCwd` needs can never match, and the run instead fell through to
+ * whichever other session happened to be open on the main checkout - a Focus
+ * button to a window that could not answer the pipeline's gate, while the
+ * session actually driving it showed no pipeline at all. Treehouse puts every
+ * session in a worktree, so this is the common case, not a corner of one.
+ *
+ * The link is a fallback and never an override: no-mistakes will register a
+ * worktree as a repository in its own right, and that run is the more specific
+ * answer - the same rule `matchRunForCwd` already applies to nesting.
+ *
+ * **Through the link the branch is required, and on the session's own path it
+ * is not.** Every worktree of a checkout resolves to the same main checkout and
+ * no-mistakes registers all of their runs against it, so the link is a
+ * one-to-many edge: resolving it by `matchRunForCwd`'s ranking alone hands one
+ * run to every sibling worktree, and hands each of them the parked one rather
+ * than its own. A worktree exists in order to be on its own branch, and every
+ * run carries the branch it is on, so that is what says which worktree's run it
+ * is. On the session's own path there is nothing to disambiguate and the branch
+ * must *not* narrow it - a session sitting in a checkout keeps showing that
+ * repo's recent pipeline whatever branch it has since moved to.
+ *
+ * A worktree whose branch cannot be read - a detached HEAD, which Treehouse
+ * produces routinely - therefore gets no run through the link at all. That is
+ * the same failing-closed rule that stops a run reached this way lending its
+ * branch: with nothing to match on, a guess would be a confident wrong answer
+ * with a Focus button attached.
+ *
+ * `mainCheckout` and `branch` are resolved by `GitBranch.checkoutFor`, since
+ * only `.git` knows the two directories are one repository, and reading it is
+ * I/O this file may not do.
+ *
+ * @param {string|null} cwd
+ * @param {string|null} mainCheckout the checkout a worktree cwd is linked to
+ * @param {string|null} branch the branch the session's own checkout is on
+ * @param {Run[]} runs
+ * @returns {Run|null}
+ */
+export function matchRunForCheckout(cwd, mainCheckout, branch, runs) {
+  const own = matchRunForCwd(cwd, runs);
+  if (own || !branch) return own;
+  return matchRunForCwd(
+    mainCheckout,
+    runs.filter((r) => r.branch === branch),
+  );
 }
 
 /**
@@ -202,8 +268,8 @@ export function matchPullRequest(cwd, branch, pullRequests) {
   let best = null;
   let bestLength = -1;
   for (const pr of pullRequests) {
-    if (pr.branch !== branch || !pr.repoPath) continue;
-    if (cwd !== pr.repoPath && !cwd.startsWith(`${pr.repoPath}/`)) continue;
+    if (pr.branch !== branch) continue;
+    if (!isInside(cwd, pr.repoPath)) continue;
     // Longest matching prefix, so a worktree registered in its own right beats
     // the repo it happens to live inside.
     if (pr.repoPath.length > bestLength) {
@@ -470,10 +536,18 @@ export function attentionFor({
  * session launched a pipeline means walking live processes, which this file may
  * not do.
  *
+ * `mainCheckouts` is the same arrangement again: reading a worktree's `.git` to
+ * find the checkout it is linked to is filesystem work, and the answer is what
+ * places a run started from a worktree. Empty for every session that is not in
+ * one, which is the ordinary case outside Treehouse. It comes off the same
+ * `.git` read as `branches`, which is not only a saving: through the link the
+ * branch is what picks which of that checkout's runs belongs to this worktree.
+ *
  * @param {{sessions: Session[], runs: Run[], now?: number,
  *          summaries?: Map<string, import('./transcript.js').TranscriptSummary>,
  *          reviewUrls?: Map<string, string|null>,
  *          branches?: Map<string, string|null>,
+ *          mainCheckouts?: Map<string, string|null>,
  *          pullRequests?: PullRequest[],
  *          pipelines?: Set<string>,
  *          runOwners?: Map<string, string>}} input
@@ -486,6 +560,7 @@ export function buildRows({
   summaries = new Map(),
   reviewUrls = new Map(),
   branches = new Map(),
+  mainCheckouts = new Map(),
   pullRequests = [],
   pipelines = new Set(),
   runOwners = new Map(),
@@ -493,6 +568,35 @@ export function buildRows({
   /** @type {Row[]} */
   const rows = [];
   const claimedRuns = new Set();
+
+  // The *live* run each session owns, inverted out of the ownership map and
+  // resolved against this reading, because a card shows the run its session is
+  // answering for whenever we know which that is. Ownership used only as a veto
+  // could take a wrong run off a card and never put the right one on it, which
+  // is the shape of every failure this attribution has produced.
+  //
+  // Only while it is still running, though, and the reason is the same one that
+  // makes the preference right in the first place: the owned run is the one
+  // whose gate this session can reach, and a finished run has no gate. An
+  // ownership outlives its run - `prune` holds it for the half hour the run
+  // stays in the reading - so without this a stale one would hide a live or
+  // parked run in the same checkout behind a completed one, which is this
+  // branch's own failure reintroduced from the other side. `run.parked` implies
+  // `run.active`, so a parked run is still preferred: it is precisely the case
+  // with a gate waiting.
+  //
+  // A session can hold more than one, having driven a second while the first
+  // was still going, so rank picks between them exactly as it does for a
+  // session that owns nothing.
+  /** @type {Map<string, Run>} */
+  const ownedRuns = new Map();
+  for (const run of runs) {
+    if (!run.active) continue;
+    const owner = runOwners.get(run.runId);
+    if (!owner) continue;
+    const best = ownedRuns.get(owner);
+    if (!best || rankRun(run) > rankRun(best)) ownedRuns.set(owner, run);
+  }
 
   // The pipeline's own sessions are folded into the row of the repo they are
   // working on, never given one of their own: two `hexbattle` rows, one of
@@ -542,13 +646,27 @@ export function buildRows({
     // not answer it.
     //
     // `runOwners` is what the process table saw: the session with a live
-    // `no-mistakes axi run` underneath it. It narrows and never widens - a run
-    // nobody was observed to own stays on every session in its repo, exactly as
-    // before, because an unattributed pipeline is better shown three times than
-    // not at all.
-    const repo = matchRunForCwd(session.cwd, runs);
+    // `no-mistakes axi run` underneath it, and when it names a *running* run for
+    // this session that is the run the card shows. Rank is the fallback for a
+    // session that owns nothing live, and there it still narrows and never
+    // widens - a run nobody was observed to own stays on every session in its
+    // repo, exactly as before, because an unattributed pipeline is better shown
+    // three times than not at all.
+    //
+    // A session owning a run on a branch its checkout has since left therefore
+    // shows that run, while it is still going, rather than the repo's newest.
+    // That is the point: it is the run this session is answering for, and the
+    // only one whose gate it can reach.
+    //
+    // The checkout's own branch is resolved first because it is not only shown:
+    // through a worktree's link it is what says which of the checkout's runs is
+    // this worktree's, all of them being registered against the one path.
+    const mainCheckout = mainCheckouts.get(session.sessionId) || null;
+    const checkoutBranch = branches.get(session.sessionId) || null;
+    const repo = matchRunForCheckout(session.cwd, mainCheckout, checkoutBranch, runs);
+    const owned = ownedRuns.get(session.sessionId) || null;
     const owner = repo ? runOwners.get(repo.runId) || null : null;
-    const run = !owner || owner === session.sessionId ? repo : null;
+    const run = owned || (!owner || owner === session.sessionId ? repo : null);
     if (run) claimedRuns.add(run.runId);
     const summary = summaries.get(session.sessionId) || null;
     const agent = (run && agents.get(run.runId)) || null;
@@ -559,7 +677,16 @@ export function buildRows({
     // The checkout's own branch is the truth about where this session is. The
     // run's is a second choice: it belongs to a pipeline that may have finished
     // on a branch that has since been left behind.
-    const branch = branches.get(session.sessionId) || repo?.branch || null;
+    //
+    // And it is not offered at all when the run was reached through a
+    // worktree's link, because there the two are known to differ - a worktree
+    // exists to be on another branch. A detached checkout, whose own branch is
+    // legitimately null, took its sibling worktree's branch name the moment the
+    // link let it match that run, and would then have been handed that branch's
+    // pull request on top. The one place a run may lend a branch is a session
+    // sitting in the run's own repo.
+    const branch =
+      checkoutBranch || (isInside(session.cwd, repo?.repoPath) ? repo?.branch : null) || null;
     rows.push({
       id: `session:${session.sessionId}`,
       kind: 'session',
@@ -571,8 +698,15 @@ export function buildRows({
       title: repo?.repoName || basename(session.cwd || '') || 'unknown',
       // The path the title was taken from, which is what disambiguation grows.
       // For a session inside a registered repo that is the repo, not the
-      // session's own directory.
-      titlePath: (repo?.repoName ? repo.repoPath : session.cwd) || null,
+      // session's own directory - but only when the session really is inside
+      // it. A worktree session is matched to a checkout it does not live in, so
+      // borrowing that path would give it and the checkout the same anchor, and
+      // disambiguation would have nothing left to grow: the `1/` and `2/` that
+      // name a Treehouse tree would vanish from the page.
+      titlePath:
+        (repo?.repoName && isInside(session.cwd, repo.repoPath)
+          ? repo.repoPath
+          : session.cwd) || null,
       branch,
       attention,
       attentionLabel: attentionLabel(attention),
@@ -632,6 +766,7 @@ export function buildRows({
       pr:
         (run?.prUrl && run.branch === branch ? pullRequestForRun(run) : null) ||
         matchPullRequest(session.cwd, branch, pullRequests) ||
+        matchPullRequest(mainCheckout, branch, pullRequests) ||
         transcriptPullRequest(summary, repo?.repoPath || session.cwd, branch, pullRequests),
       lastActivityAt: summary?.lastActivityAt ?? null,
       agent,

@@ -61,7 +61,7 @@ Four sources of truth, joined into one list:
 | `src/registry.js` | live agent sessions, fed by hooks |
 | `src/transcript.js` | what a session is doing, parsed from its transcript (pure) |
 | `src/transcript-reader.js` | the tail read behind that, cached on mtime, branch and agent |
-| `src/git-branch.js` | the branch a checkout is on, read from `.git/HEAD` |
+| `src/git-branch.js` | the branch a checkout is on, and the checkout a worktree belongs to, read from `.git` |
 | `src/lavish.js` | resolving a Lavish artifact to the page waiting on you |
 | `src/poll-watch.js` | which sessions are in a `lavish-axi poll`, which have a pipeline running, and which are driving one |
 | `src/run-owner.js` | which session started which run, remembered across the gaps |
@@ -361,9 +361,12 @@ Two rules keep it from becoming a confident wrong answer of its own:
   existed. The verb is found by scanning rather than by position, because global flags precede
   it and `--intent` follows it with paragraphs of English - the five most recent real intents
   on this machine run to 5.6KB and use the words "run", "abort" and "status" throughout.
-- **Ownership narrows and never widens.** A run nobody was observed to own stays on every
-  session in its repo, exactly as before. This is the same shape as the transcript being
-  allowed to clear a block but never assert one.
+- **Ownership narrows for every session but the one that owns the run.** A run nobody was
+  observed to own stays on every session in its repo, exactly as before. This is the same
+  shape as the transcript being allowed to clear a block but never assert one. On the owner's
+  own card it is also the positive answer, which is a later change and the resolution of a
+  whole class of failures - see *Ownership of a running run decides which run a session's card
+  shows* below.
 
 **`RunOwners` is a memory because the evidence is intermittent, not because it is expensive.**
 `axi run` *returns* at every approval gate and does not run again until the agent answers with
@@ -395,6 +398,123 @@ it. A parked run has no live process to be re-observed from, so one such tick wo
 back across its repo permanently. The prune is therefore skipped on an empty reading, the same
 rule `PollWatch` applies to a `ps` it could not read. A few stale entries until a real reading
 arrives is the cheap side of the trade.
+
+**A run started in a worktree is registered against the main checkout, and only `.git` says
+so.** no-mistakes places a run by the path a repository resolves to, which for any linked
+worktree is the checkout it was created from. The session reporting itself to us is in the
+worktree, so `matchRunForCwd`'s prefix could never match - and this is not an edge case,
+because Treehouse puts *every* session in a worktree.
+
+Both halves of the attribution above failed on it, in a way that looked like neither. The
+sighting was there - `ps` saw `no-mistakes axi run` under the worktree session - and
+`observeFrom` threw it away, because it resolves the run being claimed through the same match.
+Unowned, the run then fell through to whichever other session happened to be open on the main
+checkout. Seen live: the worktree session sat at a parked review gate showing no pipeline at
+all, while an idle `main` card claimed the run, on a branch it was not on, with a `Focus ↗` to
+the one window that could not answer the gate. Ownership's own failure mode, reached by the
+route it does not cover.
+
+`GitBranch.checkoutFor` reads the link off the same `.git` the branch already comes from, and
+returns both from one resolution - not two accessors over one cache, because a cache *hit*
+still stats HEAD, so asking separately costs a second stat per session per second for one
+answer's worth of information. `matchRunForCheckout` tries the session's own directory first.
+Five things it deliberately does not do:
+
+- **the link is a fallback, never an override.** no-mistakes will register a worktree as a
+  repository in its own right, and that run is the more specific answer - the same rule
+  `matchRunForCwd` already applies to nesting.
+- **it does not resolve the link by rank, because the link is one-to-many.** Every worktree of
+  a checkout resolves to the same path and no-mistakes registers all of their runs against it,
+  so `matchRunForCwd`'s ranking - parked, then active, then most recent - hands one run to
+  every sibling tree and hands each of them somebody else's. Two runs on one repo inside the
+  thirty-minute window is an ordinary half-hour here. A worktree exists in order to be on its
+  own branch and every run carries one, so **through the link the branch is required**, and a
+  worktree with no branch to match on - a detached HEAD, which Treehouse produces routinely -
+  gets no run at all rather than a guess.
+
+  **For display the branch requirement stops at the link; for ownership it applies
+  everywhere.** They differ because they are different questions. Display asks what pipeline
+  this checkout has recently seen, so a session physically inside the checkout still matches
+  by repo path alone, whatever branch it has since moved to - narrowing there would take the
+  pipeline off every session that changed branch after running it. Ownership asks which run
+  this session is *driving*, and `axi run` and `axi respond` both act on the branch they are
+  issued from, so a session cannot be driving a run for a branch it is not on. Narrowing a
+  sighting by branch is the definition of the question, not a heuristic answer to it.
+
+  `RunOwners.observeFrom` therefore resolves a sighting through the same function - for the
+  same reason it was given the link in the first place: if the two disagree about which run
+  was seen, a genuine `axi run` from the second tree claims the first tree's run, is discarded
+  as already owned, and the run it was really of falls through to a bystander - but it hands
+  that function only the runs on the session's own branch, and a session with no branch to
+  read owns nothing at all. An unowned run still shows on every session in its repo, which is
+  the documented degradation rather than a new failure.
+
+  **That was the third instance of one class, and the class is worth naming: rank standing in
+  for the branch.** The link picked a run by rank; the link then fanned one run out across
+  sibling trees; and a sighting on a session's *own* path was resolved by rank while a parked
+  run sat on the same `repoPath` - `rankRun` puts parked above active and `run.parked` implies
+  `run.active`, so `observeFrom`'s "only an active run can be owned" guard let it through. The
+  common cause is this branch's own premise: every worktree's run registers against the one
+  main checkout, so **several runs per `repoPath` is now the ordinary reading, not an unusual
+  one**, and anything that resolves a run by rank alone is picking between somebody else's.
+  There was a fourth, and it is what closed the class - see below.
+- **only a common dir named `.git` yields a checkout.** A linked worktree's admin directory is
+  always `<common dir>/worktrees/<name>`, and that dir is called `.git` only when the
+  repository has a working tree at all. no-mistakes' own gate repos are bare
+  (`~/.no-mistakes/repos/<hash>.git`), so its pipeline agents would otherwise be translated to
+  a directory no session is ever in; they are placed by run id instead, below. A submodule
+  points into `modules/` and is refused the same way.
+- **identity keeps the session's own path.** `titlePath` borrows the repo's path only when the
+  session is genuinely inside it. Borrowing it here would anchor the worktree and the checkout
+  on one path, and `disambiguateTitles` would have nothing left to grow - the `1/` and `2/`
+  that name a Treehouse tree would vanish and both cards would read `repo`.
+- **a run reached through the link may not lend its branch.** `branch` falls back to the
+  matched run's when a checkout's own cannot be read, and that fallback is fine for a session
+  sitting *in* the run's repo. Through the link it is a known-wrong answer, because a worktree
+  exists to be on another branch. Caught the moment the link started matching: a tree on a
+  detached HEAD, legitimately branchless, took the name of the *sibling* tree's branch - and
+  since the pull request is gated on `run.branch === branch`, would have been handed that
+  branch's review as well. Requiring the branch through the link now shuts the same door from
+  the other side, since a branchless worktree reaches no run to borrow from; the guard stays
+  because the two rules are independent, and it is what keeps this true for any run reached by
+  a route other than the session's own cwd.
+
+**Ownership of a *running* run decides which run a session's card shows; rank is the fallback
+for a session that owns nothing live.** This is the resolution of the class above rather than a
+fifth rule beside it, and the shape of the mistake is the part worth carrying forward.
+
+`buildRows` used to resolve exactly one run by rank and only then consult `runOwners`, and it
+consulted it as a **veto**: the run was dropped when somebody else owned it. So ownership could
+take a wrong run off a card and never put the right one on it - which is precisely why the same
+failure kept arriving by a new route each time. Through the link, through the sibling fan-out,
+through the sighting, and finally here on the display path, every instance was rank picking
+between runs that ownership already knew the answer for. A session driving `axi run` was handed
+the parked run next to it, `rankRun` putting parked above active, and the run it was actually
+driving fell through to an unfocusable row of its own: this feature's failure mode, reached on
+the one path that had not yet been closed. Inverting the consultation closes all four, because
+there is no longer a place where rank decides something ownership knows.
+
+Two things it deliberately does not change. **Identity still follows the session's own path** -
+`title`, `titlePath` and `branch` all come from the rank-resolved match, so a session that owns
+a run is not retitled after it and two cards on one checkout keep looking alike. And the
+**branch requirement is unmoved**: ownership everywhere, display only through the link.
+
+The consequence is accepted on purpose: a session owning a run on a branch its checkout has
+since left shows *that* run, for as long as it is still going, rather than the repo's newest.
+That is the right answer - it is the run this session is answering for, and the only one whose
+gate it can actually reach - and the run it no longer shows is not lost, because an unclaimed
+run still gets a row of its own.
+
+**The preference ends when the run does, and that qualifier is load-bearing rather than
+tidying.** The whole justification for preferring an owned run is the gate it is holding open,
+and a finished run has none - so there is nothing left to prefer. An ownership outlives its run
+by design (`prune` keeps it for the half hour the run stays in the reading, `release` for as
+long as the session lives), so an unconditional preference would let a *completed* run sit on
+the card while a live or parked one in the same checkout lost the only session that could focus
+it: this branch's own failure, reached from the other side. `run.parked` implies `run.active`,
+so a parked run is still preferred, which is the case with a gate actually waiting. A session
+whose owned run has finished falls back to the rank-resolved match, nulled when somebody else
+owns it, exactly as a session that never owned anything.
 
 **no-mistakes' own agent sessions are folded into the repo's row, never given one.**
 no-mistakes runs its pipeline steps as Claude sessions in a worktree at
@@ -442,8 +562,10 @@ pipeline - which means a finished run still matches a session for the whole thir
 counts as recent, long after the checkout has moved on. Taking its pull request
 unconditionally therefore put another branch's review beside `main`: exactly the confident
 wrong link the rest of this section is built to prevent. A checkout whose branch cannot be
-read is unaffected, because `branch` already falls back to the run's own and the two agree by
-construction.
+read is unaffected, because `branch` falls back to the run's own and the two agree by
+construction - but only for a session sitting inside the run's repo, never for one that
+reached the run through a worktree's link, where they are known to differ. See the branch
+bullet above.
 
 *The frozen part is the trap.* no-mistakes stops observing a pull request the moment its run
 reaches a terminal state - `pr_state_observed_at` never advances past `updated_at` - so every
@@ -670,7 +792,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 420 tests, no network, no dependencies, ~2s
+npm test          # 444 tests, no network, no dependencies, ~2s
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
 
@@ -753,7 +875,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 ## Commands
 
 ```sh
-npm test                       # 420 tests, ~2s
+npm test                       # 444 tests, ~2s
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
 ```

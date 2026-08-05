@@ -2,9 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync, rmSync, existsSync, renameSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import { createMonitorServer, writeFrame, stableJson } from '../src/server.js';
 import { probeHealth } from '../src/health.js';
@@ -525,6 +525,10 @@ test('a pipeline lands on the session that started it, not on its neighbours', a
       'INSERT INTO runs VALUES (?, ?, ?, ?, NULL, ?, ?, NULL, NULL, NULL, NULL, NULL)',
     ).run('run-1', 'repo-1', 'main', 'running', seconds, seconds);
     db.close();
+    // A real checkout, because a sighting is resolved by branch: `axi run` acts
+    // on the branch it is issued from, so a session with none owns nothing.
+    mkdirSync(join(repo, '.git'), { recursive: true });
+    writeFileSync(join(repo, '.git', 'HEAD'), 'ref: refs/heads/main\n');
 
     // The registry prunes a session whose agent pid is not alive, so these have
     // to be real - our own process and its parent, standing in for two agents.
@@ -592,6 +596,137 @@ test('a pipeline lands on the session that started it, not on its neighbours', a
   }
 });
 
+test('a pipeline driven from a worktree lands on the worktree, not on the checkout', async () => {
+  // Seen live, and the reason this was written: a Treehouse session at
+  // `~/.treehouse/<repo>-<hash>/2/<repo>` drove a run to a parked review gate
+  // and showed no pipeline at all, while the idle `main` checkout next door
+  // claimed it - a Focus button to the one window that could not answer the
+  // gate. no-mistakes registers a run against the main checkout, because that
+  // is where a worktree's repository resolves to, so nothing but the worktree's
+  // own `.git` ties the session to it. Real files here, because the point of
+  // the test is that the link is read.
+  //
+  // Two trees and two runs, because the link is a one-to-many edge and this is
+  // where the wiring of the branch into `observeFrom` shows: a sighting that
+  // resolved to the wrong one of a checkout's runs would be discarded as
+  // already owned, and the run it was really of would land on a bystander.
+  const { dir, cleanup } = scratch();
+  const previousHome = process.env.NMMON_HOME;
+  process.env.NMMON_HOME = dir;
+  const repo = join(dir, 'repo');
+  const worktree = join(dir, 'trees', '2', 'repo');
+  const sibling = join(dir, 'trees', '1', 'repo');
+  let monitor = null;
+  try {
+    mkdirSync(join(repo, '.git', 'worktrees', 'repo2'), { recursive: true });
+    mkdirSync(join(repo, '.git', 'worktrees', 'repo1'), { recursive: true });
+    writeFileSync(join(repo, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+    writeFileSync(join(repo, '.git', 'worktrees', 'repo2', 'HEAD'), 'ref: refs/heads/feat/thing\n');
+    writeFileSync(join(repo, '.git', 'worktrees', 'repo1', 'HEAD'), 'ref: refs/heads/feat/other\n');
+    mkdirSync(worktree, { recursive: true });
+    writeFileSync(join(worktree, '.git'), `gitdir: ${join(repo, '.git', 'worktrees', 'repo2')}\n`);
+    mkdirSync(sibling, { recursive: true });
+    writeFileSync(join(sibling, '.git'), `gitdir: ${join(repo, '.git', 'worktrees', 'repo1')}\n`);
+
+    const dbPath = join(dir, 'state.sqlite');
+    const db = new DatabaseSync(dbPath);
+    db.exec(
+      'CREATE TABLE repos (id TEXT, working_path TEXT);' +
+        'CREATE TABLE runs (id TEXT, repo_id TEXT, branch TEXT, status TEXT,' +
+        ' awaiting_agent_since INTEGER, created_at INTEGER, updated_at INTEGER,' +
+        ' pr_url TEXT, pr_state TEXT, pr_state_observed_at INTEGER, head_sha TEXT, error TEXT);' +
+        'CREATE TABLE step_results (run_id TEXT, step_name TEXT, status TEXT, step_order INTEGER,' +
+        ' findings_json TEXT, last_activity TEXT, last_activity_at INTEGER, log_path TEXT);',
+    );
+    const seconds = Math.floor(Date.now() / 1000);
+    // Both runs are registered against the main checkout, exactly as
+    // no-mistakes records them, each on the branch only its own worktree is on.
+    // Two at once in one repo is an ordinary half-hour on this machine, and it
+    // is what the link alone cannot tell apart: every worktree resolves to this
+    // one path, so without the branch the parked run would take both cards.
+    db.prepare('INSERT INTO repos VALUES (?, ?)').run('repo-1', repo);
+    db.prepare(
+      'INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL)',
+    ).run('run-1', 'repo-1', 'feat/thing', 'running', seconds, seconds, seconds);
+    db.prepare(
+      'INSERT INTO runs VALUES (?, ?, ?, ?, NULL, ?, ?, NULL, NULL, NULL, NULL, NULL)',
+    ).run('run-2', 'repo-1', 'feat/other', 'running', seconds, seconds);
+    db.close();
+
+    // The registry prunes a session whose agent pid is not alive, so all three
+    // are real. pid 1 is always there, and stands in for the second worktree's
+    // agent - only its liveness and its place in the tree below matter.
+    const driverPid = process.pid;
+    const siblingPid = 1;
+    const neighbourPid = process.ppid;
+    const ps = [
+      '  100     1 /Applications/iTerm.app/Contents/MacOS/iTerm2',
+      `  ${driverPid}   100 claude`,
+      `  999999   ${driverPid} /usr/local/bin/no-mistakes axi run --intent "ship it"`,
+      `  999998   ${siblingPid} /usr/local/bin/no-mistakes axi run --intent "ship the other"`,
+      `  ${neighbourPid}   100 claude`,
+    ].join('\n');
+
+    const port = await freePort();
+    monitor = createMonitorServer({
+      port,
+      token: 'test-token',
+      dbPath,
+      sessionsPath: join(dir, 'sessions'),
+      exec: () => assert.fail('no blocking commands from the server'),
+      execAsync: async (command) => (command === 'ps' ? ps : ''),
+    });
+    await monitor.start();
+
+    for (const [sessionId, pid, cwd] of [
+      ['worktree', driverPid, worktree],
+      ['sibling', siblingPid, sibling],
+      ['checkout', neighbourPid, repo],
+    ]) {
+      const registered = await fetch(`http://127.0.0.1:${port}/event`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-nmmon-token': 'test-token' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          hook_event_name: 'SessionStart',
+          cwd,
+          host: { tty: '/dev/ttys004', term_program: 'iTerm.app', pid },
+        }),
+      });
+      assert.equal(registered.status, 204);
+    }
+
+    // Asking is what schedules the scan, so the first reading predates it.
+    await (await fetch(`http://127.0.0.1:${port}/state?t=test-token`)).json();
+    for (let i = 0; i < 10; i += 1) await nextTick();
+
+    const body = await (await fetch(`http://127.0.0.1:${port}/state?t=test-token`)).json();
+    const byId = new Map(body.rows.map((r) => [r.sessionId, r]));
+    // Each tree carries its own run, on its own branch. Resolving the link by
+    // rank instead would give both trees the parked one and leave the other
+    // run unowned, on a row with no window behind it.
+    assert.equal(byId.get('worktree')?.run?.runId, 'run-1');
+    assert.equal(byId.get('worktree')?.branch, 'feat/thing');
+    assert.equal(byId.get('sibling')?.run?.runId, 'run-2');
+    assert.equal(byId.get('sibling')?.branch, 'feat/other');
+    assert.equal(byId.get('checkout')?.run, null);
+    assert.equal(byId.get('checkout')?.branch, 'main');
+    // Three cards on one repo, still tellable apart: the run match must not
+    // lend a worktree the checkout's path, or they would all just read "repo".
+    assert.equal(byId.get('worktree')?.title, '2/repo');
+    assert.equal(byId.get('sibling')?.title, '1/repo');
+    assert.equal(byId.get('checkout')?.title, `${basename(dir)}/repo`);
+    // And neither run is also left over as a row of its own that nobody can
+    // focus - the sessions between them account for both.
+    assert.equal(body.rows.length, 3);
+  } finally {
+    await monitor?.stop();
+    if (previousHome === undefined) delete process.env.NMMON_HOME;
+    else process.env.NMMON_HOME = previousHome;
+    cleanup();
+  }
+});
+
 test('one empty reading does not forget who owns what', async () => {
   // A reading we did not get is not evidence that every run ended - the
   // degraded `axi status` path serves an empty cache until its first
@@ -621,6 +756,8 @@ test('one empty reading does not forget who owns what', async () => {
         .run('run-1', 'repo-1', 'main', status, seconds, seconds);
     db.prepare('INSERT INTO repos VALUES (?, ?)').run('repo-1', repo);
     insertRun('running');
+    mkdirSync(join(repo, '.git'), { recursive: true });
+    writeFileSync(join(repo, '.git', 'HEAD'), 'ref: refs/heads/main\n');
 
     const driverPid = process.pid;
     const neighbourPid = process.ppid;
@@ -722,6 +859,8 @@ test('a session reading we did not get releases nobody', async () => {
     db.prepare(
       'INSERT INTO runs VALUES (?, ?, ?, ?, NULL, ?, ?, NULL, NULL, NULL, NULL, NULL)',
     ).run('run-1', 'repo-1', 'main', 'running', seconds, seconds);
+    mkdirSync(join(repo, '.git'), { recursive: true });
+    writeFileSync(join(repo, '.git', 'HEAD'), 'ref: refs/heads/main\n');
 
     const driverPid = process.pid;
     const neighbourPid = process.ppid;
