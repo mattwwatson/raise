@@ -435,6 +435,129 @@ test('a session that does not own the run is still titled after the repo it is i
   assert.equal(row.run, null);
 });
 
+// A session in a git worktree - Treehouse's whole working model - drives a run,
+// and no-mistakes registers that run against the *main* checkout, because that
+// is the path a worktree's repo resolves to. Matching on cwd prefix alone, no
+// worktree session can ever be placed in its own repo. Seen live: the session
+// at `~/.treehouse/.../2/no-mistakes-monitor` sat at a review gate showing no
+// pipeline at all, while the idle `main` checkout next door claimed the run,
+// on a branch it was not on, with a Focus button to a window that could not
+// answer the gate.
+test('a run started in a worktree belongs to the worktree session', () => {
+  const worktree = '/Users/x/.treehouse/repo-9f/2/repo';
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'worktree', cwd: worktree, state: 'working' }),
+      session({ sessionId: 'main', cwd: '/Users/x/work/repo', state: 'idle' }),
+    ],
+    // The run's repoPath is the main checkout even though it was started in the
+    // worktree, so only the link in `.git` can tie the two together.
+    runs: [run({ runId: 'r1', parked: true, branch: 'feat/thing' })],
+    mainCheckouts: new Map([['worktree', '/Users/x/work/repo']]),
+    runOwners: new Map([['r1', 'worktree']]),
+    now: 5000,
+  });
+  const byId = new Map(rows.map((r) => [r.sessionId, r]));
+  assert.equal(byId.get('worktree').run?.runId, 'r1');
+  assert.equal(byId.get('worktree').attention, 'parked');
+  assert.equal(byId.get('main').run, null);
+  assert.equal(byId.get('main').attention, 'idle');
+});
+
+test('a worktree session keeps its own path, so two checkouts stay tellable apart', () => {
+  // Identity must not follow the run match here. Borrowing the repo's path for
+  // `titlePath` would give the worktree and the checkout it is linked to the
+  // same anchor, and `disambiguateTitles` would have nothing left to grow - the
+  // `1/` and `2/` that name a Treehouse tree would disappear from the page.
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'worktree', cwd: '/Users/x/.treehouse/repo-9f/2/repo' }),
+      session({ sessionId: 'main', cwd: '/Users/x/work/repo' }),
+    ],
+    runs: [run({ runId: 'r1' })],
+    mainCheckouts: new Map([['worktree', '/Users/x/work/repo']]),
+    now: 5000,
+  });
+  const byId = new Map(rows.map((r) => [r.sessionId, r]));
+  assert.equal(byId.get('worktree').titlePath, '/Users/x/.treehouse/repo-9f/2/repo');
+  assert.equal(byId.get('main').titlePath, '/Users/x/work/repo');
+  // `buildRows` disambiguates before it returns, so these are the titles the
+  // page actually renders. Borrowing the repo's path above would have left both
+  // rows anchored on it, and both cards saying nothing but "repo".
+  assert.equal(byId.get('worktree').title, '2/repo');
+  assert.equal(byId.get('main').title, 'work/repo');
+});
+
+test('a run reached through a worktree link may not lend its branch', () => {
+  // Caught on the live dashboard the moment the link started matching: a
+  // Treehouse tree on a detached HEAD has no branch of its own, and fell
+  // straight through to the run's - naming the branch of the *sibling* tree
+  // driving the pipeline, and taking that branch's pull request with it. A
+  // worktree is on another branch by definition, so the run's is never a
+  // second-best answer here; it is a known-wrong one.
+  const rows = buildRows({
+    sessions: [session({ sessionId: 'detached', cwd: '/Users/x/.treehouse/repo-9f/1/repo' })],
+    runs: [run({ runId: 'r1', branch: 'feat/thing', prUrl: 'https://github.com/x/repo/pull/9' })],
+    mainCheckouts: new Map([['detached', '/Users/x/work/repo']]),
+    branches: new Map([['detached', null]]),
+    now: 5000,
+  });
+  assert.equal(rows[0].run?.runId, 'r1');
+  assert.equal(rows[0].branch, null);
+  assert.equal(rows[0].pr, null);
+});
+
+test('a session inside the run\'s own repo still falls back to the run\'s branch', () => {
+  const rows = buildRows({
+    sessions: [session({ sessionId: 's1', cwd: '/Users/x/work/repo/src' })],
+    runs: [run({ runId: 'r1', branch: 'feat/thing' })],
+    branches: new Map([['s1', null]]),
+    now: 5000,
+  });
+  assert.equal(rows[0].branch, 'feat/thing');
+});
+
+test('a worktree registered in its own right keeps its own run', () => {
+  // The link is a fallback, never an override. no-mistakes will happily
+  // register a worktree as a repo of its own, and that run is the more specific
+  // answer - the same rule `matchRunForCwd` already applies to nesting.
+  const worktree = '/Users/x/.treehouse/repo-9f/2/repo';
+  const rows = buildRows({
+    sessions: [session({ sessionId: 'worktree', cwd: worktree })],
+    runs: [
+      run({ runId: 'main-run', repoPath: '/Users/x/work/repo' }),
+      run({ runId: 'own-run', repoPath: worktree }),
+    ],
+    mainCheckouts: new Map([['worktree', '/Users/x/work/repo']]),
+    now: 5000,
+  });
+  assert.equal(rows[0].run?.runId, 'own-run');
+});
+
+test("a worktree session finds its branch's pull request in the main checkout", () => {
+  // Pull requests are placed by the same prefix match, so they went missing on
+  // a worktree session for exactly the same reason the run did.
+  const rows = buildRows({
+    sessions: [session({ sessionId: 'worktree', cwd: '/Users/x/.treehouse/repo-9f/2/repo' })],
+    runs: [],
+    mainCheckouts: new Map([['worktree', '/Users/x/work/repo']]),
+    branches: new Map([['worktree', 'feat/thing']]),
+    pullRequests: [
+      {
+        url: 'https://github.com/x/repo/pull/7',
+        number: 7,
+        state: 'open',
+        observedAt: 900,
+        branch: 'feat/thing',
+        repoPath: '/Users/x/work/repo',
+        live: true,
+      },
+    ],
+    now: 5000,
+  });
+  assert.equal(rows[0].pr?.number, 7);
+});
+
 test("a bystander keeps the branch's pull request, which is not the run's to lend", () => {
   // A pull request belongs to the checkout's branch, so every session on that
   // branch is waiting on the same review. Only the pipeline state is exclusive.

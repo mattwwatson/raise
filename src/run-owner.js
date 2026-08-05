@@ -33,7 +33,7 @@
  * recency window takes its owner with it.
  */
 
-import { matchRunForCwd } from './dashboard.js';
+import { matchRunForCheckout } from './dashboard.js';
 
 /** @typedef {import('./registry.js').Session} Session */
 /** @typedef {import('./nm-state.js').Run} Run */
@@ -65,15 +65,24 @@ export class RunOwners {
    * Only an active run can be owned. A driving command seen while the newest
    * match for that directory is a finished run would otherwise claim it.
    *
+   * The run has to be matched the same way `buildRows` matches it, or the two
+   * disagree about which run a sighting was of. That is not a theoretical
+   * tidiness: a session driving a pipeline from a worktree was seen driving all
+   * along, and the sighting was discarded here because a worktree's cwd matches
+   * no run by prefix - so the run stayed unowned and landed on a bystander.
+   *
    * @param {Session[]} sessions every live session
    * @param {Run[]} runs the current reading
    * @param {(session: Session) => boolean} isDriving whether the process table
    *   caught this session driving a run
+   * @param {Map<string, string|null>} [mainCheckouts] session id -> the checkout
+   *   a worktree session is linked to, from `GitBranch.linkedCheckoutFor`
    */
-  observeFrom(sessions, runs, isDriving) {
+  observeFrom(sessions, runs, isDriving, mainCheckouts = new Map()) {
     for (const session of sessions) {
       if (!isDriving(session)) continue;
-      const owned = matchRunForCwd(session.cwd, runs);
+      const linked = mainCheckouts.get(session.sessionId) || null;
+      const owned = matchRunForCheckout(session.cwd, linked, runs);
       if (owned?.active) this.observe(owned.runId, session.sessionId);
     }
   }

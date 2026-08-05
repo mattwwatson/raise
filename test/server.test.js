@@ -2,9 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync, rmSync, existsSync, renameSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import { createMonitorServer, writeFrame, stableJson } from '../src/server.js';
 import { probeHealth } from '../src/health.js';
@@ -585,6 +585,107 @@ test('a pipeline lands on the session that started it, not on its neighbours', a
   } finally {
     // In the finally, not at the end of the try: a failed assertion that leaves
     // the poll timer running wedges the whole test run rather than failing it.
+    await monitor?.stop();
+    if (previousHome === undefined) delete process.env.NMMON_HOME;
+    else process.env.NMMON_HOME = previousHome;
+    cleanup();
+  }
+});
+
+test('a pipeline driven from a worktree lands on the worktree, not on the checkout', async () => {
+  // Seen live, and the reason this was written: a Treehouse session at
+  // `~/.treehouse/<repo>-<hash>/2/<repo>` drove a run to a parked review gate
+  // and showed no pipeline at all, while the idle `main` checkout next door
+  // claimed it - a Focus button to the one window that could not answer the
+  // gate. no-mistakes registers a run against the main checkout, because that
+  // is where a worktree's repository resolves to, so nothing but the worktree's
+  // own `.git` ties the session to it. Real files here, because the point of
+  // the test is that the link is read.
+  const { dir, cleanup } = scratch();
+  const previousHome = process.env.NMMON_HOME;
+  process.env.NMMON_HOME = dir;
+  const repo = join(dir, 'repo');
+  const worktree = join(dir, 'trees', '2', 'repo');
+  let monitor = null;
+  try {
+    mkdirSync(join(repo, '.git', 'worktrees', 'repo2'), { recursive: true });
+    writeFileSync(join(repo, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+    writeFileSync(join(repo, '.git', 'worktrees', 'repo2', 'HEAD'), 'ref: refs/heads/feat/thing\n');
+    mkdirSync(worktree, { recursive: true });
+    writeFileSync(join(worktree, '.git'), `gitdir: ${join(repo, '.git', 'worktrees', 'repo2')}\n`);
+
+    const dbPath = join(dir, 'state.sqlite');
+    const db = new DatabaseSync(dbPath);
+    db.exec(
+      'CREATE TABLE repos (id TEXT, working_path TEXT);' +
+        'CREATE TABLE runs (id TEXT, repo_id TEXT, branch TEXT, status TEXT,' +
+        ' awaiting_agent_since INTEGER, created_at INTEGER, updated_at INTEGER,' +
+        ' pr_url TEXT, pr_state TEXT, pr_state_observed_at INTEGER, head_sha TEXT, error TEXT);' +
+        'CREATE TABLE step_results (run_id TEXT, step_name TEXT, status TEXT, step_order INTEGER,' +
+        ' findings_json TEXT, last_activity TEXT, last_activity_at INTEGER, log_path TEXT);',
+    );
+    const seconds = Math.floor(Date.now() / 1000);
+    // Registered against the main checkout, exactly as no-mistakes records it,
+    // on the branch only the worktree is on.
+    db.prepare('INSERT INTO repos VALUES (?, ?)').run('repo-1', repo);
+    db.prepare(
+      'INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL)',
+    ).run('run-1', 'repo-1', 'feat/thing', 'running', seconds, seconds, seconds);
+    db.close();
+
+    const driverPid = process.pid;
+    const neighbourPid = process.ppid;
+    const ps = [
+      '  100     1 /Applications/iTerm.app/Contents/MacOS/iTerm2',
+      `  ${driverPid}   100 claude`,
+      `  999999   ${driverPid} /usr/local/bin/no-mistakes axi run --intent "ship it"`,
+      `  ${neighbourPid}   100 claude`,
+    ].join('\n');
+
+    const port = await freePort();
+    monitor = createMonitorServer({
+      port,
+      token: 'test-token',
+      dbPath,
+      sessionsPath: join(dir, 'sessions'),
+      exec: () => assert.fail('no blocking commands from the server'),
+      execAsync: async (command) => (command === 'ps' ? ps : ''),
+    });
+    await monitor.start();
+
+    for (const [sessionId, pid, cwd] of [
+      ['worktree', driverPid, worktree],
+      ['checkout', neighbourPid, repo],
+    ]) {
+      const registered = await fetch(`http://127.0.0.1:${port}/event`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-nmmon-token': 'test-token' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          hook_event_name: 'SessionStart',
+          cwd,
+          host: { tty: '/dev/ttys004', term_program: 'iTerm.app', pid },
+        }),
+      });
+      assert.equal(registered.status, 204);
+    }
+
+    // Asking is what schedules the scan, so the first reading predates it.
+    await (await fetch(`http://127.0.0.1:${port}/state?t=test-token`)).json();
+    for (let i = 0; i < 10; i += 1) await nextTick();
+
+    const body = await (await fetch(`http://127.0.0.1:${port}/state?t=test-token`)).json();
+    const byId = new Map(body.rows.map((r) => [r.sessionId, r]));
+    assert.equal(byId.get('worktree')?.run?.runId, 'run-1');
+    assert.equal(byId.get('worktree')?.branch, 'feat/thing');
+    assert.equal(byId.get('checkout')?.run, null);
+    assert.equal(byId.get('checkout')?.branch, 'main');
+    // Two cards on one repo, still tellable apart: the run match must not lend
+    // the worktree the checkout's path, or both would just read "repo".
+    assert.equal(byId.get('worktree')?.title, '2/repo');
+    assert.equal(byId.get('checkout')?.title, `${basename(dir)}/repo`);
+    assert.equal(body.rows.length, 2);
+  } finally {
     await monitor?.stop();
     if (previousHome === undefined) delete process.env.NMMON_HOME;
     else process.env.NMMON_HOME = previousHome;

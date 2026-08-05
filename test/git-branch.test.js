@@ -1,7 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { GitBranch, branchFromHead, gitDirFromLink } from '../src/git-branch.js';
+import {
+  GitBranch,
+  branchFromHead,
+  gitDirFromLink,
+  mainCheckoutFromGitDir,
+} from '../src/git-branch.js';
 
 /**
  * A fake filesystem that counts reads, so the cache can be asserted on directly
@@ -57,6 +62,73 @@ test('gitDirFromLink follows a worktree .git file', () => {
     '/Users/x/work/repo/.git/worktrees/feature',
   );
   assert.equal(gitDirFromLink('not a gitdir line'), null);
+});
+
+test('mainCheckoutFromGitDir finds the checkout a linked worktree belongs to', () => {
+  assert.equal(
+    mainCheckoutFromGitDir('/Users/x/work/repo/.git/worktrees/feature'),
+    '/Users/x/work/repo',
+  );
+  assert.equal(
+    mainCheckoutFromGitDir('/Users/x/work/repo/.git/worktrees/feature/'),
+    '/Users/x/work/repo',
+  );
+});
+
+test('a bare repo has no main checkout, and no-mistakes gate repos are bare', () => {
+  // The admin dir of a linked worktree is always `<common dir>/worktrees/<name>`,
+  // so the segment before `worktrees` is the common dir - and it is only called
+  // `.git` when the repo has a working tree at all. no-mistakes keeps its gate
+  // repos at `~/.no-mistakes/repos/<hash>.git` and runs its pipeline agents in
+  // worktrees of them; translating one of those to `~/.no-mistakes/repos` would
+  // be a path no session is ever in. Those agents are placed by their run id
+  // instead, in `matchRunForAgentCwd`.
+  assert.equal(
+    mainCheckoutFromGitDir('/Users/x/.no-mistakes/repos/bafbee75ff42.git/worktrees/01KZ8DTR'),
+    null,
+  );
+  // A submodule's .git points into `modules/`, never `worktrees/`.
+  assert.equal(mainCheckoutFromGitDir('/Users/x/work/repo/.git/modules/vendor'), null);
+  assert.equal(mainCheckoutFromGitDir('/Users/x/work/repo/.git'), null);
+  assert.equal(mainCheckoutFromGitDir(''), null);
+  assert.equal(mainCheckoutFromGitDir(null), null);
+});
+
+test('linkedCheckoutFor names the checkout a worktree session is really in', () => {
+  // The bug this exists for: Treehouse puts a session in a worktree at
+  // `~/.treehouse/<repo>-<hash>/<n>/<repo>`, and no-mistakes registers the run
+  // it starts against the *main* checkout. Nothing about the worktree's path
+  // says which repo that is except its `.git`.
+  const files = fakeFiles();
+  files.set('/trees/repo-9f/2/repo/.git', 'gitdir: /Users/x/work/repo/.git/worktrees/repo2\n');
+  files.set('/Users/x/work/repo/.git/worktrees/repo2/HEAD', 'ref: refs/heads/feat/thing\n');
+  const git = new GitBranch({ files: files.access });
+  assert.equal(git.linkedCheckoutFor('/trees/repo-9f/2/repo'), '/Users/x/work/repo');
+  assert.equal(git.linkedCheckoutFor('/trees/repo-9f/2/repo/src'), '/Users/x/work/repo');
+});
+
+test('an ordinary checkout is not linked to anywhere else', () => {
+  const files = fakeFiles();
+  files.dir('/repo/.git');
+  files.set('/repo/.git/HEAD', 'ref: refs/heads/main\n');
+  const git = new GitBranch({ files: files.access });
+  assert.equal(git.linkedCheckoutFor('/repo'), null);
+  assert.equal(git.linkedCheckoutFor('/tmp/not-a-repo'), null);
+  assert.equal(git.linkedCheckoutFor(null), null);
+});
+
+test('the branch and the linked checkout come off one read', () => {
+  // Both are asked once per session per poll. Reading `.git` twice for them
+  // would double the cost of the thing this cache exists to make cheap.
+  const files = fakeFiles();
+  files.set('/wt/.git', 'gitdir: /repo/.git/worktrees/wt\n');
+  files.set('/repo/.git/worktrees/wt/HEAD', 'ref: refs/heads/feat/thing\n');
+  const git = new GitBranch({ files: files.access });
+
+  assert.equal(git.branchFor('/wt'), 'feat/thing');
+  assert.equal(git.linkedCheckoutFor('/wt'), '/repo');
+  assert.equal(git.branchFor('/wt'), 'feat/thing');
+  assert.equal(files.reads.count, 2, 'the .git link and its HEAD, once each');
 });
 
 test('reads the branch of an ordinary repo', () => {

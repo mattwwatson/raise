@@ -61,7 +61,7 @@ Four sources of truth, joined into one list:
 | `src/registry.js` | live agent sessions, fed by hooks |
 | `src/transcript.js` | what a session is doing, parsed from its transcript (pure) |
 | `src/transcript-reader.js` | the tail read behind that, cached on mtime, branch and agent |
-| `src/git-branch.js` | the branch a checkout is on, read from `.git/HEAD` |
+| `src/git-branch.js` | the branch a checkout is on, and the checkout a worktree belongs to, read from `.git` |
 | `src/lavish.js` | resolving a Lavish artifact to the page waiting on you |
 | `src/poll-watch.js` | which sessions are in a `lavish-axi poll`, which have a pipeline running, and which are driving one |
 | `src/run-owner.js` | which session started which run, remembered across the gaps |
@@ -396,6 +396,46 @@ back across its repo permanently. The prune is therefore skipped on an empty rea
 rule `PollWatch` applies to a `ps` it could not read. A few stale entries until a real reading
 arrives is the cheap side of the trade.
 
+**A run started in a worktree is registered against the main checkout, and only `.git` says
+so.** no-mistakes places a run by the path a repository resolves to, which for any linked
+worktree is the checkout it was created from. The session reporting itself to us is in the
+worktree, so `matchRunForCwd`'s prefix could never match - and this is not an edge case,
+because Treehouse puts *every* session in a worktree.
+
+Both halves of the attribution above failed on it, in a way that looked like neither. The
+sighting was there - `ps` saw `no-mistakes axi run` under the worktree session - and
+`observeFrom` threw it away, because it resolves the run being claimed through the same match.
+Unowned, the run then fell through to whichever other session happened to be open on the main
+checkout. Seen live: the worktree session sat at a parked review gate showing no pipeline at
+all, while an idle `main` card claimed the run, on a branch it was not on, with a `Focus ↗` to
+the one window that could not answer the gate. Ownership's own failure mode, reached by the
+route it does not cover.
+
+`GitBranch.linkedCheckoutFor` reads the link off the same `.git` the branch already comes
+from, so it costs nothing extra, and `matchRunForCheckout` tries the session's own directory
+first. Three things it deliberately does not do:
+
+- **the link is a fallback, never an override.** no-mistakes will register a worktree as a
+  repository in its own right, and that run is the more specific answer - the same rule
+  `matchRunForCwd` already applies to nesting.
+- **only a common dir named `.git` yields a checkout.** A linked worktree's admin directory is
+  always `<common dir>/worktrees/<name>`, and that dir is called `.git` only when the
+  repository has a working tree at all. no-mistakes' own gate repos are bare
+  (`~/.no-mistakes/repos/<hash>.git`), so its pipeline agents would otherwise be translated to
+  a directory no session is ever in; they are placed by run id instead, below. A submodule
+  points into `modules/` and is refused the same way.
+- **identity keeps the session's own path.** `titlePath` borrows the repo's path only when the
+  session is genuinely inside it. Borrowing it here would anchor the worktree and the checkout
+  on one path, and `disambiguateTitles` would have nothing left to grow - the `1/` and `2/`
+  that name a Treehouse tree would vanish and both cards would read `repo`.
+- **a run reached through the link may not lend its branch.** `branch` falls back to the
+  matched run's when a checkout's own cannot be read, and that fallback is fine for a session
+  sitting *in* the run's repo. Through the link it is a known-wrong answer, because a worktree
+  exists to be on another branch. Caught the moment the link started matching: a tree on a
+  detached HEAD, legitimately branchless, took the name of the *sibling* tree's branch - and
+  since the pull request is gated on `run.branch === branch`, would have been handed that
+  branch's review as well.
+
 **no-mistakes' own agent sessions are folded into the repo's row, never given one.**
 no-mistakes runs its pipeline steps as Claude sessions in a worktree at
 `~/.no-mistakes/worktrees/<repo-hash>/<run-id>`. They carry the same hooks, so they register
@@ -670,7 +710,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 420 tests, no network, no dependencies, ~2s
+npm test          # 434 tests, no network, no dependencies, ~2s
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
 
@@ -753,7 +793,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 ## Commands
 
 ```sh
-npm test                       # 420 tests, ~2s
+npm test                       # 434 tests, ~2s
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
 ```

@@ -1,5 +1,6 @@
 /**
- * Which branch a directory is on, read from `.git` rather than asked of git.
+ * What `.git` says about a checkout: which branch it is on, and - when it is a
+ * linked worktree - which checkout it belongs to.
  *
  * The branch used to be borrowed from whichever no-mistakes run matched the
  * session's directory, which meant a session had a branch only while its
@@ -15,6 +16,15 @@
  * `git rev-parse` would cost a process per session per poll, and the server may
  * not run one at all. `.git/HEAD` is one small file that says the same thing,
  * so it is read directly and cached on mtime, exactly like the transcript tail.
+ *
+ * The second answer, `linkedCheckoutFor`, exists because a run started in a
+ * worktree is registered by no-mistakes against the *main* checkout - that is
+ * the path a worktree's repo resolves to - while the session reporting itself
+ * to us is sitting in the worktree. `matchRunForCwd` places a run by cwd
+ * prefix, which no worktree path can ever satisfy, so the session driving the
+ * pipeline showed no pipeline and the run fell through to whichever idle
+ * session happened to be open on the main checkout. Only this file knows the
+ * two are the same repo, and it already reads the one thing that says so.
  */
 
 import { readFileSync, statSync } from 'node:fs';
@@ -79,13 +89,44 @@ export function gitDirFromLink(text) {
   return match ? match[1].trim() || null : null;
 }
 
+/**
+ * The checkout a linked worktree's git directory belongs to, or null.
+ *
+ * git always puts a linked worktree's admin directory at
+ * `<common dir>/worktrees/<name>`, so the common directory is what precedes it.
+ * That directory is only called `.git` when the repository has a working tree
+ * of its own, and requiring the name is the whole guard: a common dir named
+ * anything else is a bare repository, which has no checkout to name.
+ *
+ * That case is not hypothetical here. no-mistakes keeps its gate repositories
+ * at `~/.no-mistakes/repos/<hash>.git` and runs each pipeline step in a
+ * worktree of one, so those agents would otherwise be translated to
+ * `~/.no-mistakes/repos` - a directory no session is ever in. They are placed
+ * by their run id instead, in `matchRunForAgentCwd`. A submodule points into
+ * `modules/` rather than `worktrees/` and is refused for the same reason.
+ *
+ * @param {string|null} gitDir
+ * @returns {string|null}
+ */
+export function mainCheckoutFromGitDir(gitDir) {
+  const match = String(gitDir || '').match(/^(.*)\/\.git\/worktrees\/[^/]+\/?$/);
+  return match ? match[1] || null : null;
+}
+
 export class GitBranch {
   /**
    * `headPath` is null for a directory that is not in a repo, which is cached
-   * like any other answer - see `branchFor`.
+   * like any other answer - see `branchFor`. `mainCheckout` is null for every
+   * directory that is not in a linked worktree, which is most of them.
    *
-   * @type {Map<string, {headPath: string|null, size: number, mtimeMs: number, branch: string|null}>}
+   * @typedef {object} Resolved
+   * @property {string|null} headPath
+   * @property {string|null} mainCheckout
+   * @property {number} size
+   * @property {number} mtimeMs
+   * @property {string|null} branch
    */
+  /** @type {Map<string, Resolved>} */
   #cache = new Map();
   #files;
 
@@ -111,41 +152,75 @@ export class GitBranch {
    * @returns {string|null}
    */
   branchFor(dir) {
-    if (!dir) return null;
+    return this.#resolve(dir).branch;
+  }
+
+  /**
+   * The checkout this directory's worktree is linked to, or null when it is not
+   * in one. Served from the same read as `branchFor`, so asking both costs
+   * nothing extra.
+   *
+   * This is what lets a run be matched to a session working in a worktree. It
+   * is deliberately *only* the link: a worktree no-mistakes registered in its
+   * own right is still the more specific answer, so callers try the session's
+   * own directory first and fall back to this.
+   *
+   * @param {string|null} dir
+   * @returns {string|null}
+   */
+  linkedCheckoutFor(dir) {
+    return this.#resolve(dir).mainCheckout;
+  }
+
+  /**
+   * Everything `.git` has to say about a directory, cached on HEAD's mtime.
+   *
+   * @param {string|null} dir
+   * @returns {Resolved}
+   */
+  #resolve(dir) {
+    /** @type {Resolved} */
+    const nothing = { headPath: null, mainCheckout: null, size: 0, mtimeMs: 0, branch: null };
+    if (!dir) return nothing;
     const cached = this.#cache.get(dir);
     if (cached) {
-      if (!cached.headPath) return null;
+      if (!cached.headPath) return cached;
       try {
         const info = this.#files.stat(cached.headPath);
-        if (info.size === cached.size && info.mtimeMs === cached.mtimeMs) return cached.branch;
+        if (info.size === cached.size && info.mtimeMs === cached.mtimeMs) return cached;
       } catch {
         // The worktree was removed, or the repo re-created underneath us.
         this.#cache.delete(dir);
       }
     }
 
-    const headPath = this.#findHead(dir);
-    if (!headPath) {
-      this.#cache.set(dir, { headPath: null, size: 0, mtimeMs: 0, branch: null });
-      return null;
+    const found = this.#findGit(dir);
+    if (!found) {
+      this.#cache.set(dir, nothing);
+      return nothing;
     }
     try {
-      const info = this.#files.stat(headPath);
-      const branch = branchFromHead(this.#files.readText(headPath));
-      this.#cache.set(dir, { headPath, size: info.size, mtimeMs: info.mtimeMs, branch });
-      return branch;
+      const info = this.#files.stat(found.headPath);
+      const branch = branchFromHead(this.#files.readText(found.headPath));
+      /** @type {Resolved} */
+      const entry = { ...found, size: info.size, mtimeMs: info.mtimeMs, branch };
+      this.#cache.set(dir, entry);
+      return entry;
     } catch {
-      return null;
+      // A HEAD that could not be read this once is not cached, so the next ask
+      // tries again - but the link is still what it was, and saying so costs
+      // nothing.
+      return { ...found, size: 0, mtimeMs: 0, branch: null };
     }
   }
 
   /**
-   * Walk up until something answers to `.git`, and turn it into a path to HEAD.
+   * Walk up until something answers to `.git`, and read what it points at.
    *
    * @param {string} dir
-   * @returns {string|null}
+   * @returns {{headPath: string, mainCheckout: string|null}|null}
    */
-  #findHead(dir) {
+  #findGit(dir) {
     let current = dir;
     for (let depth = 0; depth < MAX_DEPTH; depth += 1) {
       const dotGit = join(current, '.git');
@@ -158,10 +233,11 @@ export class GitBranch {
         current = parent;
         continue;
       }
-      if (info.isDirectory) return join(dotGit, 'HEAD');
+      if (info.isDirectory) return { headPath: join(dotGit, 'HEAD'), mainCheckout: null };
       try {
         const gitDir = gitDirFromLink(this.#files.readText(dotGit));
-        return gitDir ? join(gitDir, 'HEAD') : null;
+        if (!gitDir) return null;
+        return { headPath: join(gitDir, 'HEAD'), mainCheckout: mainCheckoutFromGitDir(gitDir) };
       } catch {
         return null;
       }

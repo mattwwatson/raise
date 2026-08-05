@@ -125,3 +125,30 @@ test('a session driving in a directory no run covers owns nothing', () => {
   owners.observeFrom([session({ cwd: '/Users/x/work/elsewhere' })], [run()], () => true);
   assert.equal(owners.owners.size, 0);
 });
+
+test('a session driving from a worktree owns the run in its main checkout', () => {
+  // The sighting was there all along - the process table saw `no-mistakes axi
+  // run` under the worktree session - and it was thrown away here, because
+  // `matchRunForCwd` had nothing to match a worktree path against. The run then
+  // fell through to every session in the main checkout, unowned.
+  const owners = new RunOwners();
+  const cwd = '/Users/x/.treehouse/repo-9f/2/repo';
+  owners.observeFrom(
+    [session({ sessionId: 'worktree', cwd })],
+    [run()],
+    () => true,
+    new Map([['worktree', '/Users/x/work/repo']]),
+  );
+  assert.deepEqual([...owners.owners], [['r1', 'worktree']]);
+});
+
+test('a link to a checkout with no run still owns nothing', () => {
+  const owners = new RunOwners();
+  owners.observeFrom(
+    [session({ sessionId: 'worktree', cwd: '/Users/x/.treehouse/other-9f/1/other' })],
+    [run()],
+    () => true,
+    new Map([['worktree', '/Users/x/work/other']]),
+  );
+  assert.equal(owners.owners.size, 0);
+});

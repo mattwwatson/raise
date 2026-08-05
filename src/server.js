@@ -133,7 +133,18 @@ export function createMonitorServer({
     // for ownership to affect on such a tick, and prune still retires the entry
     // once the run leaves the reading.
     if (sessions.length > 0) runOwners.release(new Set(sessions.map((s) => s.sessionId)));
-    runOwners.observeFrom(sessions, runs, (s) => polls.ownsRunFor(s.host?.pid, agentPids));
+    // Resolved before ownership is recorded, because a session driving a
+    // pipeline from a worktree can only be tied to that run through the link.
+    // Cached on the same mtime as the branch, so this is not a second read.
+    const mainCheckouts = new Map(
+      sessions.map((s) => [s.sessionId, branches.linkedCheckoutFor(s.cwd)]),
+    );
+    runOwners.observeFrom(
+      sessions,
+      runs,
+      (s) => polls.ownsRunFor(s.host?.pid, agentPids),
+      mainCheckouts,
+    );
 
     const summaries = new Map();
     const reviewUrls = new Map();
@@ -183,6 +194,7 @@ export function createMonitorServer({
       summaries,
       reviewUrls,
       branches: sessionBranches,
+      mainCheckouts,
       pullRequests,
       pipelines,
       runOwners: runOwners.owners,

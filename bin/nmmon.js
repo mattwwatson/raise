@@ -293,6 +293,11 @@ async function cmdStatus() {
   const transcripts = new TranscriptReader();
   const gitBranches = new GitBranch();
   const branches = new Map(sessions.map((s) => [s.sessionId, gitBranches.branchFor(s.cwd)]));
+  // The checkout a worktree session's run is registered against - Treehouse
+  // puts every session in one, and nothing else can place its pipeline.
+  const mainCheckouts = new Map(
+    sessions.map((s) => [s.sessionId, gitBranches.linkedCheckoutFor(s.cwd)]),
+  );
   const agentPids = new Set(sessions.map((s) => s.host?.pid).filter(Boolean));
   const polls = new PollWatch({ execAsync });
   await polls.load(agentPids);
@@ -310,7 +315,12 @@ async function cmdStatus() {
   // between `axi run` and `axi respond` has nothing to observe and shows on
   // every session in its repo. The server, which polls, remembers instead.
   const runOwners = new RunOwners();
-  runOwners.observeFrom(sessions, runs, (s) => polls.ownsRunFor(s.host?.pid, agentPids));
+  runOwners.observeFrom(
+    sessions,
+    runs,
+    (s) => polls.ownsRunFor(s.host?.pid, agentPids),
+    mainCheckouts,
+  );
 
   // Asking Lavish costs a second or two, so it is only worth it when something
   // is actually waiting on a review.
@@ -331,6 +341,7 @@ async function cmdStatus() {
     summaries,
     reviewUrls,
     branches,
+    mainCheckouts,
     pullRequests,
     pipelines,
     runOwners: runOwners.owners,
