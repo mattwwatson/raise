@@ -62,7 +62,16 @@ import { pullRequestNumber } from './nm-state.js';
  * @property {Run|null} run
  * @property {number|null} updatedAt
  * @property {string|null} summary what the session is working on, in Claude's
- *   own words, or the pipeline step when no-mistakes is driving
+ *   own words. Never the pipeline step: the two run at once, so the step has
+ *   `pipeline` below rather than taking this
+ * @property {Pipeline|null} pipeline what no-mistakes is doing for this row,
+ *   which is a different question from what the session is doing
+ * @property {boolean} attributable whether this row is a session, or a run we
+ *   could not tie to one. False is the whole content of the unattributable
+ *   card, which exists to say so rather than to be quietly wrong
+ * @property {number|null} candidateSessions how many live sessions share this
+ *   run's repository; only set when `attributable` is false, to say how far the
+ *   uncertainty reaches
  * @property {string|null} activity the tool it is running right now
  * @property {string|null} mode 'plan' and the like; null for an ordinary turn
  * @property {string|null} reviewUrl the Lavish page this row is waiting on
@@ -185,22 +194,25 @@ export function matchRunForCwd(cwd, runs) {
  * worktree as a repository in its own right, and that run is the more specific
  * answer - the same rule `matchRunForCwd` already applies to nesting.
  *
- * **Through the link the branch is required, and on the session's own path it
- * is not.** Every worktree of a checkout resolves to the same main checkout and
- * no-mistakes registers all of their runs against it, so the link is a
- * one-to-many edge: resolving it by `matchRunForCwd`'s ranking alone hands one
- * run to every sibling worktree, and hands each of them the parked one rather
- * than its own. A worktree exists in order to be on its own branch, and every
- * run carries the branch it is on, so that is what says which worktree's run it
- * is. On the session's own path there is nothing to disambiguate and the branch
- * must *not* narrow it - a session sitting in a checkout keeps showing that
- * repo's recent pipeline whatever branch it has since moved to.
+ * **The branch is required on both paths.** Every worktree of a checkout
+ * resolves to the same main checkout and no-mistakes registers all of their
+ * runs against it, so the link is a one-to-many edge: resolving it by
+ * `matchRunForCwd`'s ranking alone hands one run to every sibling worktree, and
+ * hands each of them the parked one rather than its own. A worktree exists in
+ * order to be on its own branch, and every run carries the branch it is on, so
+ * that is what says whose run it is.
  *
- * A worktree whose branch cannot be read - a detached HEAD, which Treehouse
- * produces routinely - therefore gets no run through the link at all. That is
- * the same failing-closed rule that stops a run reached this way lending its
- * branch: with nothing to match on, a guess would be a confident wrong answer
- * with a Focus button attached.
+ * This used to stop at the link, on the rule that a session sitting in a
+ * checkout keeps showing that repo's recent pipeline whatever branch it has
+ * since moved to. That rule is gone: it put a live pipeline from somebody
+ * else's branch on an idle `main` card, with a Focus button to a window that
+ * could not answer its gate. A run is an attribute of the session driving it,
+ * and a checkout that has moved to another branch has finished with it.
+ *
+ * A checkout whose branch cannot be read - a detached HEAD, which Treehouse
+ * produces routinely - therefore gets no run at all. With nothing to match on, a
+ * guess would be a confident wrong answer with a Focus button attached, and the
+ * run is better shown on the unattributable card that says so.
  *
  * `mainCheckout` and `branch` are resolved by `GitBranch.checkoutFor`, since
  * only `.git` knows the two directories are one repository, and reading it is
@@ -213,11 +225,11 @@ export function matchRunForCwd(cwd, runs) {
  * @returns {Run|null}
  */
 export function matchRunForCheckout(cwd, mainCheckout, branch, runs) {
-  const own = matchRunForCwd(cwd, runs);
-  if (own || !branch) return own;
-  return matchRunForCwd(
+  if (!branch) return null;
+  const mine = runs.filter((r) => r.branch === branch);
+  return matchRunForCwd(cwd, mine) || matchRunForCwd(
     mainCheckout,
-    runs.filter((r) => r.branch === branch),
+    mine,
   );
 }
 
@@ -668,27 +680,28 @@ export function buildRows({
     const repo = matchRunForCheckout(session.cwd, mainCheckout, checkoutBranch, runs);
     const owned = ownedRuns.get(session.sessionId) || null;
     const owner = repo ? runOwners.get(repo.runId) || null : null;
-    const run = owned || (!owner || owner === session.sessionId ? repo : null);
-    if (run) claimedRuns.add(run.runId);
+    const matched = owned || (!owner || owner === session.sessionId ? repo : null);
+    // Claimed on the match rather than on what is shown, so a run this session
+    // owns but has finished with cannot reappear as an unattributable card: it
+    // was attributed, it is simply over.
+    if (matched) claimedRuns.add(matched.runId);
+    const run = matched && isDisplayable(matched) ? matched : null;
     const summary = summaries.get(session.sessionId) || null;
     const agent = (run && agents.get(run.runId)) || null;
     const pipelineRunning = pipelines.has(session.sessionId);
     const attention = attentionFor({ session, run, summary, agent, pipelineRunning });
     const sessionState = effectiveSessionState(session, summary, pipelineRunning);
     const plan = planFocus(session);
-    // The checkout's own branch is the truth about where this session is. The
-    // run's is a second choice: it belongs to a pipeline that may have finished
-    // on a branch that has since been left behind.
+    // The checkout's own branch, and nothing else. A run used to be able to
+    // lend its branch to a session sitting in its repo, for a checkout whose
+    // `.git` could not be read - but a run is now matched *on* the branch, so
+    // there is no run to borrow from in exactly the case the fallback existed
+    // for. Keeping it would have been a line that could never run.
     //
-    // And it is not offered at all when the run was reached through a
-    // worktree's link, because there the two are known to differ - a worktree
-    // exists to be on another branch. A detached checkout, whose own branch is
-    // legitimately null, took its sibling worktree's branch name the moment the
-    // link let it match that run, and would then have been handed that branch's
-    // pull request on top. The one place a run may lend a branch is a session
-    // sitting in the run's own repo.
-    const branch =
-      checkoutBranch || (isInside(session.cwd, repo?.repoPath) ? repo?.branch : null) || null;
+    // It is load-bearing beyond the label: the pull request is gated on it, so
+    // a borrowed branch was a borrowed review link. Nothing is the right answer
+    // when the checkout will not say.
+    const branch = checkoutBranch;
     rows.push({
       id: `session:${session.sessionId}`,
       kind: 'session',
@@ -740,10 +753,18 @@ export function buildRows({
       agentKind: session.agent || 'claude',
       run: run || null,
       updatedAt: session.updatedAt || null,
-      // The pipeline step is the better summary when there is one: it says what
-      // is being done to the repo, where the transcript title says what the
-      // conversation is about.
-      summary: run?.step?.name ? `step ${run.step.name}` : summary?.title || null,
+      // What the *session* is about, always - never the pipeline step. The step
+      // used to replace this whenever a run was attached, on the reasoning that
+      // it says what is being done to the repo where the title only says what
+      // the conversation is about. Both are true and they are concurrent: you
+      // talk to a session while no-mistakes runs for it, so the moment the
+      // pipeline started you lost sight of what you had been doing. The
+      // pipeline gets `pipeline` below and a line of its own.
+      summary: summary?.title || null,
+      pipeline: pipelineFor(run, agent),
+      // A session card is always attributable - it *is* the attribution.
+      attributable: true,
+      candidateSessions: null,
       // On a review row the running tool *is* the waiting - "Running lavish-axi"
       // next to "Waiting on your review" reads as work in progress, which is
       // the one impression this state exists to correct.
@@ -780,12 +801,29 @@ export function buildRows({
     });
   }
 
-  // Runs with no Claude session attached: someone ran no-mistakes by hand, or
-  // the session ended while the pipeline carried on. Still worth showing, just
-  // not focusable.
+  // A run we could not tie to any session. Someone ran no-mistakes by hand, the
+  // session that started it has gone, or nothing was running to trace it to -
+  // `axi run` returns at every gate, so a parked run has no process to walk up
+  // from, and `nmmon status` has no ownership memory at all.
+  //
+  // This is the one card on the page that is not a session, and it earns that
+  // by admitting what it does not know. The alternative was showing the run on
+  // every session in its repo, which under a session-centric model is a *false
+  // attribute* on all but one of them - and you cannot tell which is the real
+  // one, so all it does is teach you to distrust the pipeline line everywhere.
+  // Shown once, marked, and it says how many windows it might belong to.
+  //
+  // The count is of sessions sharing the *logical* repo, not the path: with
+  // Treehouse, `work/repo`, `1/repo` and `2/repo` are one repository, which is
+  // exactly what `mainCheckouts` resolves.
   for (const run of runs) {
     if (claimedRuns.has(run.runId)) continue;
-    if (!run.active && !isRecent(run, now)) continue;
+    if (!isDisplayable(run)) continue;
+    const candidateSessions = human.filter(
+      (s) =>
+        isInside(s.cwd, run.repoPath) ||
+        isInside(mainCheckouts.get(s.sessionId) || null, run.repoPath),
+    ).length;
     const agent = agents.get(run.runId) || null;
     const attention = attentionFor({ session: null, run, agent });
     rows.push({
@@ -809,7 +847,15 @@ export function buildRows({
       agentKind: null,
       run,
       updatedAt: run.updatedAt || null,
-      summary: run.step?.name ? `step ${run.step.name}` : null,
+      // No session, so nothing to say about one. What the pipeline is doing goes
+      // on `pipeline`, exactly as it does for a session card.
+      summary: null,
+      pipeline: pipelineFor(run, agent),
+      // The whole point of this card: it is here *because* we could not place
+      // it, and it must say so rather than looking like a session you failed to
+      // notice. The page turns these two into the explanation on the card.
+      attributable: false,
+      candidateSessions,
       activity: null,
       mode: null,
       reviewUrl: null,
@@ -844,9 +890,90 @@ function hostKindFor(plan) {
   return 'unknown';
 }
 
-/** @param {Run} run */
-function isRecent(run, now, windowMs = 30 * 60 * 1000) {
-  return run.updatedAt != null && now - run.updatedAt < windowMs;
+/**
+ * What no-mistakes is doing for a session, as one line.
+ *
+ * A session and its pipeline run at the same time, so the card carries both and
+ * this is the pipeline's half. It exists because "step ci" alone is the same
+ * five characters whether the pipeline is rebasing your pull request, waiting
+ * on a check, or idling - and the thing that says which was already on the row
+ * and being thrown away.
+ *
+ * Three sources, most specific first, because no-mistakes works in three
+ * different shapes:
+ *
+ *   - a step running a Claude agent (review, test) reports through the folded
+ *     agent, whose `activity` is the tool in flight
+ *   - the CI monitor runs *inside the no-mistakes daemon* with no agent session
+ *     at all, and reports only through `step.lastActivity`
+ *   - a parked step has neither, and the step name plus the state word on the
+ *     line above already say everything there is
+ *
+ * `what` may be null and the line still renders, because **presence follows the
+ * run existing, never the activity**. `Agent.activity` goes null between every
+ * pair of tool calls, so a marker rendered on it blinked in and out several
+ * times a minute, reading as the pipeline stopping and starting. The same trap
+ * applies here and the same rule avoids it.
+ *
+ * `step.lastActivity` arrives prefixed - `log: ...` for a log line, `status:
+ * ...` for a transition. The log prefix is stripped as transport noise; a
+ * status line is dropped entirely, because it restates the step status that
+ * line two is already showing.
+ *
+ * @typedef {object} Pipeline
+ * @property {string} step which step is running
+ * @property {string|null} status the step's own status
+ * @property {string|null} what what it is doing right now, if it says
+ */
+
+/**
+ * @param {Run|null} run
+ * @param {Agent|null} agent
+ * @returns {Pipeline|null}
+ */
+function pipelineFor(run, agent) {
+  if (!run?.step?.name) return null;
+  return {
+    step: run.step.name,
+    status: run.step.status || null,
+    what: agent?.activity || stepActivity(run.step.lastActivity) || null,
+  };
+}
+
+/**
+ * The readable half of a step's `lastActivity`, or null.
+ *
+ * @param {string|null|undefined} lastActivity
+ * @returns {string|null}
+ */
+function stepActivity(lastActivity) {
+  const text = String(lastActivity || '').trim();
+  if (!text.startsWith('log:')) return null;
+  return text.slice(4).trim() || null;
+}
+
+/**
+ * Whether a run is still worth a place on the page.
+ *
+ * This replaced a thirty-minute recency window, which kept every finished run
+ * around on the theory that a repo's recent pipeline is context. Under a
+ * session-centric model it is not: a run that passed is finished business, and
+ * the branch requirement means a card only ever shows a run for the branch it
+ * is on - so switching away is already how you say you are done with it.
+ *
+ * A **failed** run is the exception, and the reason there is a rule here rather
+ * than a bare `run.active`. Failure is unfinished business, and it is precisely
+ * the moment the card must not go quiet. It needs no timer of its own: it stops
+ * showing when the checkout leaves its branch, which is the same signal.
+ *
+ * `cancelled` counts as finished. You cancelled it, so nothing is waiting on
+ * you, and it is not a result to go back and read.
+ *
+ * @param {Run} run
+ * @returns {boolean}
+ */
+function isDisplayable(run) {
+  return run.active || run.status === 'failed';
 }
 
 /**
@@ -960,6 +1087,13 @@ export function disambiguateTitles(rows) {
  */
 export function sortRows(rows) {
   return [...rows].sort((a, b) => {
+    // An unattributable run sorts below every session, whatever either of them
+    // is doing - including parked, which normally outranks working. The page
+    // ranks by who needs a human, and this card cannot take you to one: it has
+    // no window behind it. Letting a gate nobody can answer sit above a session
+    // you could act on inverts the one thing the ordering is for.
+    const byKind = (a.kind === 'run' ? 1 : 0) - (b.kind === 'run' ? 1 : 0);
+    if (byKind !== 0) return byKind;
     const byAttention =
       ATTENTION_ORDER.indexOf(a.attention) - ATTENTION_ORDER.indexOf(b.attention);
     if (byAttention !== 0) return byAttention;

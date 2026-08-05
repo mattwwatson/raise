@@ -1,8 +1,8 @@
 # no-mistakes-monitor (`nmmon`)
 
-One page that shows every `no-mistakes` pipeline run and every agent session on your machine -
-Claude Code and pi - tells you which one is waiting for you, and jumps to that window when you
-click it.
+One page that shows every agent session on your machine - Claude Code, Claude Desktop and pi -
+tells you which one is waiting for you, and jumps to that window when you click it. If you use
+`no-mistakes`, each session also shows what its pipeline is doing.
 
 If you run several agent sessions across several repos, the problem is not knowing that work
 is happening. It is noticing the one that stopped and wants an answer, and then finding which
@@ -93,7 +93,9 @@ Pull requests opened outside a no-mistakes run are picked up from the session's 
 transcript, so a plain `gh pr create` still gets a link.
 
 **The branch is always shown**, next to the repo name, read straight from `.git/HEAD` - so it
-is right for worktrees and for sessions that have never run the pipeline.
+is right for worktrees and for sessions that have never run the pipeline. It is also what ties
+a pipeline and a pull request to a session, so a checkout on a detached HEAD shows neither
+rather than borrowing whichever was nearest.
 
 **If you have named a session, the name is shown too**, between the repo and the branch. Two
 sessions on one repo and one branch is an ordinary day, and nothing else on the row tells them
@@ -117,18 +119,33 @@ repo you could not click. They are now folded onto the row of the repo they are 
 ```
 PIPELINE PARKED
   hexbattle  HXB-63-review                                    2m  tmux  Focus ↗
-  Pipeline parked at a gate - step review
-  NO-MISTAKES  Reviewing terrain.ts
+  Pipeline parked at a gate
+  Work out why the ridge tiles overlap
+  NO-MISTAKES  review - 2 finding(s) · Reviewing terrain.ts
 ```
 
 If one of those agents ever stops for a permission prompt, the repo's row goes red and says so
 - the pipeline has stalled and only you can free it.
 
+**What you are doing and what the pipeline is doing are separate lines**, because they happen
+at the same time. Your session keeps its own state and title while no-mistakes works underneath
+it; the `NO-MISTAKES` line says which step is running and what it is up to. That works even when
+there is no pipeline agent to see - a CI monitor rebasing your pull request runs inside the
+no-mistakes daemon, and the line still reports it.
+
 **The pipeline lands on the session that started it.** Several sessions open on one checkout
 is an ordinary day, and only one of them can answer a gate - so the other cards show nothing
 about the pipeline at all: no step, no parked gate, no `NO-MISTAKES` line. They still name the
-same repo and branch, and they still link its pull request. When nmmon cannot tell which
-session started a run, the run shows on every session in that repo, as it always did.
+same repo and branch, and they still link its pull request.
+
+**A run that cannot be placed gets one card of its own, at the bottom**, saying it could not be
+traced to a session and how many of your sessions share that repo. That happens when the session
+that started it has gone, when it was run by hand, or when nothing was running to trace it to.
+It is never shown on a session that might not own it: on a page you trust to tell you who needs
+you, a pipeline attached to the wrong card is worse than one attached to none.
+
+**A run that has passed leaves the page**, because it is finished business. A run that
+**failed** stays, until you switch that checkout to another branch.
 
 A session in a git worktree counts here as being in the checkout the worktree was created
 from, because that is the repo no-mistakes registers its runs against - so a pipeline started
@@ -366,7 +383,7 @@ supported no-no-mistakes setup rather than a fault. `NM_HOME` moves where it loo
 ## Development
 
 ```sh
-npm test          # 444 tests, no network, no build step, ~2s
+npm test          # 455 tests, no network, no build step, ~2s
 npm run typecheck
 ```
 

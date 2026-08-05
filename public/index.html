@@ -1086,23 +1086,14 @@
         state.textContent = row.attentionLabel;
         line2.appendChild(state);
 
-        // A finished run's last step is not news - "Done" already said it - and
-        // "Done - step ci" reads as though something is still happening.
-        const detail = [];
-        if (row.message) detail.push(row.message);
-        else if (row.run && row.run.step && row.attention !== 'done') {
-          detail.push(
-            'step ' +
-              row.run.step.name +
-              (row.run.step.findings ? ' - ' + row.run.step.findings + ' finding(s)' : ''),
-          );
-        }
-        if (detail.length) {
+        // Why *this session* wants you. The pipeline step used to share this
+        // line, which put no-mistakes' business in the middle of the session's
+        // own status - they are two different things happening at once, so the
+        // step has a line of its own further down.
+        if (row.message) {
           const msg = document.createElement('span');
           msg.className = 'msg';
-          // line2 is a flex row with a gap; the separator was a literal hyphen
-          // that read as a stray dash hanging off the state word.
-          msg.textContent = detail.join(' ');
+          msg.textContent = row.message;
           line2.appendChild(msg);
         }
         // What it is doing this second, which only means anything while it is
@@ -1121,32 +1112,55 @@
         }
         body.appendChild(line2);
 
-        // The step is already on line2 with its findings, so a summary line is
-        // only added when it says something new - which is exactly the case
-        // this was built for: a plain Claude session with no pipeline at all.
-        if (row.summary && !(row.run && row.run.step)) {
+        // What the session itself is about, always. This used to be dropped
+        // whenever a pipeline step existed, on the reasoning that the step said
+        // it better - so the moment no-mistakes started, what you had been
+        // talking to the session about disappeared off its card. The two are
+        // concurrent, not alternatives.
+        if (row.summary) {
           const summary = document.createElement('div');
           summary.className = 'summary';
           summary.textContent = row.summary;
           body.appendChild(summary);
         }
-        // What no-mistakes' own agent is doing, on the row of the repo it is
-        // working on rather than as a second card nobody can act on. Presence
-        // follows the agent existing, never `activity` - that goes null between
-        // every pair of tool calls, and rendering on it blinked the marker in
-        // and out several times a minute.
-        if (row.agent && row.attention !== 'done') {
-          const agent = document.createElement('div');
-          agent.className = 'agent';
+        // Why an unattributable run is on the page at all. It is the one card
+        // here that is not a session, so it has to account for itself rather
+        // than look like a session you failed to notice.
+        if (row.attributable === false) {
+          const why = document.createElement('div');
+          why.className = 'summary';
+          why.textContent =
+            'Not traceable to a session' +
+            (row.candidateSessions
+              ? ' - probably one of your ' + row.candidateSessions + ' on this repo'
+              : '');
+          body.appendChild(why);
+        }
+        // What no-mistakes is doing, on the row of the session it is doing it
+        // for rather than as a second card nobody can act on.
+        //
+        // Presence follows the *run* existing, never the activity: the tool in
+        // flight goes null between every pair of calls, and a marker rendered on
+        // it blinked in and out several times a minute, reading as the pipeline
+        // stopping and starting. So the line stays and only its tail changes -
+        // and the tail may be empty, which is a step that has not said anything
+        // yet rather than a pipeline that has gone away.
+        if (row.pipeline && row.attention !== 'done') {
+          const pipeline = document.createElement('div');
+          pipeline.className = 'agent';
           const tag = document.createElement('span');
           tag.className = 'agent-tag';
           tag.textContent = 'no-mistakes';
-          agent.appendChild(tag);
+          pipeline.appendChild(tag);
           const text = document.createElement('span');
           text.className = 'agent-what';
-          text.textContent = row.agent.what;
-          agent.appendChild(text);
-          body.appendChild(agent);
+          const findings = row.run && row.run.step ? row.run.step.findings : 0;
+          text.textContent =
+            row.pipeline.step +
+            (findings ? ' - ' + findings + ' finding(s)' : '') +
+            (row.pipeline.what ? ' · ' + row.pipeline.what : '');
+          pipeline.appendChild(text);
+          body.appendChild(pipeline);
         }
         hit.appendChild(body);
         el.appendChild(hit);
@@ -1223,6 +1237,15 @@
           host.className = 'host';
           host.textContent = HOST_LABELS[row.hostKind];
           meta.appendChild(host);
+        }
+        // Stands where the host chip would be, because it answers the same
+        // question - where is this? - with the honest answer that we do not
+        // know. `HOST_LABELS` has no entry for a run, so the two never collide.
+        if (row.attributable === false) {
+          const chip = document.createElement('span');
+          chip.className = 'agent-chip';
+          chip.textContent = 'unattributed';
+          meta.appendChild(chip);
         }
         if (row.focusable) {
           const hint = document.createElement('button');
@@ -1302,14 +1325,34 @@
           return;
         }
 
+        // Grouped by attention, except for the runs we could not attribute -
+        // those go last, in a section of their own, whatever state they are in.
+        //
+        // `sortRows` already puts them at the end of the list, and that is not
+        // enough on its own: the groups below are built by filtering the whole
+        // list per attention, so a parked run landed in "Pipeline parked at a
+        // gate" and sat above every working session. A card with no window
+        // behind it must never outrank one you can act on - it cannot take you
+        // anywhere, and this page ranks by who you can go and help.
+        const placed = rows.filter((r) => r.attributable !== false);
+        const unattributed = rows.filter((r) => r.attributable === false);
+
         for (const [key, label] of GROUPS) {
-          const group = rows.filter((r) => r.attention === key);
+          const group = placed.filter((r) => r.attention === key);
           if (group.length === 0) continue;
           const title = document.createElement('div');
           title.className = 'group-title';
           title.textContent = label;
           rowsEl.appendChild(title);
           for (const row of group) rowsEl.appendChild(card(row));
+        }
+
+        if (unattributed.length > 0) {
+          const title = document.createElement('div');
+          title.className = 'group-title';
+          title.textContent = 'Pipelines we cannot place';
+          rowsEl.appendChild(title);
+          for (const row of unattributed) rowsEl.appendChild(card(row));
         }
 
         notifyOnNewlyBlocked(rows);
