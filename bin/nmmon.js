@@ -72,6 +72,17 @@ const SOURCE_LABELS = {
 };
 
 /**
+ * How each `doctor` check state is marked. Padded to a common width so the
+ * names line up; a state with no entry here is a failure, which is the one
+ * default a diagnostic tool may safely have.
+ */
+const CHECK_MARKS = {
+  ok: green('ok  '),
+  warn: yellow('warn'),
+  off: dim('--  '),
+};
+
+/**
  * Help must never fail.
  *
  * A malformed NMMON_PORT is a real error for `serve`, which reports it properly
@@ -633,14 +644,7 @@ async function cmdDoctor() {
 
   console.log(`${bold('nmmon doctor')}   home: ${monitorHome()}\n`);
   for (const check of checks) {
-    const mark =
-      check.state === 'ok'
-        ? green('ok  ')
-        : check.state === 'warn'
-          ? yellow('warn')
-          : check.state === 'off'
-            ? dim('--  ')
-            : red('fail');
+    const mark = CHECK_MARKS[check.state] ?? red('fail');
     console.log(`  ${mark}  ${check.name.padEnd(22)} ${check.detail}`);
   }
   if (checks.some((c) => c.state === 'bad')) process.exitCode = 1;

@@ -53,6 +53,14 @@ function unreadableDb(dir) {
   return path;
 }
 
+/** One run in one repo, enough to tell two databases apart by what they hold. */
+function seedRun(path, runId, repoPath) {
+  const db = new DatabaseSync(path);
+  db.exec(`INSERT INTO repos (id, working_path) VALUES ('p1', '${repoPath}')`);
+  db.exec(`INSERT INTO runs (id, repo_id, branch, status) VALUES ('${runId}', 'p1', 'main', 'running')`);
+  db.close();
+}
+
 const nextTick = () => new Promise((resolve) => setImmediate(resolve));
 
 test('currentStep prefers the running step', () => {
@@ -365,6 +373,92 @@ test('no-mistakes uninstalled under a running monitor goes quiet, not degraded',
     assert.equal(read.source, 'absent');
     assert.equal(read.warning, null);
     assert.equal(state.warning, null);
+    state.close();
+  } finally {
+    cleanup();
+  }
+});
+
+test('a half-created database is not mistaken for a version mismatch', () => {
+  // The daemon creates state.sqlite and applies its schema a moment later, so a
+  // poll landing in between is watching no-mistakes be installed. `PRAGMA
+  // table_info` on a table that is not there returns no rows rather than
+  // throwing, so every column read as missing and the window rendered as "this
+  // build of no-mistakes is newer or older than nmmon expects" - a warning
+  // banner, and a spawn per repo every fifteen seconds, both of them forever.
+  const { dir, cleanup } = scratch();
+  try {
+    const path = join(dir, 'state.sqlite');
+    writeFileSync(path, '');
+    const state = new NoMistakesState({
+      dbPath: path,
+      exec: () => assert.fail('a database being created is not a reason to shell out'),
+      execAsync: async () => assert.fail('a database being created is not a reason to shell out'),
+    });
+    assert.equal(state.probe().mode, 'absent');
+    assert.equal(state.warning, null, 'an installation in progress is not a fault to report');
+
+    const read = state.read({ candidateDirs: ['/repo-a'] });
+    assert.equal(read.source, 'absent');
+    assert.equal(read.warning, null);
+
+    makeDb(dir);
+    assert.equal(state.read({ candidateDirs: ['/repo-a'] }).source, 'sqlite');
+    state.close();
+  } finally {
+    cleanup();
+  }
+});
+
+test('the per-repo fallback is left again once the schema is one we know', () => {
+  // A version mismatch is real and the fallback is right for it, but it must
+  // not be a one-way latch: the same reading is what a half-applied schema
+  // gives, and upgrading or downgrading no-mistakes is how either one ends.
+  const { dir, cleanup } = scratch();
+  try {
+    const path = makeDb(dir, { omit: ['runs.error'] });
+    const state = new NoMistakesState({ dbPath: path, execAsync: async () => '' });
+    assert.equal(state.probe().mode, 'cli');
+    assert.match(state.warning, /missing runs\.error/);
+
+    const db = new DatabaseSync(path);
+    db.exec('ALTER TABLE runs ADD COLUMN error TEXT');
+    db.close();
+
+    const read = state.read({ candidateDirs: ['/repo-a'] });
+    assert.equal(read.source, 'sqlite');
+    assert.equal(read.warning, null, 'the warning goes when the thing it described does');
+    state.close();
+  } finally {
+    cleanup();
+  }
+});
+
+test('a database replaced at the same path is re-read, not served from the old handle', () => {
+  // The daemon replaces the file on update, migration or a restore. Our
+  // read-only handle goes on answering from the unlinked inode, and every query
+  // succeeds, so nothing further down would ever notice - the page would serve
+  // the previous database's runs as current indefinitely.
+  const { dir, cleanup } = scratch();
+  try {
+    const path = makeDb(dir);
+    seedRun(path, 'r-old', '/repo-old');
+    const state = new NoMistakesState({ dbPath: path });
+    assert.equal(state.probe().mode, 'sqlite');
+    assert.deepEqual(
+      state.read().runs.map((r) => r.runId),
+      ['r-old'],
+    );
+
+    unlinkSync(path);
+    seedRun(makeDb(dir), 'r-new', '/repo-new');
+
+    const read = state.read();
+    assert.equal(read.source, 'sqlite');
+    assert.deepEqual(
+      read.runs.map((r) => r.runId),
+      ['r-new'],
+    );
     state.close();
   } finally {
     cleanup();

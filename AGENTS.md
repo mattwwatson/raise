@@ -122,12 +122,34 @@ could not even name the real reason: `node:sqlite` reports a missing file as a g
 `ERR_SQLITE_ERROR`. And it armed the degraded path, which spawns `no-mistakes axi status` once
 per session directory every fifteen seconds, forever, for a binary that is not on the machine.
 
-**Which of the two it is gets re-decided on every read**, by one `stat`, and both directions
-matter. The database appearing is the daemon creating it on first use, long after a monitor
-was left running - deciding `absent` once and for good would leave the page quietly blind to
-every pipeline until somebody thought to restart it. The database *going away* matters more:
-the read-only handle keeps working on the unlinked inode, so an uninstall would otherwise
-leave the monitor serving a deleted file's frozen runs as current.
+**Which of the three it is gets re-decided on every read**, by one `stat`, and the rule is
+that **only `sqlite` is ever remembered, and only while the handle still points at the file it
+was decided about.** The database appearing is the daemon creating it on first use, long after
+a monitor was left running - deciding `absent` once and for good would leave the page quietly
+blind to every pipeline until somebody thought to restart it. The database *going away*
+matters more: the read-only handle keeps working on the unlinked inode, so an uninstall would
+otherwise leave the monitor serving a deleted file's frozen runs as current.
+
+**That `stat` reads identity, not existence, and the difference is a third case.** The daemon
+replaces the file on update, migration or a restore, which the module already assumes when it
+reopens once on a query error - but a replacement raises no error at all. The old inode
+answers every query happily, so `existsSync` sees a database that is there, the mode stays
+`sqlite`, and the previous file's runs are served as current for as long as the monitor runs:
+the deletion case's quiet staleness, reached by the path the deletion case does not cover.
+`dev` and `ino` captured when the handle is opened, compared on each read, close both for the
+same one `stat`.
+
+**`cli` may not latch either, and a database with no tables in it is not a version mismatch.**
+`PRAGMA table_info` returns no rows for a table that does not exist rather than throwing, so a
+file the daemon has created and not yet applied its schema to reads as one whose every column
+has been renamed. Reporting that as `cli` put the warning banner and the fifteen-second
+per-repo spawns - the two symptoms `absent` exists to remove - onto the ordinary act of
+installing no-mistakes under a running monitor, and left them there, because the re-probe used
+to fire only while the mode was `absent`. So a database carrying no tables at all is `absent`,
+and every mode except `sqlite` is re-probed on each read. A genuine version mismatch - tables
+present, columns we do not recognise - still degrades to the per-repo fallback with its
+warning, and now leaves it again when the schema becomes one we know. Re-probing costs an open
+and three PRAGMAs against a path that mode is already spawning a process per repo for.
 
 Lavish needs no equivalent, and the reason is worth knowing before adding one: the only thing
 that asks `lavish-axi` anything is a session whose transcript or process table shows a live
@@ -648,7 +670,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 417 tests, no network, no dependencies, ~2s
+npm test          # 420 tests, no network, no dependencies, ~2s
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
 
@@ -731,7 +753,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 ## Commands
 
 ```sh
-npm test                       # 417 tests, ~2s
+npm test                       # 420 tests, ~2s
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
 ```
