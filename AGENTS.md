@@ -50,7 +50,7 @@ Four sources of truth, joined into one list:
 | no-mistakes SQLite DB (polled, 1s) | `src/nm-state.js` | is a pipeline run parked, working, failed? |
 | agent hooks (pushed) | `src/registry.js` | is the agent blocked waiting for a human? |
 | the session's own transcript (tail, on change) | `src/transcript.js` | what is it working on, what is it doing right now, and did it open a pull request? |
-| the process table (one `ps`, every 3s) | `src/poll-watch.js` | is a review still open, and is a pipeline still running? |
+| the process table (one `ps`, every 3s) | `src/poll-watch.js` | is a review still open, is a pipeline still running, and whose is it? |
 
 | Path | What |
 | --- | --- |
@@ -63,7 +63,8 @@ Four sources of truth, joined into one list:
 | `src/transcript-reader.js` | the tail read behind that, cached on mtime, branch and agent |
 | `src/git-branch.js` | the branch a checkout is on, read from `.git/HEAD` |
 | `src/lavish.js` | resolving a Lavish artifact to the page waiting on you |
-| `src/poll-watch.js` | which sessions are in a `lavish-axi poll`, and which have a pipeline running |
+| `src/poll-watch.js` | which sessions are in a `lavish-axi poll`, which have a pipeline running, and which are driving one |
+| `src/run-owner.js` | which session started which run, remembered across the gaps |
 | `src/dashboard.js` | joins them all into ranked rows (pure) |
 | `src/focus/` | tmux resolution, per-terminal adapters, and raising Claude Desktop |
 | `src/process-tree.js` | which terminal or app, and which agent process, a hook is running under |
@@ -286,6 +287,64 @@ walk up to the same session. The permanently running `daemon` is excluded explic
 the ancestor walk already drops it, but a rule that depends on the walk alone is one refactor
 away from claiming every session on the machine.
 
+**A run belongs to the session that started it, and only the process table knows which.**
+`matchRunForCwd` places a run by repo path alone. That is deliberate and right for *identity* -
+the row keeps showing the repo's recent pipeline - but several sessions open on one checkout is
+an ordinary day, and every one of them matched the same run. Three cards then carried the same
+step, the same parked gate and the same folded agent, each with a `Focus ↗` to a window that
+could not answer it. Seen with three sessions on this repo: one driving `axi run`, two with
+nothing under them at all.
+
+Nothing in no-mistakes' database says whose run it is - `runs.intent_session_id` is empty on
+every row, the same field that already fails to place the pipeline's own agents. The answer
+comes from where the poll gate's does: walk the live process up to the `host.pid` the registry
+records for focusing. Same `ps`, third question.
+
+Two rules keep it from becoming a confident wrong answer of its own:
+
+- **Driving a run is ownership; reading one is not.** `isRunOwnerCommand` allows `run`,
+  `rerun`, `respond` and `abort` and refuses `status`, `logs` and the rest, so a session that
+  merely glanced at the pipeline cannot take the row off the one running it. It is an
+  allowlist, and it fails the safe way: a driving verb a later no-mistakes adds goes
+  unrecognised, the run goes unattributed, and the page behaves as it did before attribution
+  existed. The verb is found by scanning rather than by position, because global flags precede
+  it and `--intent` follows it with paragraphs of English - the five most recent real intents
+  on this machine run to 5.6KB and use the words "run", "abort" and "status" throughout.
+- **Ownership narrows and never widens.** A run nobody was observed to own stays on every
+  session in its repo, exactly as before. This is the same shape as the transcript being
+  allowed to clear a block but never assert one.
+
+**`RunOwners` is a memory because the evidence is intermittent, not because it is expensive.**
+`axi run` *returns* at every approval gate and does not run again until the agent answers with
+`axi respond`, so there is no process to walk up from for exactly as long as a run is parked -
+which is when the dashboard matters most. Without the memory the row would scatter back across
+every session in the repo at the gate, and again for the half hour a finished run stays
+visible. Verified live - with the run parked, `ps` showed only the daemon, and `nmmon status`,
+which is one-shot and has no memory, still reported all three rows. The server polls, so it
+catches `axi run` within a second of it starting and holds the answer.
+
+**Ownership does not change hands between live sessions, and is released when the owner is
+gone.** The first half is the guard against a session that ran a driving command near the end
+of a pipeline taking the row off the session that started it - a sighting from another *live*
+session is not a handover.
+
+The second half exists because the memory above outlives the sessions it names. A session ends
+while its run is parked, which is the ordinary way a pipeline outlives the window that started
+it, and whoever answers the gate next with `axi respond` is the session a human actually needs.
+Held by a dead owner, that run stayed unattributable: the new driver's card showed no pipeline
+at all, and the run fell through to a row with no Focus button - this feature's own failure
+mode inverted, and a confident wrong answer rather than the vague one it replaced. So `release`
+drops any ownership whose session is no longer registered, and it runs *before* the tick's
+sightings, or the new driver would still be refused on the very tick the old owner disappeared.
+
+**A reading we did not get is not evidence.** `prune` forgets runs that have left no-mistakes'
+recency window, so an empty runs list would forget every ownership at once - and the degraded
+`axi status` path returns exactly that from its cache until the first non-blocking call warms
+it. A parked run has no live process to be re-observed from, so one such tick would scatter it
+back across its repo permanently. The prune is therefore skipped on an empty reading, the same
+rule `PollWatch` applies to a `ps` it could not read. A few stale entries until a real reading
+arrives is the cheap side of the trade.
+
 **no-mistakes' own agent sessions are folded into the repo's row, never given one.**
 no-mistakes runs its pipeline steps as Claude sessions in a worktree at
 `~/.no-mistakes/worktrees/<repo-hash>/<run-id>`. They carry the same hooks, so they register
@@ -298,9 +357,11 @@ The tie is `matchRunForAgentCwd`: **the run id is a path segment of the agent's 
 whole segment against ids we already hold, never as a pattern - guessing at the shape of a
 ULID would eventually claim somebody's real directory.
 
-One row per repo, never two. But folding must not swallow the one signal this tool exists to
-give, so **a blocked agent still makes the row blocked and carries its message** - an agent
-sitting on a permission prompt has stalled the pipeline, and only a human can free it.
+One row per repo, never two - and once a run has an owner, that is the owner's row, because the
+folded agent is pipeline state like the step and the parked gate. But folding must not swallow
+the one signal this tool exists to give, so **a blocked agent still makes the row blocked and
+carries its message** - an agent sitting on a permission prompt has stalled the pipeline, and
+only a human can free it.
 
 An agent's block is subject to every disproof a human session's is, and for a sharper reason:
 the hooks fall silent between the permission prompt and the end of the turn either way, but
@@ -558,7 +619,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 384 tests, no network, no dependencies, ~2s
+npm test          # 411 tests, no network, no dependencies, ~2s
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
 
@@ -641,7 +702,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 ## Commands
 
 ```sh
-npm test                       # 384 tests, ~2s
+npm test                       # 411 tests, ~2s
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
 ```

@@ -106,6 +106,70 @@ export function isPipelineCommand(args) {
 }
 
 /**
+ * The subcommands that start or steer a run, as opposed to reading one.
+ *
+ * An allowlist, and it fails the safe way round: a driving verb a later
+ * no-mistakes adds is one we do not recognise, so the run goes unattributed and
+ * the dashboard behaves exactly as it did before attribution existed. The other
+ * mistake - reading `no-mistakes axi status` as ownership - would hand a
+ * pipeline to whichever session merely glanced at it.
+ */
+const DRIVING_COMMANDS = new Set(['run', 'rerun', 'respond', 'abort']);
+
+/** Subcommands that only report. Listed so they stop the scan below. */
+const READING_COMMANDS = new Set(['status', 'runs', 'logs', 'stats', 'doctor', 'attach', 'help']);
+
+/**
+ * Whether a command line is a session *driving* a pipeline run, not just
+ * looking at one.
+ *
+ * This is what settles which of several sessions open on one checkout owns the
+ * run. `matchRunForCwd` cannot: it places a run by repo path, so three sessions
+ * in a repo all match the same one, and the pipeline landed on all three cards
+ * with a Focus button that took you to a window unable to answer the gate.
+ *
+ * The verb is found by scanning rather than by position, because argv puts
+ * global flags before it (`no-mistakes --skip lint axi run`) and free text
+ * after it - `axi run --intent "..."` carries a paragraph of English that
+ * mentions plenty of these words. The real verb always precedes that text, so
+ * the first recognised word wins and anything unrecognised is skipped over.
+ *
+ * @param {string} args
+ * @returns {boolean}
+ */
+export function isRunOwnerCommand(args) {
+  if (!isPipelineCommand(args)) return false;
+  for (const word of String(args).trim().split(/\s+/).slice(1)) {
+    if (word === 'axi') continue; // the agent interface, not a verb
+    if (DRIVING_COMMANDS.has(word)) return true;
+    if (READING_COMMANDS.has(word)) return false;
+  }
+  return false;
+}
+
+/**
+ * Which sessions are driving a run of their own right now.
+ *
+ * The same ancestor walk as everything else here, so a run started by the
+ * agent's own Bash tool is attributed to the session that holds that agent.
+ *
+ * @param {ProcessTable} table
+ * @param {Set<number>} agentPids the `host.pid` of every live session
+ * @returns {Set<number>} agent pids driving a run
+ */
+export function runOwnersBySession(table, agentPids) {
+  /** @type {Set<number>} */
+  const found = new Set();
+  if (agentPids.size === 0) return found;
+  for (const [pid, proc] of table) {
+    if (!isRunOwnerCommand(proc.args)) continue;
+    const owner = walkToAgent(table, pid, agentPids);
+    if (owner !== null) found.add(owner);
+  }
+  return found;
+}
+
+/**
  * Which sessions have a live no-mistakes run under them.
  *
  * A backgrounded pipeline is what makes "Claude is waiting for your input" a
@@ -149,6 +213,8 @@ export class PollWatch {
   #polls = new Map();
   /** @type {Set<number>} */
   #pipelines = new Set();
+  /** @type {Set<number>} */
+  #owners = new Set();
   /** null means never scanned, which is not the same as scanned long ago. */
   #at = null;
   #scanning = false;
@@ -195,6 +261,21 @@ export class PollWatch {
   }
 
   /**
+   * Whether a session is driving a run rather than merely sitting in the repo
+   * one is running in. Third question off the same scan.
+   *
+   * @param {number|null|undefined} agentPid
+   * @param {Set<number>} agentPids every live session's agent pid
+   * @param {number} [now]
+   * @returns {boolean}
+   */
+  ownsRunFor(agentPid, agentPids, now = Date.now()) {
+    this.scan(agentPids, now);
+    if (!agentPid) return false;
+    return this.#owners.has(agentPid);
+  }
+
+  /**
    * Rescan if the last one has aged out. Never awaited.
    *
    * Stamped when the scan goes out rather than when it returns, and from the
@@ -212,6 +293,7 @@ export class PollWatch {
         const table = parseProcessTable(out);
         this.#polls = pollsBySession(table, agentPids);
         this.#pipelines = pipelinesBySession(table, agentPids);
+        this.#owners = runOwnersBySession(table, agentPids);
       })
       .catch(() => {
         // A process table we could not read is not evidence of anything. Keep
@@ -230,9 +312,11 @@ export class PollWatch {
       const table = parseProcessTable(out);
       this.#polls = pollsBySession(table, agentPids);
       this.#pipelines = pipelinesBySession(table, agentPids);
+      this.#owners = runOwnersBySession(table, agentPids);
     } catch {
       this.#polls = new Map();
       this.#pipelines = new Set();
+      this.#owners = new Set();
     }
     this.#at = Date.now();
   }

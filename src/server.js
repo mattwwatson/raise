@@ -19,6 +19,7 @@ import { GitBranch, defaultGitAccess } from './git-branch.js';
 import { LavishState } from './lavish.js';
 import { PollWatch } from './poll-watch.js';
 import { buildRows, summarise } from './dashboard.js';
+import { RunOwners } from './run-owner.js';
 import { focusSession } from './focus/index.js';
 import { checkRequest } from './security.js';
 import { exec as defaultExec, execAsync as defaultExecAsync } from './exec.js';
@@ -96,6 +97,9 @@ export function createMonitorServer({
   const branches = new GitBranch({ files: gitFiles });
   const lavish = new LavishState({ execAsync });
   const polls = new PollWatch({ execAsync });
+  // Outlives a poll on purpose: `axi run` returns at every gate, so the process
+  // that proves ownership is absent for exactly as long as the run is parked.
+  const runOwners = new RunOwners();
   const probe = nmState.probe();
 
   /** @type {Set<import('node:http').ServerResponse>} */
@@ -111,6 +115,26 @@ export function createMonitorServer({
     const { runs, pullRequests, source, warning } = nmState.read({ candidateDirs });
 
     const agentPids = new Set(sessions.map((s) => s.host?.pid).filter(Boolean));
+    // Whose run it is, off the same scan the poll gate and the pipeline check
+    // use. Several sessions can be open on one checkout, and only the one
+    // driving the pipeline should carry it - the others cannot answer its gate,
+    // so summoning anyone to them is a wrong answer with a Focus button
+    // attached. Departed owners let go first, or a new driver's sighting would
+    // be discarded on the very tick the old owner disappeared.
+    //
+    // Guarded on a non-empty reading, exactly as the prune below is: an empty
+    // session list is not evidence that every owner departed, it is also what
+    // `registry.list()` returns when `readdirSync` on the sessions directory
+    // throws - a transient filesystem error rather than a real absence. Letting
+    // one of those release everything would scatter a parked run back across
+    // its repo, the failure this memory exists to prevent, and a parked run has
+    // no live process to be re-observed from. Skipping the release costs
+    // nothing when the list is legitimately empty: there are no session rows
+    // for ownership to affect on such a tick, and prune still retires the entry
+    // once the run leaves the reading.
+    if (sessions.length > 0) runOwners.release(new Set(sessions.map((s) => s.sessionId)));
+    runOwners.observeFrom(sessions, runs, (s) => polls.ownsRunFor(s.host?.pid, agentPids));
+
     const summaries = new Map();
     const reviewUrls = new Map();
     const sessionBranches = new Map();
@@ -143,6 +167,15 @@ export function createMonitorServer({
     }
     transcripts.prune(new Set(sessions.map((s) => s.transcriptPath).filter(Boolean)));
     branches.prune(new Set(candidateDirs));
+    // An empty reading is not evidence that every run ended - it is what the
+    // degraded `axi status` path returns from its cache before the first
+    // non-blocking call has warmed it. Pruning on that would forget every
+    // ownership in one tick, and a parked run has no live process to be
+    // re-observed from, so it would scatter back across its repo for the rest
+    // of its life. Same rule PollWatch applies to a `ps` it could not read: a
+    // reading we did not get is not evidence of anything. A few stale entries
+    // until a real reading arrives is the cheap side of the trade.
+    if (runs.length > 0) runOwners.prune(new Set(runs.map((r) => r.runId)));
 
     const rows = buildRows({
       sessions,
@@ -152,6 +185,7 @@ export function createMonitorServer({
       branches: sessionBranches,
       pullRequests,
       pipelines,
+      runOwners: runOwners.owners,
     });
     return {
       rows,
