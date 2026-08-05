@@ -13,6 +13,7 @@ const session = (overrides = {}) => ({
 const run = (overrides = {}) => ({
   runId: 'r1',
   repoPath: '/Users/x/work/repo',
+  branch: 'main',
   active: true,
   ...overrides,
 });
@@ -138,6 +139,7 @@ test('a session driving from a worktree owns the run in its main checkout', () =
     [run()],
     () => true,
     new Map([['worktree', '/Users/x/work/repo']]),
+    new Map([['worktree', 'main']]),
   );
   assert.deepEqual([...owners.owners], [['r1', 'worktree']]);
 });
@@ -149,6 +151,53 @@ test('a link to a checkout with no run still owns nothing', () => {
     [run()],
     () => true,
     new Map([['worktree', '/Users/x/work/other']]),
+    new Map([['worktree', 'main']]),
+  );
+  assert.equal(owners.owners.size, 0);
+});
+
+test('each worktree driving a run owns the one on its own branch', () => {
+  // Two trees of one checkout, two runs registered against that one path. The
+  // sighting has to resolve exactly as the page resolves it, or the second
+  // tree's genuine `axi run` claims the *first* tree's run, is discarded as
+  // already owned, and the run it was really of is left to fall through to a
+  // bystander - this feature's failure mode, reached through its own fix.
+  const owners = new RunOwners();
+  owners.observeFrom(
+    [
+      session({ sessionId: 'a', cwd: '/Users/x/.treehouse/repo-9f/1/repo' }),
+      session({ sessionId: 'b', cwd: '/Users/x/.treehouse/repo-9f/2/repo' }),
+    ],
+    [run({ runId: 'ra', branch: 'feat/a' }), run({ runId: 'rb', branch: 'feat/b' })],
+    () => true,
+    new Map([
+      ['a', '/Users/x/work/repo'],
+      ['b', '/Users/x/work/repo'],
+    ]),
+    new Map([
+      ['a', 'feat/a'],
+      ['b', 'feat/b'],
+    ]),
+  );
+  assert.deepEqual(
+    [...owners.owners].sort(),
+    [
+      ['ra', 'a'],
+      ['rb', 'b'],
+    ].sort(),
+  );
+});
+
+test('a worktree with no branch of its own claims nothing through the link', () => {
+  // A detached HEAD - Treehouse produces them routinely - has nothing to match
+  // on, and guessing by rank would hand a sibling's run to the wrong session.
+  const owners = new RunOwners();
+  owners.observeFrom(
+    [session({ sessionId: 'detached', cwd: '/Users/x/.treehouse/repo-9f/1/repo' })],
+    [run()],
+    () => true,
+    new Map([['detached', '/Users/x/work/repo']]),
+    new Map([['detached', null]]),
   );
   assert.equal(owners.owners.size, 0);
 });

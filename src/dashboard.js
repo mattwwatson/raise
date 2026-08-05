@@ -183,17 +183,40 @@ export function matchRunForCwd(cwd, runs) {
  * worktree as a repository in its own right, and that run is the more specific
  * answer - the same rule `matchRunForCwd` already applies to nesting.
  *
- * `mainCheckout` is resolved by `GitBranch.linkedCheckoutFor`, since only
- * `.git` knows the two directories are one repository, and reading it is I/O
- * this file may not do.
+ * **Through the link the branch is required, and on the session's own path it
+ * is not.** Every worktree of a checkout resolves to the same main checkout and
+ * no-mistakes registers all of their runs against it, so the link is a
+ * one-to-many edge: resolving it by `matchRunForCwd`'s ranking alone hands one
+ * run to every sibling worktree, and hands each of them the parked one rather
+ * than its own. A worktree exists in order to be on its own branch, and every
+ * run carries the branch it is on, so that is what says which worktree's run it
+ * is. On the session's own path there is nothing to disambiguate and the branch
+ * must *not* narrow it - a session sitting in a checkout keeps showing that
+ * repo's recent pipeline whatever branch it has since moved to.
+ *
+ * A worktree whose branch cannot be read - a detached HEAD, which Treehouse
+ * produces routinely - therefore gets no run through the link at all. That is
+ * the same failing-closed rule that stops a run reached this way lending its
+ * branch: with nothing to match on, a guess would be a confident wrong answer
+ * with a Focus button attached.
+ *
+ * `mainCheckout` and `branch` are resolved by `GitBranch.checkoutFor`, since
+ * only `.git` knows the two directories are one repository, and reading it is
+ * I/O this file may not do.
  *
  * @param {string|null} cwd
  * @param {string|null} mainCheckout the checkout a worktree cwd is linked to
+ * @param {string|null} branch the branch the session's own checkout is on
  * @param {Run[]} runs
  * @returns {Run|null}
  */
-export function matchRunForCheckout(cwd, mainCheckout, runs) {
-  return matchRunForCwd(cwd, runs) || matchRunForCwd(mainCheckout, runs);
+export function matchRunForCheckout(cwd, mainCheckout, branch, runs) {
+  const own = matchRunForCwd(cwd, runs);
+  if (own || !branch) return own;
+  return matchRunForCwd(
+    mainCheckout,
+    runs.filter((r) => r.branch === branch),
+  );
 }
 
 /**
@@ -516,7 +539,9 @@ export function attentionFor({
  * `mainCheckouts` is the same arrangement again: reading a worktree's `.git` to
  * find the checkout it is linked to is filesystem work, and the answer is what
  * places a run started from a worktree. Empty for every session that is not in
- * one, which is the ordinary case outside Treehouse.
+ * one, which is the ordinary case outside Treehouse. It comes off the same
+ * `.git` read as `branches`, which is not only a saving: through the link the
+ * branch is what picks which of that checkout's runs belongs to this worktree.
  *
  * @param {{sessions: Session[], runs: Run[], now?: number,
  *          summaries?: Map<string, import('./transcript.js').TranscriptSummary>,
@@ -596,8 +621,13 @@ export function buildRows({
     // nobody was observed to own stays on every session in its repo, exactly as
     // before, because an unattributed pipeline is better shown three times than
     // not at all.
+    //
+    // The checkout's own branch is resolved first because it is not only shown:
+    // through a worktree's link it is what says which of the checkout's runs is
+    // this worktree's, all of them being registered against the one path.
     const mainCheckout = mainCheckouts.get(session.sessionId) || null;
-    const repo = matchRunForCheckout(session.cwd, mainCheckout, runs);
+    const checkoutBranch = branches.get(session.sessionId) || null;
+    const repo = matchRunForCheckout(session.cwd, mainCheckout, checkoutBranch, runs);
     const owner = repo ? runOwners.get(repo.runId) || null : null;
     const run = !owner || owner === session.sessionId ? repo : null;
     if (run) claimedRuns.add(run.runId);
@@ -619,9 +649,7 @@ export function buildRows({
     // pull request on top. The one place a run may lend a branch is a session
     // sitting in the run's own repo.
     const branch =
-      branches.get(session.sessionId) ||
-      (isInside(session.cwd, repo?.repoPath) ? repo?.branch : null) ||
-      null;
+      checkoutBranch || (isInside(session.cwd, repo?.repoPath) ? repo?.branch : null) || null;
     rows.push({
       id: `session:${session.sessionId}`,
       kind: 'session',

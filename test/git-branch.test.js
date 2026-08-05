@@ -9,15 +9,19 @@ import {
 } from '../src/git-branch.js';
 
 /**
- * A fake filesystem that counts reads, so the cache can be asserted on directly
- * rather than inferred from timing. Entries are either files (text) or
- * directories (`dir: true`).
+ * A fake filesystem that counts reads *and* stats, so the cache can be asserted
+ * on directly rather than inferred from timing. Both counters matter: a cache
+ * hit reads nothing but still stats HEAD, so counting reads alone hides an
+ * accessor that asks twice. Entries are either files (text) or directories
+ * (`dir: true`).
  */
 function fakeFiles(initial = {}) {
   const files = new Map(Object.entries(initial));
   const reads = { count: 0 };
+  const stats = { count: 0 };
   return {
     reads,
+    stats,
     set(path, text, mtimeMs = 1) {
       files.set(path, { text, mtimeMs });
     },
@@ -29,6 +33,7 @@ function fakeFiles(initial = {}) {
     },
     access: {
       stat(path) {
+        stats.count += 1;
         const file = files.get(path);
         if (!file) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
         return { size: file.text.length, mtimeMs: file.mtimeMs, isDirectory: Boolean(file.dir) };
@@ -94,7 +99,7 @@ test('a bare repo has no main checkout, and no-mistakes gate repos are bare', ()
   assert.equal(mainCheckoutFromGitDir(null), null);
 });
 
-test('linkedCheckoutFor names the checkout a worktree session is really in', () => {
+test('checkoutFor names the checkout a worktree session is really in', () => {
   // The bug this exists for: Treehouse puts a session in a worktree at
   // `~/.treehouse/<repo>-<hash>/<n>/<repo>`, and no-mistakes registers the run
   // it starts against the *main* checkout. Nothing about the worktree's path
@@ -103,8 +108,8 @@ test('linkedCheckoutFor names the checkout a worktree session is really in', () 
   files.set('/trees/repo-9f/2/repo/.git', 'gitdir: /Users/x/work/repo/.git/worktrees/repo2\n');
   files.set('/Users/x/work/repo/.git/worktrees/repo2/HEAD', 'ref: refs/heads/feat/thing\n');
   const git = new GitBranch({ files: files.access });
-  assert.equal(git.linkedCheckoutFor('/trees/repo-9f/2/repo'), '/Users/x/work/repo');
-  assert.equal(git.linkedCheckoutFor('/trees/repo-9f/2/repo/src'), '/Users/x/work/repo');
+  assert.equal(git.checkoutFor('/trees/repo-9f/2/repo').mainCheckout, '/Users/x/work/repo');
+  assert.equal(git.checkoutFor('/trees/repo-9f/2/repo/src').mainCheckout, '/Users/x/work/repo');
 });
 
 test('an ordinary checkout is not linked to anywhere else', () => {
@@ -112,23 +117,29 @@ test('an ordinary checkout is not linked to anywhere else', () => {
   files.dir('/repo/.git');
   files.set('/repo/.git/HEAD', 'ref: refs/heads/main\n');
   const git = new GitBranch({ files: files.access });
-  assert.equal(git.linkedCheckoutFor('/repo'), null);
-  assert.equal(git.linkedCheckoutFor('/tmp/not-a-repo'), null);
-  assert.equal(git.linkedCheckoutFor(null), null);
+  assert.equal(git.checkoutFor('/repo').mainCheckout, null);
+  assert.equal(git.checkoutFor('/tmp/not-a-repo').mainCheckout, null);
+  assert.equal(git.checkoutFor(null).mainCheckout, null);
 });
 
-test('the branch and the linked checkout come off one read', () => {
-  // Both are asked once per session per poll. Reading `.git` twice for them
-  // would double the cost of the thing this cache exists to make cheap.
+test('the branch and the linked checkout come off one resolution', () => {
+  // Both are needed once per session per poll, and a separate accessor for each
+  // would stat HEAD twice for one answer's worth of information - a cache hit
+  // reads nothing, but it still stats. Hence one call returning both.
   const files = fakeFiles();
   files.set('/wt/.git', 'gitdir: /repo/.git/worktrees/wt\n');
   files.set('/repo/.git/worktrees/wt/HEAD', 'ref: refs/heads/feat/thing\n');
   const git = new GitBranch({ files: files.access });
 
-  assert.equal(git.branchFor('/wt'), 'feat/thing');
-  assert.equal(git.linkedCheckoutFor('/wt'), '/repo');
-  assert.equal(git.branchFor('/wt'), 'feat/thing');
+  const first = git.checkoutFor('/wt');
+  assert.equal(first.branch, 'feat/thing');
+  assert.equal(first.mainCheckout, '/repo');
   assert.equal(files.reads.count, 2, 'the .git link and its HEAD, once each');
+
+  const statsAfterFirst = files.stats.count;
+  assert.deepEqual(git.checkoutFor('/wt'), first);
+  assert.equal(files.reads.count, 2, 'nothing was read a second time');
+  assert.equal(files.stats.count - statsAfterFirst, 1, 'one stat for both answers, not one each');
 });
 
 test('reads the branch of an ordinary repo', () => {
@@ -136,7 +147,7 @@ test('reads the branch of an ordinary repo', () => {
   files.dir('/repo/.git');
   files.set('/repo/.git/HEAD', 'ref: refs/heads/main\n');
   const git = new GitBranch({ files: files.access });
-  assert.equal(git.branchFor('/repo'), 'main');
+  assert.equal(git.checkoutFor('/repo').branch, 'main');
 });
 
 test('walks up from a subdirectory to find the repo', () => {
@@ -145,7 +156,7 @@ test('walks up from a subdirectory to find the repo', () => {
   files.dir('/repo/.git');
   files.set('/repo/.git/HEAD', 'ref: refs/heads/main\n');
   const git = new GitBranch({ files: files.access });
-  assert.equal(git.branchFor('/repo/src/deeply/nested'), 'main');
+  assert.equal(git.checkoutFor('/repo/src/deeply/nested').branch, 'main');
 });
 
 test('resolves a worktree, whose .git is a file pointing elsewhere', () => {
@@ -155,14 +166,14 @@ test('resolves a worktree, whose .git is a file pointing elsewhere', () => {
   files.set('/trees/ab12/thing/.git', 'gitdir: /repo/.git/worktrees/thing\n');
   files.set('/repo/.git/worktrees/thing/HEAD', 'ref: refs/heads/feat/hexes\n');
   const git = new GitBranch({ files: files.access });
-  assert.equal(git.branchFor('/trees/ab12/thing'), 'feat/hexes');
+  assert.equal(git.checkoutFor('/trees/ab12/thing').branch, 'feat/hexes');
 });
 
 test('a directory outside any repo has no branch', () => {
   const files = fakeFiles();
   const git = new GitBranch({ files: files.access });
-  assert.equal(git.branchFor('/tmp/scratch'), null);
-  assert.equal(git.branchFor(null), null);
+  assert.equal(git.checkoutFor('/tmp/scratch').branch, null);
+  assert.equal(git.checkoutFor(null).branch, null);
 });
 
 test('answers from cache while HEAD has not moved', () => {
@@ -173,9 +184,9 @@ test('answers from cache while HEAD has not moved', () => {
   files.set('/repo/.git/HEAD', 'ref: refs/heads/main\n');
   const git = new GitBranch({ files: files.access });
 
-  assert.equal(git.branchFor('/repo'), 'main');
-  assert.equal(git.branchFor('/repo'), 'main');
-  assert.equal(git.branchFor('/repo'), 'main');
+  assert.equal(git.checkoutFor('/repo').branch, 'main');
+  assert.equal(git.checkoutFor('/repo').branch, 'main');
+  assert.equal(git.checkoutFor('/repo').branch, 'main');
   assert.equal(files.reads.count, 1);
 });
 
@@ -184,10 +195,10 @@ test('picks up a branch change', () => {
   files.dir('/repo/.git');
   files.set('/repo/.git/HEAD', 'ref: refs/heads/main\n', 1);
   const git = new GitBranch({ files: files.access });
-  assert.equal(git.branchFor('/repo'), 'main');
+  assert.equal(git.checkoutFor('/repo').branch, 'main');
 
   files.set('/repo/.git/HEAD', 'ref: refs/heads/feat/new\n', 2);
-  assert.equal(git.branchFor('/repo'), 'feat/new');
+  assert.equal(git.checkoutFor('/repo').branch, 'feat/new');
 });
 
 test('a directory known not to be a repo is not walked again', () => {
@@ -204,9 +215,9 @@ test('a directory known not to be a repo is not walked again', () => {
     readText: () => assert.fail('nothing to read'),
   };
   const git = new GitBranch({ files: counting });
-  git.branchFor('/tmp/a/b/c');
+  git.checkoutFor('/tmp/a/b/c');
   const afterFirst = stats.length;
-  git.branchFor('/tmp/a/b/c');
+  git.checkoutFor('/tmp/a/b/c');
   assert.equal(stats.length, afterFirst, 'the second ask cost nothing');
 });
 
@@ -215,11 +226,11 @@ test('a deleted worktree is re-resolved rather than answered from cache', () => 
   files.set('/wt/.git', 'gitdir: /repo/.git/worktrees/wt\n');
   files.set('/repo/.git/worktrees/wt/HEAD', 'ref: refs/heads/gone\n');
   const git = new GitBranch({ files: files.access });
-  assert.equal(git.branchFor('/wt'), 'gone');
+  assert.equal(git.checkoutFor('/wt').branch, 'gone');
 
   files.remove('/repo/.git/worktrees/wt/HEAD');
   files.remove('/wt/.git');
-  assert.equal(git.branchFor('/wt'), null);
+  assert.equal(git.checkoutFor('/wt').branch, null);
 });
 
 test('prune forgets directories whose sessions have gone', () => {
@@ -227,10 +238,10 @@ test('prune forgets directories whose sessions have gone', () => {
   files.dir('/repo/.git');
   files.set('/repo/.git/HEAD', 'ref: refs/heads/main\n');
   const git = new GitBranch({ files: files.access });
-  assert.equal(git.branchFor('/repo'), 'main');
+  assert.equal(git.checkoutFor('/repo').branch, 'main');
   assert.equal(files.reads.count, 1);
 
   git.prune(new Set(['/other']));
-  assert.equal(git.branchFor('/repo'), 'main');
+  assert.equal(git.checkoutFor('/repo').branch, 'main');
   assert.equal(files.reads.count, 2, 'the entry was dropped, so it had to be read again');
 });

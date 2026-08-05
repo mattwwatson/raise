@@ -411,13 +411,33 @@ all, while an idle `main` card claimed the run, on a branch it was not on, with 
 the one window that could not answer the gate. Ownership's own failure mode, reached by the
 route it does not cover.
 
-`GitBranch.linkedCheckoutFor` reads the link off the same `.git` the branch already comes
-from, so it costs nothing extra, and `matchRunForCheckout` tries the session's own directory
-first. Three things it deliberately does not do:
+`GitBranch.checkoutFor` reads the link off the same `.git` the branch already comes from, and
+returns both from one resolution - not two accessors over one cache, because a cache *hit*
+still stats HEAD, so asking separately costs a second stat per session per second for one
+answer's worth of information. `matchRunForCheckout` tries the session's own directory first.
+Five things it deliberately does not do:
 
 - **the link is a fallback, never an override.** no-mistakes will register a worktree as a
   repository in its own right, and that run is the more specific answer - the same rule
   `matchRunForCwd` already applies to nesting.
+- **it does not resolve the link by rank, because the link is one-to-many.** Every worktree of
+  a checkout resolves to the same path and no-mistakes registers all of their runs against it,
+  so `matchRunForCwd`'s ranking - parked, then active, then most recent - hands one run to
+  every sibling tree and hands each of them somebody else's. Two runs on one repo inside the
+  thirty-minute window is an ordinary half-hour here. A worktree exists in order to be on its
+  own branch and every run carries one, so **through the link the branch is required**, and a
+  worktree with no branch to match on - a detached HEAD, which Treehouse produces routinely -
+  gets no run at all rather than a guess.
+
+  The branch requirement stops at the link. A session physically inside the checkout still
+  matches by repo path alone, whatever branch it has since moved to, because that row is meant
+  to keep showing the repo's recent pipeline. Narrowing there would take the pipeline off
+  every session that changed branch after running it.
+
+  `RunOwners.observeFrom` resolves a sighting through the same function for the same reason it
+  was given the link in the first place: if the two disagree about which run was seen, a
+  genuine `axi run` from the second tree claims the first tree's run, is discarded as already
+  owned, and the run it was really of falls through to a bystander.
 - **only a common dir named `.git` yields a checkout.** A linked worktree's admin directory is
   always `<common dir>/worktrees/<name>`, and that dir is called `.git` only when the
   repository has a working tree at all. no-mistakes' own gate repos are bare
@@ -434,7 +454,10 @@ first. Three things it deliberately does not do:
   exists to be on another branch. Caught the moment the link started matching: a tree on a
   detached HEAD, legitimately branchless, took the name of the *sibling* tree's branch - and
   since the pull request is gated on `run.branch === branch`, would have been handed that
-  branch's review as well.
+  branch's review as well. Requiring the branch through the link now shuts the same door from
+  the other side, since a branchless worktree reaches no run to borrow from; the guard stays
+  because the two rules are independent, and it is what keeps this true for any run reached by
+  a route other than the session's own cwd.
 
 **no-mistakes' own agent sessions are folded into the repo's row, never given one.**
 no-mistakes runs its pipeline steps as Claude sessions in a worktree at
@@ -710,7 +733,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 434 tests, no network, no dependencies, ~2s
+npm test          # 439 tests, no network, no dependencies, ~2s
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
 
@@ -793,7 +816,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 ## Commands
 
 ```sh
-npm test                       # 434 tests, ~2s
+npm test                       # 439 tests, ~2s
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
 ```

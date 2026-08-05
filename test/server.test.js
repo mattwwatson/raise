@@ -601,18 +601,28 @@ test('a pipeline driven from a worktree lands on the worktree, not on the checko
   // is where a worktree's repository resolves to, so nothing but the worktree's
   // own `.git` ties the session to it. Real files here, because the point of
   // the test is that the link is read.
+  //
+  // Two trees and two runs, because the link is a one-to-many edge and this is
+  // where the wiring of the branch into `observeFrom` shows: a sighting that
+  // resolved to the wrong one of a checkout's runs would be discarded as
+  // already owned, and the run it was really of would land on a bystander.
   const { dir, cleanup } = scratch();
   const previousHome = process.env.NMMON_HOME;
   process.env.NMMON_HOME = dir;
   const repo = join(dir, 'repo');
   const worktree = join(dir, 'trees', '2', 'repo');
+  const sibling = join(dir, 'trees', '1', 'repo');
   let monitor = null;
   try {
     mkdirSync(join(repo, '.git', 'worktrees', 'repo2'), { recursive: true });
+    mkdirSync(join(repo, '.git', 'worktrees', 'repo1'), { recursive: true });
     writeFileSync(join(repo, '.git', 'HEAD'), 'ref: refs/heads/main\n');
     writeFileSync(join(repo, '.git', 'worktrees', 'repo2', 'HEAD'), 'ref: refs/heads/feat/thing\n');
+    writeFileSync(join(repo, '.git', 'worktrees', 'repo1', 'HEAD'), 'ref: refs/heads/feat/other\n');
     mkdirSync(worktree, { recursive: true });
     writeFileSync(join(worktree, '.git'), `gitdir: ${join(repo, '.git', 'worktrees', 'repo2')}\n`);
+    mkdirSync(sibling, { recursive: true });
+    writeFileSync(join(sibling, '.git'), `gitdir: ${join(repo, '.git', 'worktrees', 'repo1')}\n`);
 
     const dbPath = join(dir, 'state.sqlite');
     const db = new DatabaseSync(dbPath);
@@ -625,20 +635,31 @@ test('a pipeline driven from a worktree lands on the worktree, not on the checko
         ' findings_json TEXT, last_activity TEXT, last_activity_at INTEGER, log_path TEXT);',
     );
     const seconds = Math.floor(Date.now() / 1000);
-    // Registered against the main checkout, exactly as no-mistakes records it,
-    // on the branch only the worktree is on.
+    // Both runs are registered against the main checkout, exactly as
+    // no-mistakes records them, each on the branch only its own worktree is on.
+    // Two at once in one repo is an ordinary half-hour on this machine, and it
+    // is what the link alone cannot tell apart: every worktree resolves to this
+    // one path, so without the branch the parked run would take both cards.
     db.prepare('INSERT INTO repos VALUES (?, ?)').run('repo-1', repo);
     db.prepare(
       'INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL)',
     ).run('run-1', 'repo-1', 'feat/thing', 'running', seconds, seconds, seconds);
+    db.prepare(
+      'INSERT INTO runs VALUES (?, ?, ?, ?, NULL, ?, ?, NULL, NULL, NULL, NULL, NULL)',
+    ).run('run-2', 'repo-1', 'feat/other', 'running', seconds, seconds);
     db.close();
 
+    // The registry prunes a session whose agent pid is not alive, so all three
+    // are real. pid 1 is always there, and stands in for the second worktree's
+    // agent - only its liveness and its place in the tree below matter.
     const driverPid = process.pid;
+    const siblingPid = 1;
     const neighbourPid = process.ppid;
     const ps = [
       '  100     1 /Applications/iTerm.app/Contents/MacOS/iTerm2',
       `  ${driverPid}   100 claude`,
       `  999999   ${driverPid} /usr/local/bin/no-mistakes axi run --intent "ship it"`,
+      `  999998   ${siblingPid} /usr/local/bin/no-mistakes axi run --intent "ship the other"`,
       `  ${neighbourPid}   100 claude`,
     ].join('\n');
 
@@ -655,6 +676,7 @@ test('a pipeline driven from a worktree lands on the worktree, not on the checko
 
     for (const [sessionId, pid, cwd] of [
       ['worktree', driverPid, worktree],
+      ['sibling', siblingPid, sibling],
       ['checkout', neighbourPid, repo],
     ]) {
       const registered = await fetch(`http://127.0.0.1:${port}/event`, {
@@ -676,15 +698,23 @@ test('a pipeline driven from a worktree lands on the worktree, not on the checko
 
     const body = await (await fetch(`http://127.0.0.1:${port}/state?t=test-token`)).json();
     const byId = new Map(body.rows.map((r) => [r.sessionId, r]));
+    // Each tree carries its own run, on its own branch. Resolving the link by
+    // rank instead would give both trees the parked one and leave the other
+    // run unowned, on a row with no window behind it.
     assert.equal(byId.get('worktree')?.run?.runId, 'run-1');
     assert.equal(byId.get('worktree')?.branch, 'feat/thing');
+    assert.equal(byId.get('sibling')?.run?.runId, 'run-2');
+    assert.equal(byId.get('sibling')?.branch, 'feat/other');
     assert.equal(byId.get('checkout')?.run, null);
     assert.equal(byId.get('checkout')?.branch, 'main');
-    // Two cards on one repo, still tellable apart: the run match must not lend
-    // the worktree the checkout's path, or both would just read "repo".
+    // Three cards on one repo, still tellable apart: the run match must not
+    // lend a worktree the checkout's path, or they would all just read "repo".
     assert.equal(byId.get('worktree')?.title, '2/repo');
+    assert.equal(byId.get('sibling')?.title, '1/repo');
     assert.equal(byId.get('checkout')?.title, `${basename(dir)}/repo`);
-    assert.equal(body.rows.length, 2);
+    // And neither run is also left over as a row of its own that nobody can
+    // focus - the sessions between them account for both.
+    assert.equal(body.rows.length, 3);
   } finally {
     await monitor?.stop();
     if (previousHome === undefined) delete process.env.NMMON_HOME;

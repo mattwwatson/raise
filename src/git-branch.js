@@ -17,7 +17,7 @@
  * not run one at all. `.git/HEAD` is one small file that says the same thing,
  * so it is read directly and cached on mtime, exactly like the transcript tail.
  *
- * The second answer, `linkedCheckoutFor`, exists because a run started in a
+ * The second answer, the linked checkout, exists because a run started in a
  * worktree is registered by no-mistakes against the *main* checkout - that is
  * the path a worktree's repo resolves to - while the session reporting itself
  * to us is sitting in the worktree. `matchRunForCwd` places a run by cwd
@@ -25,6 +25,11 @@
  * pipeline showed no pipeline and the run fell through to whichever idle
  * session happened to be open on the main checkout. Only this file knows the
  * two are the same repo, and it already reads the one thing that says so.
+ *
+ * Both answers come back from one call, because two accessors over one cache
+ * are still two stats of the same HEAD per session per poll - and callers need
+ * them together anyway, the branch being what picks which of a checkout's runs
+ * a worktree session is the one driving.
  */
 
 import { readFileSync, statSync } from 'node:fs';
@@ -116,7 +121,7 @@ export function mainCheckoutFromGitDir(gitDir) {
 export class GitBranch {
   /**
    * `headPath` is null for a directory that is not in a repo, which is cached
-   * like any other answer - see `branchFor`. `mainCheckout` is null for every
+   * like any other answer - see `checkoutFor`. `mainCheckout` is null for every
    * directory that is not in a linked worktree, which is most of them.
    *
    * @typedef {object} Resolved
@@ -136,40 +141,36 @@ export class GitBranch {
   }
 
   /**
-   * The branch a directory is checked out on, or null.
+   * What a directory is checked out on, and what it is linked to.
    *
-   * One stat on the happy path: a HEAD that has not moved cannot have changed
-   * branch. A directory that turned out not to be in a repo is remembered as
-   * such rather than re-walked every second - so a `git init` inside a live
+   * `branch` is null for a detached HEAD, for a directory that is not in a repo
+   * at all, and for a HEAD that could not be read. `mainCheckout` is null for
+   * every directory that is not in a linked worktree, which is most of them.
+   *
+   * One stat on the happy path, for both answers together: a HEAD that has not
+   * moved cannot have changed branch, and cannot have changed which repository
+   * it belongs to either. Asking for the two separately would stat it twice per
+   * session per poll, which is why there is one accessor rather than two.
+   *
+   * A directory that turned out not to be in a repo is remembered as such
+   * rather than re-walked every second - so a `git init` inside a live
    * session's directory is not picked up until the session restarts. That is
    * worth the twenty-odd stats a second it saves, since a session's checkout
    * does not usually come into existence underneath it.
+   *
+   * The link is deliberately *only* the link: a worktree no-mistakes registered
+   * in its own right is still the more specific answer, so callers try the
+   * session's own directory first and fall back to this.
    *
    * Never throws. A directory that has been deleted, or a HEAD that cannot be
    * read, is a session with no branch, which is still a session.
    *
    * @param {string|null} dir
-   * @returns {string|null}
+   * @returns {{branch: string|null, mainCheckout: string|null}}
    */
-  branchFor(dir) {
-    return this.#resolve(dir).branch;
-  }
-
-  /**
-   * The checkout this directory's worktree is linked to, or null when it is not
-   * in one. Served from the same read as `branchFor`, so asking both costs
-   * nothing extra.
-   *
-   * This is what lets a run be matched to a session working in a worktree. It
-   * is deliberately *only* the link: a worktree no-mistakes registered in its
-   * own right is still the more specific answer, so callers try the session's
-   * own directory first and fall back to this.
-   *
-   * @param {string|null} dir
-   * @returns {string|null}
-   */
-  linkedCheckoutFor(dir) {
-    return this.#resolve(dir).mainCheckout;
+  checkoutFor(dir) {
+    const { branch, mainCheckout } = this.#resolve(dir);
+    return { branch, mainCheckout };
   }
 
   /**

@@ -454,6 +454,10 @@ test('a run started in a worktree belongs to the worktree session', () => {
     // worktree, so only the link in `.git` can tie the two together.
     runs: [run({ runId: 'r1', parked: true, branch: 'feat/thing' })],
     mainCheckouts: new Map([['worktree', '/Users/x/work/repo']]),
+    branches: new Map([
+      ['worktree', 'feat/thing'],
+      ['main', 'main'],
+    ]),
     runOwners: new Map([['r1', 'worktree']]),
     now: 5000,
   });
@@ -474,8 +478,12 @@ test('a worktree session keeps its own path, so two checkouts stay tellable apar
       session({ sessionId: 'worktree', cwd: '/Users/x/.treehouse/repo-9f/2/repo' }),
       session({ sessionId: 'main', cwd: '/Users/x/work/repo' }),
     ],
-    runs: [run({ runId: 'r1' })],
+    runs: [run({ runId: 'r1', branch: 'feat/thing' })],
     mainCheckouts: new Map([['worktree', '/Users/x/work/repo']]),
+    branches: new Map([
+      ['worktree', 'feat/thing'],
+      ['main', 'main'],
+    ]),
     now: 5000,
   });
   const byId = new Map(rows.map((r) => [r.sessionId, r]));
@@ -488,13 +496,15 @@ test('a worktree session keeps its own path, so two checkouts stay tellable apar
   assert.equal(byId.get('main').title, 'work/repo');
 });
 
-test('a run reached through a worktree link may not lend its branch', () => {
-  // Caught on the live dashboard the moment the link started matching: a
-  // Treehouse tree on a detached HEAD has no branch of its own, and fell
-  // straight through to the run's - naming the branch of the *sibling* tree
-  // driving the pipeline, and taking that branch's pull request with it. A
-  // worktree is on another branch by definition, so the run's is never a
-  // second-best answer here; it is a known-wrong one.
+test('a worktree with no branch of its own gets nothing through the link', () => {
+  // Treehouse leaves trees on a detached HEAD routinely, and the branch is the
+  // only thing that says which of a checkout's runs is this worktree's. With
+  // none, the honest answer is no run - and the failure it fails closed against
+  // was seen live: the tree fell straight through to the run's branch, naming
+  // the branch of the *sibling* tree driving the pipeline, and would have taken
+  // that branch's pull request with it. A worktree is on another branch by
+  // definition, so a run reached this way is never a second-best answer; it is
+  // a known-wrong one.
   const rows = buildRows({
     sessions: [session({ sessionId: 'detached', cwd: '/Users/x/.treehouse/repo-9f/1/repo' })],
     runs: [run({ runId: 'r1', branch: 'feat/thing', prUrl: 'https://github.com/x/repo/pull/9' })],
@@ -502,9 +512,98 @@ test('a run reached through a worktree link may not lend its branch', () => {
     branches: new Map([['detached', null]]),
     now: 5000,
   });
+  const row = rows.find((r) => r.kind === 'session');
+  assert.equal(row.run, null);
+  assert.equal(row.branch, null);
+  assert.equal(row.pr, null);
+});
+
+test('two runs on one checkout land on the worktrees that started them', () => {
+  // The live shape: two Treehouse trees of one repo, each driving its own
+  // pipeline, both runs registered against the same main checkout. Resolving
+  // the link by recency or parkedness alone hands the parked run to both trees
+  // and leaves the other with no pipeline at all - the failure the link was
+  // added to fix, reproduced through the link. Ownership is deliberately empty
+  // here: `nmmon status` is one-shot and has no memory of it, so the branch has
+  // to be what separates them.
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'a', cwd: '/Users/x/.treehouse/repo-9f/1/repo' }),
+      session({ sessionId: 'b', cwd: '/Users/x/.treehouse/repo-9f/2/repo' }),
+    ],
+    runs: [
+      run({ runId: 'ra', branch: 'feat/a', parked: true, parkedSince: 1000 }),
+      run({ runId: 'rb', branch: 'feat/b', updatedAt: 2000 }),
+    ],
+    mainCheckouts: new Map([
+      ['a', '/Users/x/work/repo'],
+      ['b', '/Users/x/work/repo'],
+    ]),
+    branches: new Map([
+      ['a', 'feat/a'],
+      ['b', 'feat/b'],
+    ]),
+    runOwners: new Map(),
+    now: 5000,
+  });
+  const byId = new Map(rows.filter((r) => r.kind === 'session').map((r) => [r.sessionId, r]));
+  assert.equal(byId.get('a').run?.runId, 'ra');
+  assert.equal(byId.get('b').run?.runId, 'rb');
+  // Neither run is left over as a row nobody can focus.
+  assert.deepEqual(
+    rows.filter((r) => r.kind === 'run').map((r) => r.id),
+    [],
+  );
+});
+
+test('an unowned run does not fan out across a checkout\'s other worktrees', () => {
+  // Every worktree of a checkout resolves to the same path, so the link is a
+  // one-to-many edge: without the branch, one parked run would take over every
+  // sibling tree's card - its step, its gate, its folded agent and a Focus
+  // button to a window that cannot answer it. Ownership must not be what saves
+  // this, hence an empty map.
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'driver', cwd: '/Users/x/.treehouse/repo-9f/2/repo', state: 'idle' }),
+      session({ sessionId: 'sibling', cwd: '/Users/x/.treehouse/repo-9f/1/repo', state: 'idle' }),
+      session({ sessionId: 'checkout', cwd: '/Users/x/work/repo', state: 'idle' }),
+    ],
+    runs: [run({ runId: 'r1', parked: true, branch: 'feat/thing' })],
+    mainCheckouts: new Map([
+      ['driver', '/Users/x/work/repo'],
+      ['sibling', '/Users/x/work/repo'],
+    ]),
+    branches: new Map([
+      ['driver', 'feat/thing'],
+      ['sibling', 'feat/other'],
+      ['checkout', 'main'],
+    ]),
+    runOwners: new Map(),
+    now: 5000,
+  });
+  const byId = new Map(rows.filter((r) => r.kind === 'session').map((r) => [r.sessionId, r]));
+  assert.equal(byId.get('driver').run?.runId, 'r1');
+  assert.equal(byId.get('sibling').run, null);
+  assert.equal(byId.get('sibling').attention, 'idle');
+  // The session physically inside the checkout is the deliberate exception: a
+  // run is placed there by repo path alone, whatever branch the checkout has
+  // since moved to, so it keeps showing its repo's recent pipeline.
+  assert.equal(byId.get('checkout').run?.runId, 'r1');
+});
+
+test('a session inside the checkout keeps the repo\'s run on another branch', () => {
+  // The rule the link narrows must not narrow here. `matchRunForCwd` places a
+  // run by repo path alone on purpose - the row keeps showing the repo's recent
+  // pipeline - so a branch requirement on this path would take the pipeline off
+  // every session that had switched branch since it ran.
+  const rows = buildRows({
+    sessions: [session({ sessionId: 's1', cwd: '/Users/x/work/repo/src' })],
+    runs: [run({ runId: 'r1', branch: 'feat/thing' })],
+    branches: new Map([['s1', 'main']]),
+    now: 5000,
+  });
   assert.equal(rows[0].run?.runId, 'r1');
-  assert.equal(rows[0].branch, null);
-  assert.equal(rows[0].pr, null);
+  assert.equal(rows[0].branch, 'main');
 });
 
 test('a session inside the run\'s own repo still falls back to the run\'s branch', () => {

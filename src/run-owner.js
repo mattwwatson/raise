@@ -71,18 +71,28 @@ export class RunOwners {
    * along, and the sighting was discarded here because a worktree's cwd matches
    * no run by prefix - so the run stayed unowned and landed on a bystander.
    *
+   * The branch is part of that match, which is why it is asked for here rather
+   * than left to the page. Sibling worktrees of one checkout all resolve to the
+   * same path, so without it a genuine sighting from the worktree driving the
+   * *second* run resolves to the first, is discarded as already owned, and the
+   * run it was actually of is left to fall through to a bystander - the very
+   * failure the link was added to fix, reached through the link.
+   *
    * @param {Session[]} sessions every live session
    * @param {Run[]} runs the current reading
    * @param {(session: Session) => boolean} isDriving whether the process table
    *   caught this session driving a run
    * @param {Map<string, string|null>} [mainCheckouts] session id -> the checkout
-   *   a worktree session is linked to, from `GitBranch.linkedCheckoutFor`
+   *   a worktree session is linked to, from `GitBranch.checkoutFor`
+   * @param {Map<string, string|null>} [branches] session id -> the branch its
+   *   own checkout is on, from the same read
    */
-  observeFrom(sessions, runs, isDriving, mainCheckouts = new Map()) {
+  observeFrom(sessions, runs, isDriving, mainCheckouts = new Map(), branches = new Map()) {
     for (const session of sessions) {
       if (!isDriving(session)) continue;
       const linked = mainCheckouts.get(session.sessionId) || null;
-      const owned = matchRunForCheckout(session.cwd, linked, runs);
+      const branch = branches.get(session.sessionId) || null;
+      const owned = matchRunForCheckout(session.cwd, linked, branch, runs);
       if (owned?.active) this.observe(owned.runId, session.sessionId);
     }
   }
