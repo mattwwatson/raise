@@ -1332,7 +1332,12 @@
             if (!wantsYou(row) || lastBlocked.has(row.id)) continue;
             const review = row.attention === 'review';
             const n = new Notification(
-              row.title + (review ? ' wants your review' : ' needs you'),
+              // In the title rather than the body, because the body already
+              // carries the reason and two identically titled notifications for
+              // one repo are indistinguishable before you read either.
+              row.title +
+                (row.sessionName ? ' - ' + row.sessionName : '') +
+                (review ? ' wants your review' : ' needs you'),
               {
                 body: review
                   ? row.summary || 'A review page is waiting for you'

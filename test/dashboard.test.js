@@ -273,6 +273,7 @@ test('an unnamed session, and a run with no session, carry no name at all', () =
     now: 5000,
     summaries: new Map([['s1', { title: 't', mode: null, activity: null, lavishFile: null }]]),
   });
+  assert.equal(rows.length, 2);
   for (const row of rows) assert.equal(row.sessionName, null);
 });
 
