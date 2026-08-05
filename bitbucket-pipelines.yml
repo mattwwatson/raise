@@ -24,17 +24,13 @@ definitions:
   steps:
     - step: &test-and-typecheck
         name: Tests and typecheck
-        caches:
-          - node
         script:
           - npm ci
           - npm test
           - npm run typecheck
 
 pipelines:
-  # Every pull request, which is what the no-mistakes CI step watches. Defining
-  # this means `default` does not also fire for a branch with an open PR, so a
-  # push does not pay for two identical runs.
+  # Every pull request, which is what the no-mistakes CI step watches.
   pull-requests:
     '**':
       - step: *test-and-typecheck
@@ -44,3 +40,14 @@ pipelines:
   branches:
     main:
       - step: *test-and-typecheck
+
+  # The backstop, for the pushes neither of the above is guaranteed to see: a
+  # branch with no open pull request, and a pull request whose merge with main
+  # cannot be produced - a pull-request pipeline builds that merge, so the
+  # conflicted PR this file exists to catch is exactly the case that might
+  # register no check at all. Bitbucket runs a pull-request pipeline *in
+  # addition to* `default` rather than instead of it, so a branch with an open
+  # PR now pays for two identical runs; that duplicate is the price of the
+  # backstop and is accepted knowingly.
+  default:
+    - step: *test-and-typecheck
