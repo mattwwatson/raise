@@ -827,7 +827,10 @@ npm test          # 449 tests, no network, no dependencies, ~2s
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
 
-Both must pass before anything is done.
+Both must pass before anything is done, and `bitbucket-pipelines.yml` runs the same two on
+every pull request, on `main`, and on any other branch push - nothing else, on Node 24 only.
+Why there is no linter, no coverage and no second Node version is in that file's own comments;
+renaming either npm script means changing it there too.
 
 - **Reproduce a bug as a test first**, then fix what the test exposes.
 - Tests are `node:test` + `node:assert/strict`, one file per module, named after the
