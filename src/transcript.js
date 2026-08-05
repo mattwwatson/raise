@@ -10,9 +10,10 @@
  * Claude Code already writes what we need into its transcript, so nothing here
  * is inferred from prose:
  *
- *   ai-title    a generated name for the session, refreshed as it goes
- *   mode        normal, plan, and so on
- *   tool_use    every tool call, with the id its result later refers back to
+ *   ai-title      a generated name for the session, refreshed as it goes
+ *   custom-title  the name a human gave it, with `/rename`
+ *   mode          normal, plan, and so on
+ *   tool_use      every tool call, with the id its result later refers back to
  *
  * The last tool_use with no matching tool_result is the one running *now* -
  * that is the whole trick, and it is what makes the difference between "this
@@ -36,6 +37,9 @@
  *
  * @typedef {object} TranscriptSummary
  * @property {string|null} title Claude's own name for the session
+ * @property {string|null} sessionName the name a human gave the session -
+ *   `/rename` in Claude Code, `/name` in pi - which is a statement of intent
+ *   rather than a guess at one
  * @property {string|null} mode 'normal', 'plan', ... null when never recorded
  * @property {string|null} activity what it is doing right now, in words, or
  *   null when it is between tools - thinking, or writing a reply
@@ -75,6 +79,15 @@
  * of every length, because Claude Code rewrites the title and mode on each
  * turn. 128KB is four times that: enough headroom for a long tool-heavy stretch
  * without ever reading a whole multi-megabyte file.
+ *
+ * The session name rides on that same guarantee rather than having one of its
+ * own. `/rename` writes its `custom-title` record once, near the start of a long
+ * session - far outside this window - but Claude Code re-appends it with every
+ * `ai-title` flush, within a few hundred bytes of one. Measured on a 1.3MB
+ * transcript: flushes every ~40KB, worst gap 59KB, and a `custom-title` beside
+ * each of the three since the rename. It is a fact about Claude Code, not about
+ * us: if the name ever stops appearing on a card whose title still updates,
+ * that re-appending is what changed.
  */
 export const TAIL_BYTES = 128 * 1024;
 
@@ -553,6 +566,10 @@ export function summariseTranscript(records, branch = null) {
     running?.name === 'Bash' ? lavishPollTarget(running.input?.command) : null;
   return {
     title: lastOf(records, 'ai-title', 'aiTitle'),
+    // Not proof that `/rename` was typed - a fork writes "<name> (fork)" and a
+    // resumed session carries its name forward - but all three are the name
+    // Claude Code itself displays, which is the thing worth showing.
+    sessionName: lastOf(records, 'custom-title', 'customTitle'),
     mode: lastOf(records, 'mode', 'mode'),
     activity: describeToolUse(running),
     lavishFile,
@@ -564,6 +581,7 @@ export function summariseTranscript(records, branch = null) {
 /** A summary that claims nothing, for a session with no readable transcript. */
 export const EMPTY_SUMMARY = Object.freeze({
   title: null,
+  sessionName: null,
   mode: null,
   activity: null,
   lavishFile: null,

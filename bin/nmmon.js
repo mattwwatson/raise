@@ -367,9 +367,15 @@ async function cmdStatus() {
           ? yellow
           : dim;
     const step = row.run?.step ? ` ${dim(`step ${row.run.step.name}`)}` : '';
-    console.log(
-      `${colour(row.attentionLabel.padEnd(26))} ${bold(row.title)} ${dim(row.branch || '')}${step}`,
-    );
+    // Same place as on the page - between the repo and the branch - so the two
+    // tell one story about which session is which. The separator is the one
+    // thing the page does without: there the name is prose beside a monospace
+    // branch and needs no help, while here both are dimmed alike and would run
+    // together into one string. It is only ever between the two, so a row
+    // missing either does not grow a dangling dot.
+    const identity = [row.sessionName, row.branch].filter(Boolean).join(' · ');
+    const named = identity ? ` ${dim(identity)}` : '';
+    console.log(`${colour(row.attentionLabel.padEnd(26))} ${bold(row.title)}${named}${step}`);
     if (row.message) console.log(`  ${dim(row.message)}`);
     // The summary is what the step line already says when there is a pipeline.
     if (row.summary && !row.run?.step) console.log(`  ${dim(row.summary)}`);

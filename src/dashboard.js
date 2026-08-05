@@ -45,6 +45,8 @@ import { pullRequestNumber } from './nm-state.js';
  * @property {string} title the repo name, grown into a path only on collision
  * @property {string|null} titlePath the path `title` was derived from, which is
  *   what disambiguation grows
+ * @property {string|null} sessionName the name a human gave this session, in
+ *   either agent; null unless one was set, which is most of the time
  * @property {string|null} branch
  * @property {Attention} attention
  * @property {string} attentionLabel `attention`, in words
@@ -707,6 +709,11 @@ export function buildRows({
         (repo?.repoName && isInside(session.cwd, repo.repoPath)
           ? repo.repoPath
           : session.cwd) || null,
+      // What the human called it, which is the only thing that tells apart two
+      // sessions on the same repo and the same branch. Deliberately not fed to
+      // `disambiguateTitles`: that grows a path until two *places* differ, and a
+      // name that happens to be unique must not stop it.
+      sessionName: summary?.sessionName || null,
       branch,
       attention,
       attentionLabel: attentionLabel(attention),
@@ -788,6 +795,8 @@ export function buildRows({
       cwd: run.repoPath,
       title: run.repoName,
       titlePath: run.repoPath || null,
+      // Nobody named this: there is no session behind it to have been named.
+      sessionName: null,
       branch: run.branch,
       attention,
       attentionLabel: attentionLabel(attention),

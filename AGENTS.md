@@ -180,6 +180,37 @@ summary is quoted rather than inferred. Doing it in the hook instead would mean 
 `PreToolUse`/`PostToolUse` pair firing a localhost POST inside the user's editing loop on
 every single tool call, to learn something already on disk.
 
+**The name you gave a session is identity, so it goes on line 1 and not in `.meta`.** Both
+agents let a human name a session - `/rename` in Claude Code, `/name` in pi - and that name is
+the only thing that distinguishes two sessions on the same repo *and* the same branch, which is
+an ordinary day here. It sits between the repo and the branch because it belongs with them;
+`.meta` is where controls and status live, and it is `flex: none` with no ellipsis, so a
+34-character name there would push the strip and squeeze line 1 instead of giving. It does not
+feed `disambiguateTitles`, which grows a path until two *places* differ - a name that happens to
+be unique must not stop that.
+
+The `ai-title` stays on its own line beneath. The two answer different questions - what you
+meant the session for, and what it turned out to be doing - and on a long session they drift
+apart, which is itself worth seeing.
+
+**Both agents' names normalise onto Claude Code's `custom-title` record**, for the reason pi's
+transcript is normalised at all: one concept, one field, one place on the card. pi's `/name`
+used to be rewritten as an `ai-title` for want of anywhere better, since pi generates no title
+of its own - and `title` for a pi session is null again now, correctly.
+
+**The name survives the 128KB tail window only because Claude Code re-appends it.** `/rename`
+writes its `custom-title` record once, which on a long session is far outside anything we read.
+What saves it is that Claude Code rewrites the record with every `ai-title` flush, within a few
+hundred bytes of one - measured on a 1.3MB transcript as flushes every ~40KB, worst gap 59KB. So
+the name inherits the summary's guarantee rather than having one of its own, and needs no head
+read, no second cache key and no extra I/O. That is a fact about Claude Code, not about us: if a
+name ever stops appearing on a card whose `ai-title` still updates, that re-appending is what
+changed, and a head read is the fix.
+
+A `custom-title` is not proof that `/rename` was typed - a fork writes `"<name> (fork)"`, and a
+resumed session carries its name forward - and no attempt is made to prove it. All three are the
+name Claude Code itself displays for the session, which is the thing worth showing.
+
 **The tool that is running is the one with no result yet.** A `tool_use` id that no
 `tool_result` refers back to is in flight; that is the whole basis of "what is it doing right
 now", and it is what separates *is sitting in a Bash command* from *used Bash at some point*.
@@ -792,11 +823,14 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 444 tests, no network, no dependencies, ~2s
+npm test          # 449 tests, no network, no dependencies, ~2s
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
 
-Both must pass before anything is done.
+Both must pass before anything is done, and `bitbucket-pipelines.yml` runs the same two on
+every pull request, on `main`, and on any other branch push - nothing else, on Node 24 only.
+Why there is no linter, no coverage and no second Node version is in that file's own comments;
+renaming either npm script means changing it there too.
 
 - **Reproduce a bug as a test first**, then fix what the test exposes.
 - Tests are `node:test` + `node:assert/strict`, one file per module, named after the
@@ -875,7 +909,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 ## Commands
 
 ```sh
-npm test                       # 444 tests, ~2s
+npm test                       # 449 tests, ~2s
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
 ```

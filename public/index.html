@@ -432,11 +432,48 @@
         align-items: baseline;
         gap: 8px;
         min-width: 0;
+        /*
+         * The repo cannot shrink and the name has a floor, so on a window narrow
+         * enough the line is wider than the card. Clipping it keeps that inside
+         * the body rather than letting it run under the Focus button.
+         */
+        overflow: hidden;
       }
       .repo {
         font-weight: 620;
         letter-spacing: -0.01em;
         white-space: nowrap;
+      }
+      /*
+       * What you called this session. Identity, so it sits with the repo and the
+       * branch rather than over in `.meta` with the controls - and prose rather
+       * than monospace, which is the whole reason it needs no separator to be
+       * told apart from the branch beside it. It gives before the repo does:
+       * `.repo` is nowrap with no `min-width`, so a long name ellipsises itself
+       * rather than squeezing the thing you scan by.
+       */
+      .name {
+        font-size: 12.5px;
+        color: var(--muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        /*
+         * Gives well before the branch does. Both shrink, and flexbox shares the
+         * loss in proportion to width, so a narrow window clipped `main` to
+         * "ma…" while a long name beside it kept eighteen characters - the
+         * shorter, load-bearing one destroyed to spare the one with room to
+         * lose. A branch is unreadable the moment it is cut; a name is still
+         * itself with its tail gone.
+         *
+         * The floor is what stops that becoming the opposite mistake. Shrinking
+         * six times faster crushed a long name to zero width, and an element at
+         * zero shows nothing at all - not even an ellipsis to say something was
+         * there. "Fixi…" is a poor label and an honest one; a card that quietly
+         * drops what you named the session is neither.
+         */
+        flex-shrink: 6;
+        min-width: 5ch;
       }
       .branch {
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -445,7 +482,13 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        min-width: 0;
+        /*
+         * The same floor the name has, which for a short branch means no
+         * shrinking at all: flexbox shares a deficit in proportion to width, so
+         * `main` gave up the four pixels that turned it into "ma…" while the
+         * name beside it still had a hundred to spare.
+         */
+        min-width: 5ch;
       }
       .line2 {
         display: flex;
@@ -1003,7 +1046,13 @@
           hit.title = 'Bring this window to the front';
           hit.setAttribute(
             'aria-label',
-            row.title + ' - ' + row.attentionLabel + '. Bring this window to the front.',
+            row.title +
+              // Read out for the same reason it is shown: with several sessions
+              // on one repo, it is the only thing that tells them apart.
+              (row.sessionName ? ', ' + row.sessionName : '') +
+              ' - ' +
+              row.attentionLabel +
+              '. Bring this window to the front.',
           );
         }
 
@@ -1016,6 +1065,12 @@
         repo.className = 'repo';
         repo.textContent = row.title;
         line1.appendChild(repo);
+        if (row.sessionName) {
+          const name = document.createElement('span');
+          name.className = 'name';
+          name.textContent = row.sessionName;
+          line1.appendChild(name);
+        }
         if (row.branch) {
           const branch = document.createElement('span');
           branch.className = 'branch';
@@ -1277,7 +1332,12 @@
             if (!wantsYou(row) || lastBlocked.has(row.id)) continue;
             const review = row.attention === 'review';
             const n = new Notification(
-              row.title + (review ? ' wants your review' : ' needs you'),
+              // In the title rather than the body, because the body already
+              // carries the reason and two identically titled notifications for
+              // one repo are indistinguishable before you read either.
+              row.title +
+                (row.sessionName ? ' - ' + row.sessionName : '') +
+                (review ? ' wants your review' : ' needs you'),
               {
                 body: review
                   ? row.summary || 'A review page is waiting for you'
