@@ -366,7 +366,7 @@ supported no-no-mistakes setup rather than a fault. `NM_HOME` moves where it loo
 ## Development
 
 ```sh
-npm test          # 449 tests, no network, no build step, ~2s
+npm test          # 450 tests, no network, no build step, ~2s
 npm run lint
 npm run typecheck
 ```
