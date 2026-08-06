@@ -87,11 +87,13 @@ open. Subagent side-conversations and the boilerplate Claude Code injects into t
 are filtered out, so what you see is what actually passed between you and Claude.
 
 **A row links its pull request.** If a branch has one open, the row shows `PR #41` and takes
-you to it. The state is only shown as a badge while a no-mistakes run is actually watching
-the PR - once the run ends, no-mistakes stops checking, so a stored "open" can be days out of
-date. After that the link stays and the state moves into the tooltip as *"was open, last
-checked 3d ago"*. The link outlives the run on purpose: the run is over in minutes, and the
-review is what you are waiting on for the rest of the day.
+you to it. The state is only shown as a badge while somebody is actually watching the PR -
+which means a no-mistakes run still going *and* a reading from the last few minutes. Once the
+run ends no-mistakes stops checking, so a stored "open" can be days out of date; and a run can
+keep running long after anything stopped looking, so being alive is not on its own enough.
+After that the link stays and the state moves into the tooltip as *"was open, last checked 3d
+ago"*. The link outlives the run on purpose: the run is over in minutes, and the review is what
+you are waiting on for the rest of the day.
 
 Pull requests opened outside a no-mistakes run are picked up from the session's own
 transcript, so a plain `gh pr create` still gets a link.
@@ -387,7 +389,7 @@ supported no-no-mistakes setup rather than a fault. `NM_HOME` moves where it loo
 ## Development
 
 ```sh
-npm test          # 596 tests, no network, no build step, ~2s
+npm test          # no network, no build step, ~2s
 npm run lint
 npm run typecheck
 ```

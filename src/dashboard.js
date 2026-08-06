@@ -15,7 +15,7 @@
 
 import { basename } from 'node:path';
 import { planFocus } from './focus/index.js';
-import { pullRequestNumber } from './nm-state.js';
+import { prStateIsCurrent, pullRequestNumber } from './nm-state.js';
 
 /** @typedef {import('./registry.js').Session} Session */
 /** @typedef {import('./nm-state.js').Run} Run */
@@ -302,23 +302,33 @@ export function matchPullRequest(cwd, branch, pullRequests) {
 /**
  * The pull request a run carries on its own record.
  *
- * The database query finds this one too, and with better provenance, so this
- * only ever matters on the degraded `axi status` path - where there is no
- * history to query and the run in front of us is all there is.
+ * This is the *first* source a session card tries, not a fallback: the runs
+ * query carries `pr_url` and `pr_state` too, so any card with a matched run
+ * takes its pull request from here. It was documented as mattering only on the
+ * degraded `axi status` path, and that comment is what hid RAI-10 - the source
+ * least equipped to say how fresh its state was is the one the page usually
+ * showed.
+ *
+ * `observedAt` used to be `run.updatedAt`, which is when the *run* was last
+ * touched. That is a proxy and a bad one: it advances every time the run does
+ * anything at all, so a pull request nobody had looked at for hours still
+ * looked freshly observed. It is the run's own `pr_state_observed_at` now, and
+ * null when there is none - see `prStateIsCurrent`.
  *
  * @param {Run} run
+ * @param {number} now
  * @returns {PullRequest|null}
  */
-function pullRequestForRun(run) {
+function pullRequestForRun(run, now) {
   if (!run.prUrl) return null;
   return {
     url: run.prUrl,
     number: pullRequestNumber(run.prUrl),
     state: run.prState || null,
-    observedAt: run.updatedAt ?? null,
+    observedAt: run.prStateObservedAt ?? null,
     branch: run.branch,
     repoPath: run.repoPath,
-    live: run.active,
+    current: prStateIsCurrent(run.status, run.prStateObservedAt ?? null, now),
   };
 }
 
@@ -369,7 +379,7 @@ export function transcriptPullRequest(summary, repoPath, branch, pullRequests = 
     observedAt: seen.observedAt,
     branch,
     repoPath,
-    live: false,
+    current: false,
   };
 }
 
@@ -812,11 +822,13 @@ export function buildRows({
       // noise on the one thing this page has to keep scannable.
       mode: summary?.mode && summary.mode !== 'normal' ? summary.mode : null,
       reviewUrl: reviewUrls.get(session.sessionId) || null,
-      // Three sources, most trustworthy first. A live run is being watched
-      // right now, so its state is real. The database's history is branch
-      // verified but frozen. The transcript is neither, and is the only one
-      // that sees a pull request no-mistakes never opened - which is common
-      // enough that leaving it out means no link at all on plain Claude work.
+      // Three sources, most trustworthy first. A run still going is being
+      // watched right now - for as long as something is actually looking, which
+      // is `prStateIsCurrent`'s job to check rather than something the run's
+      // status settles. The database's history is branch verified but frozen.
+      // The transcript is neither, and is the only one that sees a pull request
+      // no-mistakes never opened - which is common enough that leaving it out
+      // means no link at all on plain Claude work.
       //
       // The run's own pull request has to clear the same branch check as the
       // other two, and it is kept even though a run is now matched *on* the
@@ -837,7 +849,7 @@ export function buildRows({
       // a branch could take away would drop a real review link every time the
       // pipeline was on another branch.
       pr:
-        (run?.prUrl && run.branch === branch ? pullRequestForRun(run) : null) ||
+        (run?.prUrl && run.branch === branch ? pullRequestForRun(run, now) : null) ||
         matchPullRequest(session.cwd, branch, pullRequests) ||
         matchPullRequest(mainCheckout, branch, pullRequests) ||
         transcriptPullRequest(
@@ -908,7 +920,7 @@ export function buildRows({
       activity: null,
       mode: null,
       reviewUrl: null,
-      pr: pullRequestForRun(run) || matchPullRequest(run.repoPath, run.branch, pullRequests),
+      pr: pullRequestForRun(run, now) || matchPullRequest(run.repoPath, run.branch, pullRequests),
       // The pipeline's agent has a transcript even when nobody else here does,
       // so it is a better account of when this last moved than the run's own
       // clock, which only ticks when a step changes.

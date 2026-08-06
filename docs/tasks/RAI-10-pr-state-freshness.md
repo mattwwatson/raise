@@ -1,8 +1,10 @@
 ---
 ticket: RAI-10
-status: backlog
+status: shipped
 size: S
 depends: -
+branch: RAI-10-stale-pr-chip
+shipped: 2026-08-06
 ---
 # RAI-10 - A merged pull request still shows an OPEN chip
 
@@ -149,3 +151,79 @@ npm run typecheck
 
 Report: which source produced the symptom, the measured observation interval, the threshold
 chosen and why.
+
+---
+
+## Implementation notes
+
+### Which source produced it: `pullRequestForRun`, and the brief's table was wrong about why
+
+The brief expected the database-query source, on the strength of `pullRequestForRun`'s own
+comment - *"this only ever matters on the degraded `axi status` path"*. **That comment is
+false.** `RUNS_QUERY` selects `pr_url` and `pr_state`, so `run.prUrl` is populated on the
+ordinary database path, and `buildRows` puts `pullRequestForRun` **first** in the chain
+(`dashboard.js:840`, and again on the unattributed-run row at `:911`). Any card with a matched
+run carrying a pull request was showing *that* source, not the branch-verified one.
+
+Which makes the trap the brief warned about the live case rather than the hypothetical one:
+that source reported `run.updatedAt` as `observedAt`, and `updated_at` is bumped by every write
+the run makes. The source most likely to be on a card was the one a freshness gate could not
+see. Fixing this needed both halves - carry the real column, *then* gate on it.
+
+### The observation cadence: measured at **≤112s**, and it stops without the run stopping
+
+All figures from the live database (`~/.no-mistakes/state.sqlite`, 46 runs recorded with
+`pr_state = 'open'`, read-only).
+
+- **The column is a genuine observation, refreshed on every poll, not stamped once at PR
+  creation.** Proof: `pr_state_observed_at` runs up to **45 hours** later than the `pr` step
+  that opened the pull request, on runs whose state is still `open`. no-mistakes writes it with
+  `UPDATE runs SET pr_state = ?, pr_state_observed_at = ?, updated_at = ? WHERE id = ?`.
+- **Cadence.** The 43 runs whose last write was a cancel or a failure sample "time since the
+  last observation" without bias, because when a human cancels is uncorrelated with the poll
+  phase: median **64s**, p90 **110s**, max **112s**. Consistent with a ~2 minute poll.
+- **The failure the gate exists for.** Two runs (`01KY4P345S7ZGSK17QV64CPGTE`,
+  `01KY4PAZZHT0DVAB702YN7ANC5`) were last observed at the *same second* - 2026-07-22T13:45:13Z,
+  a daemon restart - and then sat in the `ci` step, status `running`, for a further **7h23m**
+  carrying `open`. `live` was true throughout. That window is unbounded, and it is what put a
+  confident `OPEN` chip over a merged pull request.
+
+**Threshold: `PR_STATE_FRESH_MS = 5 minutes`**, 2.7x the measured worst healthy case. It cannot
+fire during a healthy run, and it catches a dead monitor within five minutes. The measurement
+is recorded in the comment beside the constant, per the brief.
+
+### `live` became `current`, rather than gaining a sibling
+
+The brief left this as a judgement call. `live` names a fact about the *run*, and the bug is
+precisely that fact being read as a fact about the *reading* - so keeping the name preserves
+the confusion that caused it. `PullRequest.current` now means one thing: `state` may be
+presented as the state now. Renaming rather than adding also keeps the page asking one boolean
+and leaves nothing unread crossing the SSE frame.
+
+`prStateIsCurrent(status, observedAt, now)` in `nm-state.js` is the single rule, used by both
+`normalisePullRequest` and `pullRequestForRun`. It **fails closed** - a run with no observation
+time is not current - because showing the state word is a claim, and the degraded `axi status`
+path has no observation to offer. The frozen-run guard is unchanged and still required; this
+adds the second half rather than replacing the first.
+
+### RAI-13: it goes ahead, with a narrower remit
+
+The brief's branch - *"if no useful threshold exists, that is a real finding and makes querying
+the forge the only honest fix"* - **did not fire.** A useful threshold does exist, by a
+comfortable margin (5 min against a 112s worst case), so this was fixable with no network and
+no credentials, exactly as scoped.
+
+But it does not make [RAI-13](RAI-13-pr-state-from-forge.md) unnecessary, and the residual is
+worth stating precisely:
+
+- **A freshness gate bounds the lie to the observation cadence; it cannot remove it.** For up
+  to ~2 minutes between a merge and no-mistakes noticing, the reading is honestly fresh and
+  honestly wrong. Nothing on disk can close that.
+- **It says nothing at all about a pull request nobody is monitoring.** Once the run finishes -
+  or for a pull request opened by hand - there is no observer, so the honest answer is now
+  silence rather than a stale word. The page has a link and a "was open, last checked 3d ago"
+  tooltip, and no way to find out.
+
+So RAI-13 changes from *the only honest fix* to *the source that is authoritative when nothing
+is watching*. That is a smaller and better-defined job than the brief assumed, and it is still
+worth doing.

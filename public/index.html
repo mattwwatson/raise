@@ -648,11 +648,11 @@
         text-decoration: underline;
       }
       /*
-       * The state word, and only when it is current. no-mistakes stops watching
-       * a pull request the moment its run ends, so afterwards the stored state
-       * is a snapshot of that moment - every cancelled run in a real database
-       * still reads "open" days later. A frozen reading rendered as live status
-       * is exactly the confident-but-wrong signal this page must never give, so
+       * The state word, and only when `PullRequest.current` says it may be read
+       * as the state now - the run still going *and* the reading recent, both
+       * halves being required for the reasons recorded on that field in
+       * `src/nm-state.js`. A frozen reading rendered as current status is
+       * exactly the confident-but-wrong signal this page must never give, so
        * the link survives the run and the state word does not.
        */
       .pr-state {
@@ -1180,7 +1180,7 @@
           const label = document.createElement('span');
           label.textContent = row.pr.number ? 'PR #' + row.pr.number : 'PR';
           a.appendChild(label);
-          if (row.pr.live && row.pr.state && row.pr.state !== 'none') {
+          if (row.pr.current && row.pr.state && row.pr.state !== 'none') {
             const state = document.createElement('span');
             state.className = 'pr-state ' + row.pr.state;
             state.textContent = row.pr.state;

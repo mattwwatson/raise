@@ -768,9 +768,15 @@ optional and has its own tests: assert the folding through the row's `attention`
 and `pipeline`, never by reaching for the agent.
 
 **A pull request has three possible sources, and they are ranked by how much they know.**
-A live no-mistakes run is being watched right now, so its `pr_state` is real. The database's
-history is branch-verified but frozen. The transcript is neither, and is the only one that
-sees a pull request no-mistakes never opened.
+A live no-mistakes run is being watched right now, so its `pr_state` is real *for as long as
+something is actually looking*. The database's history is branch-verified but frozen. The
+transcript is neither, and is the only one that sees a pull request no-mistakes never opened.
+
+The first of those is `pullRequestForRun`, and it is worth knowing that it is the source a
+session card usually shows rather than a fallback - the runs query carries `pr_url` and
+`pr_state` too, so any card with a matched run takes its pull request from there. It was
+documented as mattering only on the degraded `axi status` path, and that sentence is what hid
+the freshness bug below for as long as it did.
 
 **All three are gated on the checkout's branch, the run's own included.** This was written when
 `matchRunForCwd` placed a run by repo path alone, so a finished run went on matching a session
@@ -789,11 +795,34 @@ not say, because a borrowed branch was a borrowed review link.
 *The frozen part is the trap.* no-mistakes stops observing a pull request the moment its run
 reaches a terminal state - `pr_state_observed_at` never advances past `updated_at` - so every
 cancelled run in a real database still says `open`, days later. **The link survives the run;
-the state word does not.** `PullRequest.live` is what enforces that, and the page shows the
+the state word does not.** `PullRequest.current` is what enforces that, and the page shows the
 state as a chip only when it is true, otherwise as "was open, last checked 3d ago" in the
 tooltip. The runs query deliberately does *not* bound pull requests by the thirty-minute
 window it uses for runs: a run is interesting for half an hour, and the review it opened is
 what you are waiting on for the rest of the day.
+
+**"The run is still going" is not "this reading is current", and the field is called `current`
+because reading it as `live` is exactly the mistake.** The rule above guards a frozen reading
+from a *finished* run and, until RAI-10, guarded nothing at all against a stale one from a
+*running* one - so a merged pull request kept a confident `OPEN` chip. Observation stops
+without the run stopping: two runs in the real database were last observed at the same second,
+a daemon restart, and then sat in the `ci` step marked `running` for a further **7h23m**
+carrying `open`. So `current` requires the run to be active **and** the reading to be no older
+than `PR_STATE_FRESH_MS`.
+
+**That threshold is measured, and the measurement is recorded beside it in `nm-state.js`.**
+no-mistakes rewrites `pr_state_observed_at` on every poll of its `ci` step rather than only on
+change, at a cadence whose worst case over 43 unbiased samples was 112s; five minutes is 2.7x
+that, so a healthy run never loses its chip. What no threshold can close is the cadence itself
+- up to about two minutes of honestly-fresh, honestly-wrong `open` between a merge and
+no-mistakes noticing. That residual is the whole remaining case for **RAI-13**, and it needs
+the forge and therefore credentials.
+
+**An observation time may never be substituted.** `pullRequestForRun` used to report
+`run.updatedAt` as `observedAt`, which is when the *run* was last touched - it advances every
+time the run does anything, so the source most likely to be on a card was also the one a
+freshness rule could not see. A source with no observation to offer says null and is not
+current: the degraded `axi status` path, and a no-mistakes too old to carry the column.
 
 *The transcript part is the sharp edge.* A session mentions plenty of pull requests that are
 not its own, and the failure is not a missing link but a confident link to the wrong review.
@@ -1022,7 +1051,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 596 tests, no network, no dependencies, ~2s
+npm test          # 599 tests, no network, no dependencies, ~2s
 npm run lint      # oxlint over src, bin, hooks, public, test, scripts
 npm run typecheck # tsc --noEmit over src, bin, hooks, public, scripts
 ```
@@ -1106,7 +1135,9 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 - Do not change the SSE frame shape, event names or `/api` responses without updating
   `public/` in the same change - they are one protocol.
 - Flag any change to the poll interval, `KEEPALIVE_MS` or `STALE_AFTER_MS` - they are tuned
-  against each other.
+  against each other. `PR_STATE_FRESH_MS` is tuned against something outside this repo
+  entirely - no-mistakes' own observation cadence - so changing it means re-measuring, not
+  re-reasoning. The measurement is in the comment beside it.
 
 ## Roadmap and task tracking
 
@@ -1149,7 +1180,7 @@ before creating a ticket or touching anything under `docs/tasks/`.**
 ## Commands
 
 ```sh
-npm test                       # 596 tests, ~2s
+npm test                       # 599 tests, ~2s
 npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
