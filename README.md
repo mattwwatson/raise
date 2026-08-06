@@ -320,8 +320,8 @@ Supported terminals today: **iTerm2** and **Terminal.app**, plus **tmux** inside
 Opening a session in the Claude Desktop app puts it on the dashboard too - the app runs the
 same Claude Code underneath, so it fires the same hooks. Those rows are marked `desktop`
 rather than `tab`, and everything else about them is ordinary: the repo, the branch, what it
-is working on, its pull request, and any no-mistakes run in that checkout all appear exactly
-as they do for a terminal session.
+is working on, its pull request, and any no-mistakes run it started all appear exactly as they
+do for a terminal session.
 
 Focusing one brings the app to the front, and says so in a toast: nmmon cannot reach inside
 Claude Desktop to select a session, so it raises the app and leaves the sidebar to you. The
