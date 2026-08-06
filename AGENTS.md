@@ -405,10 +405,23 @@ two with nothing under them at all.
 > branch cannot be read matches nothing at all, failing closed like every other rule here.
 >
 > This also retired the thirty-minute recency window. A run that **passed** leaves the page
-> when it passes; a run that **failed** stays, because failure is unfinished business and the
-> moment a card must not go quiet. The failed one needs no timer either - it stops showing when
-> the checkout leaves its branch, which is the same signal. `cancelled` counts as finished:
-> you cancelled it, so nothing is waiting on you. See `isDisplayable`.
+> when it passes; a run that ended **badly** stays, because failure is unfinished business and
+> the moment a card must not go quiet. The failed one needs no timer either - it stops showing
+> when the checkout leaves its branch, which is the same signal. `cancelled` counts as
+> finished: you cancelled it, so nothing is waiting on you. See `isDisplayable`.
+>
+> **`FINISHED_QUIETLY` names the two endings that leave, and everything else stays** - so a
+> terminal status a later no-mistakes invents (`errored`, `timed_out`) cannot be dropped from
+> the page in silence. `attentionFor` reads the same set, so the filter and the colour cannot
+> drift: one vocabulary, and an unrecognised ending is `failed` on both. **This fails open, and
+> it is the opposite polarity to `isRunOwnerCommand` on purpose** - an unrecognised *driving
+> verb* must refuse to claim a run, because guessing there puts a pipeline on the wrong card,
+> while an unrecognised *ending* must refuse to hide one, because guessing there makes the one
+> card that must not go quiet disappear. Do not "fix" either to match the other.
+>
+> The status word decides it and `run.error` deliberately does not: every `cancelled` run in
+> the real database carries an error, so the obvious `|| run.error` puts back exactly what this
+> drops.
 
 Nothing in no-mistakes' database says whose run it is - `runs.intent_session_id` is empty on
 every row, the same field that already fails to place the pipeline's own agents. The answer
@@ -684,13 +697,29 @@ agent of a run is kept**: a step's agent is still registered while the next one 
 letting the later write win would let an older calm agent mask a newly blocked one, which is
 exactly the signal folding is not allowed to swallow.
 
-**The marker's presence follows the agent existing, never `Agent.activity`.** `activity` is
-the tool with no result yet, so it is null between every pair of tool calls - most seconds, on
-a busy agent - and rendering on it blinked the marker in and out several times a minute, which
-on a pinned page reads as the pipeline starting and stopping. There is no second string to
-fall back on either: **a no-mistakes agent transcript carries no `ai-title`** (Claude Code
-writes those for interactive sessions only), so `Agent.summary` is always null for one of
-these. Hence `Agent.what`, which is never null. Do not re-derive the marker from `activity`.
+**The marker's presence never follows `Agent.activity`.** `activity` is the tool with no
+result yet, so it is null between every pair of tool calls - most seconds, on a busy agent -
+and rendering on it blinked the marker in and out several times a minute, which on a pinned
+page reads as the pipeline starting and stopping. There is no second string to fall back on
+either: **a no-mistakes agent transcript carries no `ai-title`** (Claude Code writes those for
+interactive sessions only), so `Agent.summary` is always null for one of these.
+
+**The rule survives; where it hangs has moved.** It used to hang on `Agent.what`, a
+never-null string, and the marker was the agent's own line. The card carries one pipeline line
+now, for the session's run and the folded agent alike, so presence follows **the run
+existing** and `Pipeline.what` is allowed to be null while the line still renders. The
+accepted consequence, since `Agent.what`'s `title || 'working'` fallback no longer reaches a
+renderer: between two tool calls the line shows the step name alone, where the old one said
+"working". A step that has not spoken yet is not a pipeline that has gone away, which is the
+same statement the never-null rule was making.
+
+**`Agent` does not reach a renderer at all, and is not on `Row`.** It is how a stalled
+pipeline turns its repo's row red and lends it the message, and it is where `Pipeline.what`
+gets the tool in flight - the row carries those answers rather than the agent behind them. It
+was on `Row` until the page and then the CLI both moved to `Pipeline`, at which point it was
+unread payload crossing the event stream while looking load-bearing. What it feeds is not
+optional and has its own tests: assert the folding through the row's `attention`, `message`
+and `pipeline`, never by reaching for the agent.
 
 **A pull request has three possible sources, and they are ranked by how much they know.**
 A live no-mistakes run is being watched right now, so its `pr_state` is real. The database's
@@ -945,7 +974,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 459 tests, no network, no dependencies, ~2s
+npm test          # 460 tests, no network, no dependencies, ~2s
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
 
@@ -1031,7 +1060,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 ## Commands
 
 ```sh
-npm test                       # 459 tests, ~2s
+npm test                       # 460 tests, ~2s
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
 ```

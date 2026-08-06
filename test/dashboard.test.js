@@ -836,12 +836,13 @@ test("the pipeline's own agent is folded into the owner's row alone", () => {
     now: 5000,
   });
   const byId = new Map(rows.map((r) => [r.sessionId, r]));
-  // A blocked pipeline agent has stalled the run, so the owner goes red.
+  // A blocked pipeline agent has stalled the run, so the owner goes red and
+  // carries the agent's own reason - the row is where the folded agent shows.
   assert.equal(byId.get('owner').attention, 'blocked');
-  assert.equal(byId.get('owner').agent?.state, 'blocked');
+  assert.equal(byId.get('owner').message, 'Claude needs your permission to use Bash');
   // The bystander cannot free it and must not be summoned for it.
-  assert.equal(byId.get('bystander').agent, null);
   assert.equal(byId.get('bystander').attention, 'idle');
+  assert.equal(byId.get('bystander').message, null);
 });
 
 test('a run whose owner is no longer registered gets a row of its own', () => {
@@ -1338,14 +1339,15 @@ test("the pipeline's agent does not get a row of its own", () => {
       session({ sessionId: 'human', cwd: '/Users/x/work/repo' }),
       session({ sessionId: 'agent', cwd: AGENT_CWD }),
     ],
-    runs: [agentRun()],
+    runs: [agentRun({ step: { name: 'review', status: 'running', findings: 0 } })],
     summaries: new Map([
       ['agent', { title: 'Review the terrain change', activity: 'Reading terrain.ts', mode: null, lavishFile: null, lastActivityAt: 9000, pullRequest: null }],
     ]),
   });
   assert.equal(rows.length, 1, 'one row per repo, never two');
   assert.equal(rows[0].sessionId, 'human');
-  assert.equal(rows[0].agent.activity, 'Reading terrain.ts');
+  // Folded in rather than lost: what the agent is doing is the pipeline line.
+  assert.equal(rows[0].pipeline?.what, 'Reading terrain.ts');
 });
 
 test('a blocked pipeline agent still reaches you, on the repo row', () => {
@@ -1387,8 +1389,7 @@ test("a granted agent prompt stops pinning the repo's row red", () => {
       ['agent', { title: null, activity: 'Running npm', mode: null, lavishFile: null, lastActivityAt: 9000, pullRequest: null }],
     ]),
   });
-  assert.notEqual(rows[0].attention, 'blocked');
-  assert.equal(rows[0].agent.state, 'working');
+  assert.equal(rows[0].attention, 'working');
   assert.equal(rows[0].message, null, 'and the reason for a block that is over goes with it');
 });
 
@@ -1412,13 +1413,13 @@ test('the newest agent of a run is the one shown, not whichever wrote last', () 
       session({ sessionId: 'new-agent', cwd: AGENT_CWD, state: 'blocked', message: 'Needs permission to push' }),
       session({ sessionId: 'old-agent', cwd: AGENT_CWD, state: 'working' }),
     ],
-    runs: [agentRun()],
+    runs: [agentRun({ step: { name: 'push', status: 'running', findings: 0 } })],
     summaries: new Map([
       ['new-agent', { title: null, activity: 'Running git push', mode: null, lavishFile: null, lastActivityAt: 9000, pullRequest: null }],
       ['old-agent', { title: null, activity: 'Running npm test', mode: null, lavishFile: null, lastActivityAt: 8000, pullRequest: null }],
     ]),
   });
-  assert.equal(rows[0].agent.activity, 'Running git push');
+  assert.equal(rows[0].pipeline?.what, 'Running git push');
   assert.equal(rows[0].attention, 'blocked');
 });
 
@@ -1448,58 +1449,79 @@ test("an agent's block is never captioned with the human's granted prompt", () =
 test('the agent lands on the run row when nobody else is in that repo', () => {
   const rows = build({
     sessions: [session({ sessionId: 'agent', cwd: AGENT_CWD })],
-    runs: [agentRun()],
+    runs: [agentRun({ step: { name: 'test', status: 'running', findings: 0 } })],
     summaries: new Map([
       ['agent', { title: null, activity: 'Running npm', mode: null, lavishFile: null, lastActivityAt: 9000, pullRequest: null }],
     ]),
   });
   assert.equal(rows.length, 1);
   assert.equal(rows[0].kind, 'run');
-  assert.equal(rows[0].agent.activity, 'Running npm');
+  assert.equal(rows[0].pipeline?.what, 'Running npm');
   assert.equal(rows[0].lastActivityAt, 9000, "the agent's transcript beats the run's own clock");
 });
 
 test('an ordinary session is never mistaken for a pipeline agent', () => {
+  // Its own tool stays its own: read off the session line, and never folded
+  // into the pipeline's as though no-mistakes were running it.
   const rows = build({
     sessions: [session({ sessionId: 'human', cwd: '/Users/x/work/repo' })],
-    runs: [agentRun()],
+    runs: [agentRun({ step: { name: 'test', status: 'running', findings: 0 } })],
+    summaries: new Map([
+      ['human', { title: null, activity: 'Editing terrain.ts', mode: null, lavishFile: null, lastActivityAt: 9000, pullRequest: null }],
+    ]),
   });
   assert.equal(rows[0].sessionId, 'human');
-  assert.equal(rows[0].agent, null);
+  assert.equal(rows[0].activity, 'Editing terrain.ts');
+  assert.equal(rows[0].pipeline?.what, null);
 });
 
-test('the agent marker does not blink out between two tool calls', () => {
+test('the pipeline line does not blink out between two tool calls', () => {
   // `activity` is the tool with no result yet, so it is null every time one
   // call finishes before the next begins - most seconds, on a busy agent.
   // Rendering on it made the marker flash in and out several times a minute,
-  // which on a pinned page reads as the pipeline starting and stopping.
+  // which on a pinned page reads as the pipeline starting and stopping. So
+  // presence follows the *run*, and the accepted consequence is that between
+  // two tool calls the line carries the step name alone.
   const between = new Map([
-    ['agent', { title: null, activity: null, mode: null, lavishFile: null, lastActivityAt: 9000, pullRequest: null }],
+    ['agent', { title: 'Review the terrain change', activity: null, mode: null, lavishFile: null, lastActivityAt: 9000, pullRequest: null }],
   ]);
   const rows = build({
     sessions: [
       session({ sessionId: 'human', cwd: '/Users/x/work/repo' }),
       session({ sessionId: 'agent', cwd: AGENT_CWD }),
     ],
-    runs: [agentRun()],
+    runs: [agentRun({ step: { name: 'review', status: 'running', findings: 0 } })],
     summaries: between,
   });
-  assert.ok(rows[0].agent, 'the agent is still there between tools');
-  assert.equal(rows[0].agent.what, 'working', 'and still has something to say');
+  assert.ok(rows[0].pipeline, 'the line is still there between tools');
+  assert.equal(rows[0].pipeline.step, 'review');
+  assert.equal(rows[0].pipeline.what, null);
 });
 
-test('the agent marker prefers the live tool, then the title', () => {
-  const rowFor = (summary) =>
+test("the pipeline line prefers the agent's live tool over the step's own report", () => {
+  // Two sources for one line, most specific first: a step running a Claude
+  // agent says what tool is in flight, and a step with no agent - the CI
+  // monitor, which runs inside the daemon - has only its own last activity.
+  const whatFor = (activity) =>
     build({
       sessions: [session({ sessionId: 'agent', cwd: AGENT_CWD })],
-      runs: [agentRun()],
-      summaries: new Map([['agent', summary]]),
-    })[0].agent.what;
+      runs: [
+        agentRun({
+          step: {
+            name: 'ci',
+            status: 'running',
+            findings: 0,
+            lastActivity: 'log: base branch advanced, re-arming CI monitor',
+          },
+        }),
+      ],
+      summaries: new Map([
+        ['agent', { title: 'Review the change', activity, mode: null, lavishFile: null, lastActivityAt: 1, pullRequest: null }],
+      ]),
+    })[0].pipeline.what;
 
-  const base = { mode: null, lavishFile: null, lastActivityAt: 1, pullRequest: null };
-  assert.equal(rowFor({ ...base, activity: 'Reading terrain.ts', title: 'Review the change' }), 'Reading terrain.ts');
-  assert.equal(rowFor({ ...base, activity: null, title: 'Review the change' }), 'Review the change');
-  assert.equal(rowFor({ ...base, activity: null, title: null }), 'working');
+  assert.equal(whatFor('Reading terrain.ts'), 'Reading terrain.ts');
+  assert.equal(whatFor(null), 'base branch advanced, re-arming CI monitor');
 });
 
 // -------------------------------------------- a running pipeline is not idle
@@ -1805,6 +1827,38 @@ test('a passed run drops off the card; a failed one stays', () => {
     now: 5000,
   });
   assert.equal(failed.find((r) => r.sessionId === 's1').run?.runId, 'r1');
+});
+
+test('a way of ending that no-mistakes has yet to invent stays on the page, as failed', () => {
+  // The display filter and the colour read the same list of statuses that mean
+  // nothing is waiting on you, so a terminal word added later - `timed_out`
+  // here, which does not exist today - cannot be quietly dropped by one while
+  // the other calls it a failure. This fails *open*, the opposite way round to
+  // `isRunOwnerCommand`: an unrecognised driving verb must not claim a run,
+  // and an unrecognised ending must not hide one.
+  const ended = run({ runId: 'r1', status: 'timed_out', active: false, error: null });
+  assert.equal(attentionFor({ session: null, run: ended }), 'failed');
+
+  const rows = build({
+    sessions: [session({ sessionId: 's1' })],
+    runs: [ended],
+    branches: new Map([['s1', 'main']]),
+    now: 5000,
+  });
+  const row = rows.find((r) => r.sessionId === 's1');
+  assert.equal(row.run?.runId, 'r1');
+  assert.equal(row.attention, 'failed');
+
+  // And a run you cancelled still leaves, error field and all - which is why
+  // the status word decides this and `run.error` does not.
+  const cancelled = build({
+    sessions: [session({ sessionId: 's1' })],
+    runs: [run({ runId: 'r1', status: 'cancelled', active: false, error: 'cancelled by user' })],
+    branches: new Map([['s1', 'main']]),
+    now: 5000,
+  });
+  assert.equal(cancelled.find((r) => r.sessionId === 's1').run, null);
+  assert.equal(cancelled.length, 1);
 });
 
 test('a run nobody can be tied to gets one honest card, never a false attribute', () => {

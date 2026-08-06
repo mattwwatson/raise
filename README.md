@@ -12,9 +12,11 @@ of your fifteen terminal tabs it was in. That is what this fixes.
 WAITING FOR YOU
   hexbattle      HXB-56-residue-never-drains   Waiting for you - permission to use Bash   2m   tmux
 PIPELINE PARKED
-  firstmate      fm/poll-dispatch              Pipeline parked at a gate - step review    12s  tab
+  firstmate      fm/poll-dispatch              Pipeline parked at a gate                  12s  tab
+                 NO-MISTAKES  review
 WORKING
-  moroku-skills  feature/dev-setup-skill       Working - step test                             tab
+  moroku-skills  feature/dev-setup-skill       Working                                         tab
+                 NO-MISTAKES  test · Running npm test
 ```
 
 ## What it watches
@@ -384,7 +386,7 @@ supported no-no-mistakes setup rather than a fault. `NM_HOME` moves where it loo
 ## Development
 
 ```sh
-npm test          # 459 tests, no network, no build step, ~2s
+npm test          # 460 tests, no network, no build step, ~2s
 npm run typecheck
 ```
 

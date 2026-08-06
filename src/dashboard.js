@@ -57,8 +57,7 @@ import { pullRequestNumber } from './nm-state.js';
  * @property {boolean} focusable whether clicking this row can do anything
  * @property {'tmux'|'tab'|'app'|'unknown'|null} hostKind where the session lives
  * @property {import('./registry.js').AgentKind|null} agentKind which agent is
- *   running it; null for a run with no session behind it. Named apart from
- *   `agent` below, which is the pipeline's own session folded into this row
+ *   running it; null for a run with no session behind it
  * @property {Run|null} run
  * @property {number|null} updatedAt
  * @property {string|null} summary what the session is working on, in Claude's
@@ -78,19 +77,23 @@ import { pullRequestNumber } from './nm-state.js';
  * @property {PullRequest|null} pr the pull request open on this branch
  * @property {number|null} lastActivityAt epoch ms this session last wrote to
  *   its transcript, which is when it last actually did something
- * @property {Agent|null} agent the pipeline's own Claude session, folded in
  */
 
 /**
- * What no-mistakes' own agent is doing, shown on the row of the repo it is
- * working on rather than as a row of its own.
+ * What no-mistakes' own agent is doing, folded into the row of the repo it is
+ * working on rather than given a row of its own.
  *
- * `what` is never null, and that is the point. `activity` is the tool with no
- * result yet, so it goes null every time one call finishes and before the next
- * begins - which on a busy agent is most seconds. Rendering on `activity`
- * blinked the marker in and out several times a minute, which on a page you
- * leave pinned reads as the pipeline starting and stopping. Presence is decided
- * by the agent existing; only the words change.
+ * It does not reach a renderer directly. The agent is what makes a stalled
+ * pipeline turn its repo's row red and lends it the message, and it is where
+ * `Pipeline.what` gets the tool in flight; the row carries those answers and not
+ * the agent itself.
+ *
+ * `activity` is the tool with no result yet, so it goes null every time one call
+ * finishes and before the next begins - which on a busy agent is most seconds.
+ * A marker rendered on it blinked in and out several times a minute, reading as
+ * the pipeline starting and stopping. The rule that came out of that now lives
+ * on `Pipeline`: presence follows the *run* existing, and the words are allowed
+ * to be missing.
  *
  * @typedef {object} Agent
  * @property {string} what the best description available, always something
@@ -501,6 +504,21 @@ function effectiveSessionState(session, summary, pipelineRunning = false) {
 }
 
 /**
+ * The terminal statuses that mean nothing is waiting on you.
+ *
+ * `completed` is a run that passed and `cancelled` is one you stopped, so in
+ * both cases the answer is known and the card has nothing left to say. Every
+ * *other* way a run can end reads as a failure, and `isDisplayable` keeps it on
+ * the page on the strength of the same set - one vocabulary, so the filter and
+ * the colour cannot drift apart.
+ *
+ * The word is what decides it, never `run.error`: every `cancelled` run in the
+ * real database carries an error, so reading that instead would call a run you
+ * stopped a failure and put it back on the page.
+ */
+const FINISHED_QUIETLY = new Set(['completed', 'cancelled']);
+
+/**
  * Decide the single attention level for a row.
  *
  * A session polling a Lavish artifact outranks everything except an outright
@@ -530,7 +548,7 @@ export function attentionFor({
   if (agent?.state === 'blocked') return 'blocked';
   if (session && summary?.lavishFile) return 'review';
   if (run?.parked) return 'parked';
-  if (run && !run.active && (run.status === 'failed' || run.error)) return 'failed';
+  if (run && !run.active && !FINISHED_QUIETLY.has(String(run.status))) return 'failed';
   if (run?.active) return 'working';
   if (state === 'working') return 'working';
   if (state === 'idle') return 'idle';
@@ -821,7 +839,6 @@ export function buildRows({
           pullRequests,
         ),
       lastActivityAt: summary?.lastActivityAt ?? null,
-      agent,
     });
   }
 
@@ -888,7 +905,6 @@ export function buildRows({
       // so it is a better account of when this last moved than the run's own
       // clock, which only ticks when a step changes.
       lastActivityAt: agent?.lastActivityAt ?? run.updatedAt ?? null,
-      agent,
     });
   }
 
@@ -1010,19 +1026,30 @@ function stepActivity(lastActivity) {
  * the branch requirement means a card only ever shows a run for the branch it
  * is on - so switching away is already how you say you are done with it.
  *
- * A **failed** run is the exception, and the reason there is a rule here rather
- * than a bare `run.active`. Failure is unfinished business, and it is precisely
- * the moment the card must not go quiet. It needs no timer of its own: it stops
- * showing when the checkout leaves its branch, which is the same signal.
+ * A run that ended **badly** is the exception, and the reason there is a rule
+ * here rather than a bare `run.active`. Failure is unfinished business, and it
+ * is precisely the moment the card must not go quiet. It needs no timer of its
+ * own: it stops showing when the checkout leaves its branch, which is the same
+ * signal.
  *
- * `cancelled` counts as finished. You cancelled it, so nothing is waiting on
- * you, and it is not a result to go back and read.
+ * So the quiet statuses are named and everything else shows. **This fails open,
+ * which is the opposite polarity to `isRunOwnerCommand`, and deliberately so.**
+ * A driving verb we do not recognise must not claim ownership of a run, because
+ * the cost of guessing is a pipeline on the wrong card. A terminal status we do
+ * not recognise must not hide a run, because the cost of guessing is the one
+ * card that must not go quiet vanishing in silence. Each fails the safe way for
+ * what it guards, and matching them up would break one of them. `attentionFor`
+ * already reads an unrecognised terminal status as `failed`, so the two agree.
+ *
+ * Checking the status word rather than `run.error` is load-bearing: every
+ * `cancelled` run in the real database carries an error, so the obvious
+ * `|| run.error` would put back exactly what this drops.
  *
  * @param {Run} run
  * @returns {boolean}
  */
 function isDisplayable(run) {
-  return run.active || run.status === 'failed';
+  return run.active || !FINISHED_QUIETLY.has(String(run.status));
 }
 
 /**
