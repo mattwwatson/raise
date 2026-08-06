@@ -29,9 +29,10 @@ Three different things, because they answer three different questions.
 | **Waiting on your review** | the running `lavish-axi poll` | The agent is sitting in a `lavish-axi poll`, waiting for you to open a review page and respond. It looks busy from the outside; it is not. |
 | **Pipeline parked** | the no-mistakes database | A run stopped at a gate. Usually the agent answers it itself within seconds, so it is informational. |
 
-`no-mistakes` keeps a single daemon and a single SQLite database for the whole machine, so
-nmmon reads every repo's state from one place. You do not register repos with it and there is
-nothing to configure per project.
+**There is nothing to configure per project.** Sessions report themselves through the agent's
+hooks, so a repo shows up the first time you work in it and is never registered anywhere. The
+pipeline half needs no setting up either: `no-mistakes` keeps one daemon and one SQLite database
+for the whole machine, so every repo's runs are read from that one place.
 
 **Rows name themselves apart.** A row is normally labelled with just the repo directory name,
 but a repo, its worktrees and a second clone of it all share that name - three cards reading

@@ -1,8 +1,10 @@
 ---
 ticket: RAI-2
-status: backlog
+status: shipped
+shipped: 2026-08-06
 size: S
 depends: -
+branch: RAI-2-correct-doc-framing
 ---
 # RAI-2 - Correct what the documentation says this tool is
 
@@ -119,6 +121,48 @@ something has gone wrong.
 
 Read both documents end to end afterwards and confirm no sentence still frames this as a
 no-mistakes tool or as a private one.
+
+## Implementation notes
+
+Four edits, no code. **Item 4's audit was already stale on one point** - the test counts it
+records as `462` read `596` everywhere by the time this was picked up, and match `npm test`, so
+nothing was needed there. The other three landed as written.
+
+**Item 1 kept the architectural half and dropped the audience.** `AGENTS.md:11` now reads *"a
+single-page monitor for the machine it runs on"*. That says the same true thing about scope - one
+machine, nothing remote - without a clause a contributor reads as *not for you*, and it needed no
+sentence of its own because line 12 onwards already says what it monitors.
+
+**Item 2 split the constraint in two, because it was doing two jobs.** The scope boundaries -
+no auth, no multi-user, no remote access - keep their own paragraph and are stated more firmly
+than before: each of them turns a local page into a service. Focusing gets a second paragraph
+saying that macOS-only is *where it has been run, not a position the design takes*, pointing at
+the existing one-entry terminal rule under **Architecture** rather than restating it, and
+refusing only the adapter for a platform nobody is on - because that one cannot be exercised
+against a real session.
+
+That is deliberately a softening and not a promise. [RAI-8] was still `To Do` when this shipped,
+and it is what decides the contribution posture and writes the bar down; this ticket only had to
+stop the paragraph contradicting whatever RAI-8 settles on. So the words *contribute* and
+*contribution* do not appear, and neither does a link to a ticket that has not been decided.
+
+**Item 3 reordered the sources table and said why in the document.** Hooks, transcript, process
+table, database - the database last, being the only optional one. An unexplained reorder is one a
+later pass reverts on aesthetic grounds, so the ordering is now claimed out loud as editorial,
+with the reason (the hooks are the only source that works on a machine with nothing else
+installed) and a "do not reorder them back".
+
+**The sweep found one thing, in `README.md`.** Under *What it watches*, a paragraph derived a
+general property of nmmon from an optional dependency: *"`no-mistakes` keeps a single daemon and
+a single SQLite database for the whole machine, so nmmon reads every repo's state from one place.
+You do not register repos with it and there is nothing to configure per project."* The
+zero-configuration claim is true and does not come from no-mistakes - sessions report themselves
+through the agent's hooks - so it now leads on that, and the no-mistakes fact is the subordinate
+clause about the pipeline half. That is exactly the class item 4 describes: a sentence that was
+correct while no-mistakes was the subject.
+
+Nothing else surfaced. **Design decisions worth knowing** was read and not touched, per the
+ticket.
 
 [RAI-3]: https://mattwwatson.atlassian.net/browse/RAI-3
 [RAI-6]: https://mattwwatson.atlassian.net/browse/RAI-6
