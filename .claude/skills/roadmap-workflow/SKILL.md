@@ -150,13 +150,42 @@ messages, branch names and PR title/description is read.
 
 ## Tooling
 
-**There is none yet, deliberately.** [RAI-14] covers porting hexbattle's board-from-disk,
-Jira reconciliation, link check and CI gate - about 400 lines, no dependencies. It was
-ticketed rather than built so the workflow could start immediately.
+Four commands, in `scripts/`. Zero dependencies, and three of the four never touch the
+network - which is what lets the two that run in CI be immune to an expired token.
 
-Until then the conventions are enforced by reading. The one that matters most and has no
-guard: **the PR that ships an item must set `status: shipped` in its spec**, or `main`
-lands with a ticket marked Done and a file claiming the work never started.
+```sh
+npm run tasks         # the board: what is ready, what is blocked, what shipped
+npm run tasks:links   # every docs/tasks reference in the repo still resolves
+npm run tasks:gate    # this branch's spec says shipped
+npm run tasks:validate  # how disk and Jira differ - a report, not a gate
+```
+
+**`tasks`** reads the frontmatter and marks an item READY when every `depends:` key has
+shipped. A blocker says *why* it blocks, because a dependency that is `wont-do` or that no
+spec claims can never clear on its own. It is grouped by state and sorted by ticket number:
+priority lives on the board and the repo does not encode one.
+
+**`tasks:gate`** is the guard for the convention that has none otherwise - *the PR that
+ships an item must set `status: shipped` in its spec*, or `main` lands with a ticket marked
+Done and a file claiming the work never started. It runs on **pull requests only**: a
+work-in-progress push makes no claim to be mergeable, so failing it would only paint CI red
+all day.
+
+**`tasks:links`** runs on every build, a dangling reference being just as broken on `main`.
+
+**`tasks:validate`** is the only one that talks to Jira, and it is a **report**: disk and
+Jira differing is normal, since a checkout describes what is merged *here* while Jira
+describes where the workflow is. Divergence exits 0; only a spec naming a ticket Jira has
+never heard of fails. It is never run in CI, which is why no pipeline holds a credential.
+
+```sh
+JIRA_EMAIL=you@example.com \
+  JIRA_TOKEN=$(secret-get JIRA_PERSONAL_API_TOKEN) npm run tasks:validate
+```
+
+Two things it will report and you should not chase: **orphans**, which are the epic children
+that need no spec until one is picked up, and an **epic** whose status differs from its spec,
+an epic's status following its children.
 
 ## What to work on next
 
@@ -199,4 +228,3 @@ Add to this list as more are found.
   `npm run lint`. See AGENTS.md.
 
 [RAI-3]: https://mattwwatson.atlassian.net/browse/RAI-3
-[RAI-14]: https://mattwwatson.atlassian.net/browse/RAI-14

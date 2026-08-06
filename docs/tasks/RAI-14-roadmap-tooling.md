@@ -1,6 +1,7 @@
 ---
 ticket: RAI-14
-status: in-progress
+status: shipped
+shipped: 2026-08-06
 size: M
 depends: -
 branch: RAI-14-roadmap-tooling
@@ -28,7 +29,8 @@ This is a **port**, not a design exercise. `hexbattle` runs the same scheme and 
 wired into that repo's pipeline. What does not survive the port is its structure - top-level
 side effects, disk reads inside the logic, `console.log` woven through the decisions, and no
 tests. Under this repo's rules that all has to be rebuilt, and rebuilding it is what surfaced
-four latent bugs in the original (below).
+three latent bugs in the original, plus one claim in its own error text that is simply untrue
+(below).
 
 ### The four commands
 
@@ -227,7 +229,7 @@ npm run typecheck # now covering scripts/
 And by hand:
 
 ```sh
-npm run tasks         # 10 items; RAI-3 blocked by RAI-2, RAI-13 blocked by RAI-10
+npm run tasks         # 11 items; RAI-3 blocked by RAI-2, RAI-13 blocked by RAI-10
 npm run tasks:links   # every reference resolves
 npm run tasks:gate    # fails while this spec says in-progress, passes once it says shipped
 JIRA_EMAIL=... JIRA_TOKEN=$(secret-get JIRA_PERSONAL_API_TOKEN) npm run tasks:validate
@@ -237,3 +239,71 @@ Negative cases proven rather than assumed: renaming a referenced spec makes `tas
 and name the referrer; a spec left `backlog` makes `tasks:gate` fail with the exact frontmatter
 to add; the suite passes with no network; and the pipeline change is confirmed against a real PR
 build to run there and **not** on a plain branch push.
+
+---
+
+## Implementation notes
+
+Shipped as 8 modules in `scripts/` and 6 test files, ~1,000 source lines against the ticket's
+estimate of 400. The multiplier is module comments, JSDoc typedefs, the render/logic split and
+the guards below; the executable logic is barely larger than the original. **132 tests added,
+462 to 594.**
+
+**The structure is the part that differs most from the port.** Every command is *pure core -
+result object - pure renderer*, and `scripts/tasks.js` is the only file that reads a directory,
+makes a request, writes a line or assigns `process.exitCode`. `exitCode` is a field on `Board`,
+`GateResult`, `ValidationReport` and `LinkReport` rather than a side effect, which is what makes
+*"a spec left backlog fails the gate with 1"* a pure assertion with no subprocess in it. The
+original runs its whole program at import and cannot be loaded by a test without executing.
+
+The branch comes from `src/git-branch.js` rather than `git rev-parse`, so the port ends up with
+no subprocess at all and inherits worktree handling that is already tested.
+
+### Three things only the live API could settle
+
+- **`/rest/api/3/search/jql` returns no `total`** - only `isLast` and `nextPageToken`. So the
+  original's un-paginated `maxResults=200` cannot even detect that it was truncated, and every
+  spec past the cut reads as a ticket that does not exist. Paging runs to the end and exceeding
+  `MAX_PAGES` is a failure rather than a short answer.
+- **An epic is `issuetype.hierarchyLevel > 0`**, not a type named `Epic`, which an admin can
+  rename. The name survives as a fallback.
+- **A `+` for a space in the query string is accepted** by Jira, so `URLSearchParams` output goes
+  through unmodified. Verified against the real endpoint rather than assumed.
+
+### Two guards found by running the thing
+
+- **The link checker failed its own first run with 27 broken references, every one its own test
+  fixtures.** A test that asserts a broken reference is caught must contain a broken reference.
+  `test`, `tests`, `__tests__` and `fixtures` are skipped, and two placeholder paths in the
+  module's own JSDoc were reworded to `<name>.md`. The cost is a stale reference inside a test
+  going unnoticed; the benefit is a check anybody believes.
+- **It then found the one real instance**: this spec's neighbour, `RAI-13-pr-state-from-forge.md`,
+  named its prerequisite as `PR-STATE-FRESHNESS.md`, renamed long ago. Corrected, and rewritten
+  with its directory so the check can see it at all.
+
+### `JiraFetchResult` is one object, not a union
+
+`{ok: true, ...}|{ok: false, ...}` reads better and does not survive this repository's deliberate
+`strict: false`: with `strictNullChecks` off, TypeScript stops narrowing on a boolean discriminant,
+so `if (!result.ok)` leaves the failure branch typed as the success member and the checker objects
+to the code that is correct. Optional-by-convention fields, documented as such, are what `Board`
+and `ValidationReport` already do.
+
+### Frontmatter strips a trailing comment
+
+The canonical block in the `roadmap-workflow` skill documents every field with an inline comment
+naming its legal values. Copying that block is what the skill is *for*, and without stripping it
+yields a `status` of `backlog          # backlog | ...` and an `unknown-status` fault on a
+correctly written file.
+
+### What changed outside `scripts/`
+
+`package.json` gained four scripts and `scripts` on the lint path; `tsconfig.json` includes
+`scripts/**/*.js`, so a non-shipping directory holding two CI gates is typechecked like the rest.
+Both were pulled forward from this chunk into the first, because otherwise every chunk would have
+reported a green definition of done that had never read the code it added.
+
+`AGENTS.md` and the `roadmap-workflow` skill both claimed the ticket key had to start the branch
+name *because the Jira automation is anchored there*. It is not - Jira finds a key anywhere in a
+branch name. The convention stands on its own terms instead, and `tasks:gate` is the only thing
+that can hold it, which is a better reason to check it than if Jira had been doing it for us.

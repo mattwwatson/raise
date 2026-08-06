@@ -121,6 +121,12 @@ Four sources of truth, joined into one list:
 | `public/index.html` | the page, self-contained |
 | `public/connection.js` | the liveness rule (pure, no DOM, injected clock) |
 
+`scripts/` is **not** part of the product. It holds this repository's own roadmap tooling -
+the board, the link check, the shipped-spec CI gate and the Jira reconciliation - and is
+absent from `files` in `package.json` for that reason, so none of it ships. `scripts/` may
+import from `src/`, as the gate does for `GitBranch`; `src/` must never import from
+`scripts/`.
+
 Rules:
 
 - **Pure logic and I/O stay in separate modules.** `cli-args.js`, `dashboard.js`,
@@ -1004,7 +1010,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 462 tests, no network, no dependencies, ~2s
+npm test          # 594 tests, no network, no dependencies, ~2s
 npm run lint      # oxlint over src, bin, hooks, public, test
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
@@ -1108,19 +1114,42 @@ An Epic gets a spec too, and it carries the shared background for everything und
 push, so its children need their own file only when one is picked up. **No branch without a
 spec file.**
 
-Full workflow - capturing, picking up, shipping, and the Jira-vs-disk rules - is the
-[roadmap-workflow skill](.claude/skills/roadmap-workflow/SKILL.md). **Load it before
-creating a ticket or touching anything under `docs/tasks/`.**
+`scripts/` holds four commands over all this - `npm run tasks`, `tasks:links`, `tasks:gate`
+and `tasks:validate`. Two of them run in CI, and which two is the design:
+
+- **`tasks:links` on every build.** A spec filename is rewritten when its item is captured,
+  so a reference to the old name goes stale in silence - and is as broken on `main` as on a
+  branch.
+- **`tasks:gate` on pull requests only**, guarded by `BITBUCKET_PR_ID`. It asks a question
+  about *merging*, and the `default` pipeline fires on every push including work in progress,
+  where the spec correctly still says `in-progress`.
+- **`tasks:validate` never**, because it is the only one that talks to Jira and no pipeline
+  should hold a credential. That is also why the other two are disk-only: neither can go red
+  because a token expired.
+
+Full workflow - capturing, picking up, shipping, the Jira-vs-disk rules and what each command
+reports - is the [roadmap-workflow skill](.claude/skills/roadmap-workflow/SKILL.md). **Load it
+before creating a ticket or touching anything under `docs/tasks/`.**
 
 [board]: https://mattwwatson.atlassian.net/jira/software/c/projects/RAI/boards/6
 
 ## Commands
 
 ```sh
-npm test                       # 462 tests, ~2s
+npm test                       # 594 tests, ~2s
 npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
+```
+
+The roadmap tooling, which is this repository's own workflow rather than part of the product
+- see [Roadmap and task tracking](#roadmap-and-task-tracking):
+
+```sh
+npm run tasks                  # the board from docs/tasks/
+npm run tasks:links            # every docs/tasks reference resolves
+npm run tasks:gate             # this branch's spec says shipped
+npm run tasks:validate         # how disk and Jira differ - needs JIRA_EMAIL and JIRA_TOKEN
 ```
 
 The `nmmon` commands themselves, and their flags, are documented in
