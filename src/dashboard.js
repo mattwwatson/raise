@@ -822,11 +822,13 @@ export function buildRows({
       // noise on the one thing this page has to keep scannable.
       mode: summary?.mode && summary.mode !== 'normal' ? summary.mode : null,
       reviewUrl: reviewUrls.get(session.sessionId) || null,
-      // Three sources, most trustworthy first. A live run is being watched
-      // right now, so its state is real. The database's history is branch
-      // verified but frozen. The transcript is neither, and is the only one
-      // that sees a pull request no-mistakes never opened - which is common
-      // enough that leaving it out means no link at all on plain Claude work.
+      // Three sources, most trustworthy first. A run still going is being
+      // watched right now - for as long as something is actually looking, which
+      // is `prStateIsCurrent`'s job to check rather than something the run's
+      // status settles. The database's history is branch verified but frozen.
+      // The transcript is neither, and is the only one that sees a pull request
+      // no-mistakes never opened - which is common enough that leaving it out
+      // means no link at all on plain Claude work.
       //
       // The run's own pull request has to clear the same branch check as the
       // other two, and it is kept even though a run is now matched *on* the
