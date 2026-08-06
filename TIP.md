@@ -139,6 +139,17 @@ off, TypeScript stops narrowing on a boolean discriminant, so `if (!result.ok)` 
 failure branch typed as the success member and the checker objects to the code that is correct.
 Optional-by-convention fields are what `Board` and `ValidationReport` already do.
 
+### 3.9 The link check skips test directories (decided 06/08/2026)
+
+Found by running it: the first real run reported **27 broken references, every one of them its
+own test fixtures**. A test that asserts a broken reference is caught has to write a broken
+reference down, so scanning `test/` makes the check red the day it is first switched on.
+
+`test`, `tests`, `__tests__` and `fixtures` are skipped. The cost is that a genuine stale
+reference inside a test is missed; the benefit is a check anybody believes. Two placeholder
+paths in this module's own JSDoc were reworded to `<name>.md` for the same reason - documenting
+the pattern must not trip it.
+
 ### 3.x Stubs and placeholders register
 
 *Empty.* Anything intentionally fake goes here and must be gone before the endgame.
@@ -179,11 +190,16 @@ TIP-only commits get squashed at the end; this file is deleted in a final commit
    test green; `scripts/` now covered by both.
    *E2E*: 11 items (the 10 plus this one), RAI-3 blocked by RAI-2, RAI-13 blocked by RAI-10, the
    other seven READY. Verified.
-2. **Links** - `task-links.js` + tests + `npm run tasks:links`. *pending*
-   *E2E*: passes on the tree; renaming a referenced spec makes it fail and name the referrer.
-3. **Gate** - `task-gate.js` + tests + `npm run tasks:gate`. *pending*
-   *E2E*: fails on this branch while the spec says `in-progress`; passes when flipped to
-   `shipped`; `fix/RAI-14-x` is rejected for putting the key second.
+2. **Links** - `task-links.js` + tests + `npm run tasks:links`.
+   **implemented 06/08/2026 (pending review)** - 22 tests.
+   *E2E*: 10 references across 60 files resolve. `git mv` on a referenced spec makes it fail and
+   name all three referrers with line numbers; restoring it clears. RAI-13's stale
+   `PR-STATE-FRESHNESS.md` corrected, and it is now a reference the check can see.
+3. **Gate** - `task-gate.js` + tests + `npm run tasks:gate`.
+   **implemented 06/08/2026 (pending review)** - 18 tests.
+   *E2E*: fails on this branch while the spec says `in-progress`, quoting the two lines to add;
+   passes when flipped to `shipped`; `fix/RAI-14-roadmap-tooling` rejected for putting the key
+   second; `RAI-99-mystery` names the spec file to create.
 4. **Validate** - `task-jira.js` + tests + `npm run tasks:validate`.
    **implemented 06/08/2026 (pending review)** - brought forward ahead of links and gate at the
    user's request; they are independent, so the swap cost nothing. 32 tests, 519 to 551.

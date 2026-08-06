@@ -29,12 +29,17 @@ test('a branch that is only the key, with no short name, still names the key', (
   assert.equal(ticketFromBranch('RAI-14'), 'RAI-14');
 });
 
-test('a branch with the key not first is refused, because Jira anchors on the key being first', () => {
-  // The original matches after a slash and so accepts this, while its own
-  // failure message explains that a prefixed branch transitions nothing. The
-  // gate passed on exactly the branch shape it exists to reject.
-  assert.equal(ticketFromBranch('fix/RAI-14-roadmap-tooling'), null);
-  assert.equal(ticketFromBranch('feature/RAI-14'), null);
+test('a key starting a path segment names the ticket, so a prefixed branch works', () => {
+  assert.equal(ticketFromBranch('fix/RAI-14-roadmap-tooling'), 'RAI-14');
+  assert.equal(ticketFromBranch('feature/RAI-14'), 'RAI-14');
+  assert.equal(ticketFromBranch('mattw/wip/RAI-14-tooling'), 'RAI-14');
+});
+
+test('a key buried inside a segment is not the name of the branch', () => {
+  // At that point it is a substring inside a word rather than the branch
+  // naming its ticket.
+  assert.equal(ticketFromBranch('wip-RAI-14-roadmap-tooling'), null);
+  assert.equal(ticketFromBranch('revertRAI-14'), null);
 });
 
 test('a lowercase key is not a key', () => {
@@ -64,7 +69,7 @@ test('a checkout with no branch fails as "no branch", not as a bad branch name',
 test('a branch with no key at all fails the gate and explains the naming rule', () => {
   const result = gateBranch('tidy-up', indexed([spec()]));
   assert.equal(result.outcome, 'no-key');
-  assert.ok(text(renderGate(result)).includes('key goes FIRST'));
+  assert.ok(text(renderGate(result)).includes('start the'));
 });
 
 test('a branch whose key has no spec fails and names the file to create', () => {

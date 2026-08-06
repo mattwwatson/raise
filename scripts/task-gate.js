@@ -32,19 +32,25 @@ import { ANSI, painter } from './task-format.js';
  */
 
 /**
- * The ticket key, which must be at the **start** of the branch name.
+ * The ticket key, which must start the branch name **or a path segment of it**.
+ * `RAI-14-roadmap-tooling` and `fix/RAI-14-roadmap-tooling` both name RAI-14.
  *
- * The original reads `/(?:^|\/)([A-Z]+-\d+)-/`, which matches after a slash and
- * therefore accepts `fix/RAI-14-tooling` - while its own failure message, three
- * lines below, explains that a prefixed branch transitions nothing because the
- * Jira automation is anchored on `^{{issue.key}}-`. So the gate passes on
- * exactly the branch shape it exists to reject. Anchored here.
+ * The original carries a real contradiction here, and it is worth recording
+ * which way it was resolved. Its regex allows the prefix while its own failure
+ * message, three lines below, says a prefixed branch transitions nothing
+ * because the Jira automation is anchored on the key. Both cannot be right. The
+ * **regex** is what this repository adopted: a prefix is a normal way to name a
+ * branch, and refusing one buys nothing here.
+ *
+ * What is still refused is a key buried mid-segment - `wip-RAI-14-tooling` -
+ * because at that point the key is no longer naming the branch, it is a
+ * substring inside a word.
  *
  * A bare `RAI-14` with no short name is accepted, so that branch gets the
  * honest "no spec" or "not shipped" answer rather than being told it carries no
  * key at all.
  */
-export const BRANCH_KEY_PATTERN = /^([A-Z][A-Z0-9]+-\d+)(?:-|$)/;
+export const BRANCH_KEY_PATTERN = /(?:^|\/)([A-Z][A-Z0-9]+-\d+)(?:-|$)/;
 
 /**
  * @param {string|null} branch
@@ -113,10 +119,14 @@ export function renderGate(result, { colour = false, today = '' } = {}) {
   } else if (result.outcome === 'no-key') {
     err.push(`${label} - ${paint(ANSI.red, `branch "${result.branch}" carries no ticket key.`)}`);
     err.push('');
-    err.push('  Branches are named <KEY>-<short-name> - RAI-14-roadmap-tooling. The');
-    err.push('  key goes FIRST: the Jira automation is anchored there, so a prefixed');
-    err.push('  branch like fix/RAI-14-roadmap-tooling transitions nothing. Without');
-    err.push('  the key no commit links to the ticket, and this has nothing to check.');
+    err.push('  Branches are named <KEY>-<short-name>, and the key must start the');
+    err.push('  branch name or a path segment of it - RAI-14-roadmap-tooling and');
+    err.push('  fix/RAI-14-roadmap-tooling both work. A key buried inside a segment,');
+    err.push('  like wip-RAI-14-roadmap-tooling, does not: at that point it is a');
+    err.push('  substring rather than the name of the branch.');
+    err.push('');
+    err.push('  Without a key no commit links to the ticket, and this has nothing');
+    err.push('  to check.');
   } else if (result.outcome === 'no-spec') {
     err.push(`${label} - ${paint(ANSI.red, `no spec in docs/tasks/ has "ticket: ${result.ticket}".`)}`);
     err.push('');

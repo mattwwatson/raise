@@ -140,31 +140,37 @@ version-dependent, which is the reasoning that file already gives for lint and t
 
 ---
 
-## Four bugs in the original, fixed rather than ported
+## Three bugs in the original, fixed rather than ported
 
 Each was found by rebuilding the logic against tests, and each would have been a confident wrong
 answer.
 
-**1. The gate regex contradicts its own error message.** `/(?:^|\/)([A-Z]+-\d+)-/` matches after
-a `/`, so it accepts `fm/RAI-14-tooling` - while the failure text three lines below explains that
-a prefixed branch transitions nothing in Jira, because the automation is anchored `^{{issue.key}}-`.
-The gate passes on exactly the branch shape it exists to reject. Replaced with an anchored
-`^([A-Z][A-Z0-9]+-\d+)(?:-|$)`, which also accepts a bare `RAI-14` so that branch gets the right
-message rather than *"carries no ticket key"*.
-
-**2. `maxResults=200` with no pagination check.** A truncated page turns every spec past the cut
+**1. `maxResults=200` with no pagination check.** A truncated page turns every spec past the cut
 into a phantom *"does not exist in Jira"* fault. A short read is not a short answer, so a page
 Jira does not call the last one is a **fetch failure** (exit 2), not data.
 
-**3. The JQL excludes epics, and this repo gives epics a spec.** `issuetype != Epic` plus
+**2. The JQL excludes epics, and this repo gives epics a spec.** `issuetype != Epic` plus
 `docs/tasks/RAI-1-open-source-release.md` produces a permanent, uncorrectable fault: *"RAI-1 does
 not exist in Jira"*, exit 1, forever. Epics are queried, and exempted from the *status*
 comparison rather than from existence - an epic's status follows its children, so it is expected
 to differ.
 
-**4. No cycle detection in `depends`.** The original catches a self-dependency and an unknown
+**3. No cycle detection in `depends`.** The original catches a self-dependency and an unknown
 key; a ring of three is silently never READY with nothing saying why. A ring is a structural
 fault naming the ring in order.
+
+### One contradiction in the original, resolved the other way
+
+Its branch regex `/(?:^|\/)([A-Z]+-\d+)-/` allows a path prefix, while its failure message three
+lines below says a prefixed branch transitions nothing because the Jira automation is anchored on
+the key. Both cannot be right.
+
+**The regex is what this repository adopts.** A key at the start of a path segment names its
+ticket, so `RAI-14-roadmap-tooling` and `fix/RAI-14-roadmap-tooling` are equally valid and the
+gate accepts both. A prefix is an ordinary way to name a branch and refusing one buys this tool
+nothing. What is still refused is a key buried mid-segment - `wip-RAI-14-tooling` - where the key
+has stopped naming the branch and become a substring inside a word. The *message* is what
+changed, not the behaviour.
 
 Two smaller departures. The board groups by `phase`, a field this repo's frontmatter does not
 have, and sorts by `legacy-id`, which it also does not have - ported literally every row lands in
