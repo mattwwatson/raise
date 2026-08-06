@@ -9,10 +9,11 @@
  *   - `axi run` *returns* at every approval gate, and does not run again until
  *     the agent answers with `axi respond`. Between the two there is no process
  *     to walk up from, and a parked run is precisely when the dashboard matters
- *     most - so without a memory the row would scatter back across every
- *     session in the repo exactly at the gate.
- *   - a run stays on the page for half an hour after it ends, by which time
- *     nothing of it is running at all.
+ *     most - so without a memory the run would fall off the card of the session
+ *     holding its gate exactly at the gate, onto an unattributable row nobody
+ *     can act on.
+ *   - a run that failed stays on the page after it ends, and by then nothing of
+ *     it is running to be observed either.
  *
  * **Ownership does not change hands between live sessions.** Letting a later
  * sighting overwrite an earlier one would let a session that merely ran a
@@ -72,20 +73,20 @@ export class RunOwners {
    * no run by prefix - so the run stayed unowned and landed on a bystander.
    *
    * **The branch narrows the sighting on every path, including the session's
-   * own.** That is where ownership parts company with the page: `buildRows` asks
-   * what pipeline a checkout has recently seen and deliberately keeps showing it
-   * after the checkout moves on, while this asks which run a session is
-   * *driving*, and `axi run` and `axi respond` both act on the branch they are
-   * issued from - so a session cannot be driving a run for a branch it is not
-   * on. Narrowing here is the definition, not a heuristic. Without it a session
-   * in the main checkout driving its own run claims a *parked* run on the same
-   * path instead, since `matchRunForCwd` ranks parked above active and a parked
-   * run is an active one, so the guard below cannot catch it.
+   * own** - the same requirement `buildRows` now applies to the run a card
+   * shows, and for the same reason on this side: `axi run` and `axi respond`
+   * both act on the branch they are issued from, so a session cannot be driving
+   * a run for a branch it is not on. Narrowing here is the definition, not a
+   * heuristic. Without it a session in the main checkout driving its own run
+   * claims a *parked* run on the same path instead, since `matchRunForCwd` ranks
+   * parked above active and a parked run is an active one, so the guard below
+   * cannot catch it.
    *
    * A session whose branch cannot be read - a detached HEAD, which Treehouse
    * produces routinely - therefore owns nothing, rather than falling back to a
-   * guess by rank. The run stays unowned and shows on every session in its repo,
-   * which is exactly how the page behaved before ownership existed.
+   * guess by rank. The run stays unowned and gets a card of its own saying it
+   * could not be placed, which is the documented degradation rather than a new
+   * failure.
    *
    * @param {Session[]} sessions every live session
    * @param {Run[]} runs the current reading

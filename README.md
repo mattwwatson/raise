@@ -1,8 +1,8 @@
 # no-mistakes-monitor (`nmmon`)
 
-One page that shows every `no-mistakes` pipeline run and every agent session on your machine -
-Claude Code and pi - tells you which one is waiting for you, and jumps to that window when you
-click it.
+One page that shows every agent session on your machine - Claude Code, Claude Desktop and pi -
+tells you which one is waiting for you, and jumps to that window when you click it. If you use
+`no-mistakes`, each session also shows what its pipeline is doing.
 
 If you run several agent sessions across several repos, the problem is not knowing that work
 is happening. It is noticing the one that stopped and wants an answer, and then finding which
@@ -12,9 +12,11 @@ of your fifteen terminal tabs it was in. That is what this fixes.
 WAITING FOR YOU
   hexbattle      HXB-56-residue-never-drains   Waiting for you - permission to use Bash   2m   tmux
 PIPELINE PARKED
-  firstmate      fm/poll-dispatch              Pipeline parked at a gate - step review    12s  tab
+  firstmate      fm/poll-dispatch              Pipeline parked at a gate                  12s  tab
+                 NO-MISTAKES  review
 WORKING
-  moroku-skills  feature/dev-setup-skill       Working - step test                             tab
+  moroku-skills  feature/dev-setup-skill       Working                                         tab
+                 NO-MISTAKES  test · Running npm test
 ```
 
 ## What it watches
@@ -48,9 +50,10 @@ gave the session, if you gave it one.
 
 ## Every row says what it is about
 
-"Working" across four repos tells you nothing about which one to look at. When no-mistakes is
-driving, the row shows the pipeline step. When it is just Claude - which is most of the time -
-the row shows Claude's own name for the session, and the tool it is running this second:
+"Working" across four repos tells you nothing about which one to look at. Every row shows
+Claude's own name for the session and the tool it is running this second - and when
+no-mistakes is driving, what the pipeline is doing gets a line of its own beneath, because the
+two are happening at once:
 
 ```
 WAITING FOR YOU
@@ -93,7 +96,9 @@ Pull requests opened outside a no-mistakes run are picked up from the session's 
 transcript, so a plain `gh pr create` still gets a link.
 
 **The branch is always shown**, next to the repo name, read straight from `.git/HEAD` - so it
-is right for worktrees and for sessions that have never run the pipeline.
+is right for worktrees and for sessions that have never run the pipeline. It is also what ties
+a pipeline and a pull request to a session, so a checkout on a detached HEAD shows neither
+rather than borrowing whichever was nearest.
 
 **If you have named a session, the name is shown too**, between the repo and the branch. Two
 sessions on one repo and one branch is an ordinary day, and nothing else on the row tells them
@@ -117,18 +122,33 @@ repo you could not click. They are now folded onto the row of the repo they are 
 ```
 PIPELINE PARKED
   hexbattle  HXB-63-review                                    2m  tmux  Focus ↗
-  Pipeline parked at a gate - step review
-  NO-MISTAKES  Reviewing terrain.ts
+  Pipeline parked at a gate
+  Work out why the ridge tiles overlap
+  NO-MISTAKES  review - 2 finding(s) · Reviewing terrain.ts
 ```
 
 If one of those agents ever stops for a permission prompt, the repo's row goes red and says so
 - the pipeline has stalled and only you can free it.
 
+**What you are doing and what the pipeline is doing are separate lines**, because they happen
+at the same time. Your session keeps its own state and title while no-mistakes works underneath
+it; the `NO-MISTAKES` line says which step is running and what it is up to. That works even when
+there is no pipeline agent to see - a CI monitor rebasing your pull request runs inside the
+no-mistakes daemon, and the line still reports it.
+
 **The pipeline lands on the session that started it.** Several sessions open on one checkout
 is an ordinary day, and only one of them can answer a gate - so the other cards show nothing
 about the pipeline at all: no step, no parked gate, no `NO-MISTAKES` line. They still name the
-same repo and branch, and they still link its pull request. When nmmon cannot tell which
-session started a run, the run shows on every session in that repo, as it always did.
+same repo and branch, and they still link its pull request.
+
+**A run that cannot be placed gets one card of its own, at the bottom**, saying it could not be
+traced to a session and how many of your sessions share that repo. That happens when the session
+that started it has gone, when it was run by hand, or when nothing was running to trace it to.
+It is never shown on a session that might not own it: on a page you trust to tell you who needs
+you, a pipeline attached to the wrong card is worse than one attached to none.
+
+**A run that has passed leaves the page**, because it is finished business. A run that
+**failed** stays, until you switch that checkout to another branch.
 
 A session in a git worktree counts here as being in the checkout the worktree was created
 from, because that is the repo no-mistakes registers its runs against - so a pipeline started
@@ -300,8 +320,8 @@ Supported terminals today: **iTerm2** and **Terminal.app**, plus **tmux** inside
 Opening a session in the Claude Desktop app puts it on the dashboard too - the app runs the
 same Claude Code underneath, so it fires the same hooks. Those rows are marked `desktop`
 rather than `tab`, and everything else about them is ordinary: the repo, the branch, what it
-is working on, its pull request, and any no-mistakes run in that checkout all appear exactly
-as they do for a terminal session.
+is working on, its pull request, and any no-mistakes run it started all appear exactly as they
+do for a terminal session.
 
 Focusing one brings the app to the front, and says so in a toast: nmmon cannot reach inside
 Claude Desktop to select a session, so it raises the app and leaves the sidebar to you. The
@@ -366,7 +386,7 @@ supported no-no-mistakes setup rather than a fault. `NM_HOME` moves where it loo
 ## Development
 
 ```sh
-npm test          # 450 tests, no network, no build step, ~2s
+npm test          # 462 tests, no network, no build step, ~2s
 npm run lint
 npm run typecheck
 ```

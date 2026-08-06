@@ -8,13 +8,33 @@ that are easy to undo by accident.
 
 ## Project Overview
 
-`nmmon` is a single-page monitor for one developer's machine. It shows every `no-mistakes`
-pipeline run and every agent session - Claude Code or pi - across every repo, ranks them by
-who needs a human, and focuses the terminal window when you click a row.
+`nmmon` is a single-page monitor for one developer's machine. It shows every agent session -
+Claude Code in a terminal, Claude Desktop, or pi - across every repo, ranks them by who needs
+a human, and focuses the window when you click a row.
 
 The product is one sentence: **tell me which session is waiting for me, and take me there.**
 Everything else is supporting cast. Optimise for that signal arriving fast and never being
 wrong.
+
+**The session is the unit, and everything else is an attribute of one.** This is worth stating
+plainly because it was not always true: nmmon began as a monitor for `no-mistakes` and grew
+into a monitor for sessions, and a run of decisions written under the old framing survived
+into the new one. They all shared a shape - treating a pipeline run as a subject in its own
+right - and every one of them eventually put a confident wrong answer on a card. So:
+
+| Attribute | On a card when | From |
+| --- | --- | --- |
+| needs a human | always - it is the product | hooks, and the transcript that disproves a stale block |
+| a no-mistakes run | it is tied to *this* session | the no-mistakes database and the process table |
+| a pull request | it is on this checkout's branch | the database, or the session's own transcript |
+| a Lavish review | this session is sitting in a poll | the process table |
+
+Two consequences that are not obvious, and that the sections below keep returning to. **A
+session and its pipeline run at the same time** - you talk to a session while no-mistakes
+works for it - so the card shows both, and neither may displace the other. And **an attribute
+we cannot place belongs to nobody**: shown on every session that might own it, it is a false
+attribute on all but one, and there is no way to tell which. Better a single card that admits
+it than three that quietly disagree.
 
 The failure mode that matters most is not a crash - it is **quiet staleness**. A monitor that
 shows a confident green dot over state that stopped updating is worse than one that is
@@ -390,12 +410,46 @@ the ancestor walk already drops it, but a rule that depends on the walk alone is
 away from claiming every session on the machine.
 
 **A run belongs to the session that started it, and only the process table knows which.**
-`matchRunForCwd` places a run by repo path alone. That is deliberate and right for *identity* -
-the row keeps showing the repo's recent pipeline - but several sessions open on one checkout is
-an ordinary day, and every one of them matched the same run. Three cards then carried the same
-step, the same parked gate and the same folded agent, each with a `Focus ↗` to a window that
-could not answer it. Seen with three sessions on this repo: one driving `axi run`, two with
-nothing under them at all.
+`matchRunForCwd` places a run by repo path alone, and that was once the whole rule - deliberate,
+on the ground that the row keeps showing the repo's recent pipeline. But several sessions open
+on one checkout is an ordinary day, and every one of them matched the same run. Three cards then
+carried the same step, the same parked gate and the same folded agent, each with a `Focus ↗` to
+a window that could not answer it. Seen with three sessions on this repo: one driving `axi run`,
+two with nothing under them at all.
+
+> **The path is no longer sufficient on its own, and the "recent pipeline" rule is gone.**
+> `matchRunForCheckout` requires the run's branch to match the checkout's, on the session's own
+> path as well as through a worktree's link. The old rule put a *live* pipeline from another
+> branch on an idle `main` card - the same wrong answer from the other direction - and a
+> checkout that has switched branch has said it is done with what ran there. A checkout whose
+> branch cannot be read matches nothing at all, failing closed like every other rule here.
+>
+> This also retired the thirty-minute recency window. A run that **passed** leaves the page
+> when it passes; a run that ended **badly** stays, because failure is unfinished business and
+> the moment a card must not go quiet. The failed one needs no timer either - it stops showing
+> when the checkout leaves its branch, which is the same signal. `cancelled` counts as
+> finished: you cancelled it, so nothing is waiting on you. See `isDisplayable`.
+>
+> **`FINISHED_QUIETLY` names the two endings that leave, and everything else stays** - so a
+> status a later no-mistakes invents (`errored`, `timed_out`) cannot be dropped from the page
+> in silence. The status word decides it and whether the run carries an error deliberately does
+> not: every `cancelled` run in the real database has one, so reading that instead would put
+> back exactly what this drops.
+>
+> **Staying is not the same as being red, and the two rules fail in different directions.**
+> `isDisplayable` fails **open** - an unrecognised status keeps its card, because a card going
+> quiet is the worst thing this page can do. `attentionFor` fails **soft** - only `failed` is
+> coloured as a failure, and an unrecognised status reads as `working`. Being on the page is
+> knowledge; being red is a claim, and we genuinely do not know what a word we have never seen
+> means. `ACTIVE_STATUSES` in `nm-state.js` is an allowlist, so an unknown status is not
+> `active` either, and a new *running* state (`queued`, `waiting`) would arrive here looking
+> exactly like a new ending - red that sometimes means nothing is wrong is how this page stops
+> being believed. `ACTIVE_STATUSES` is the one place a new word would need adding.
+>
+> That makes three guards that fail three different ways, and the shape is the point: each
+> fails in the direction that is safe for the thing it guards. `isRunOwnerCommand` fails
+> **closed** - an unrecognised *driving verb* must refuse to claim a run, because guessing puts
+> a pipeline on the wrong card. Do not "fix" any of them to match the others.
 
 Nothing in no-mistakes' database says whose run it is - `runs.intent_session_id` is empty on
 every row, the same field that already fails to place the pipeline's own agents. The answer
@@ -412,21 +466,27 @@ Two rules keep it from becoming a confident wrong answer of its own:
   existed. The verb is found by scanning rather than by position, because global flags precede
   it and `--intent` follows it with paragraphs of English - the five most recent real intents
   on this machine run to 5.6KB and use the words "run", "abort" and "status" throughout.
-- **Ownership narrows for every session but the one that owns the run.** A run nobody was
-  observed to own stays on every session in its repo, exactly as before. This is the same
+- **Ownership narrows for every session but the one that owns the run.** This is the same
   shape as the transcript being allowed to clear a block but never assert one. On the owner's
   own card it is also the positive answer, which is a later change and the resolution of a
   whole class of failures - see *Ownership of a running run decides which run a session's card
   shows* below.
 
+  > A run nobody was observed to own used to stay on **every** session in its repo, on the
+  > reasoning that an unattributed pipeline is better shown three times than not at all. Under
+  > a session-centric model that is a false attribute on all but one of them, with no way to
+  > tell which - and a pipeline line you learn to distrust on one card is one you distrust
+  > everywhere. It now goes to a card of its own; see *An unattributable run gets one card*.
+
 **`RunOwners` is a memory because the evidence is intermittent, not because it is expensive.**
 `axi run` *returns* at every approval gate and does not run again until the agent answers with
 `axi respond`, so there is no process to walk up from for exactly as long as a run is parked -
-which is when the dashboard matters most. Without the memory the row would scatter back across
-every session in the repo at the gate, and again for the half hour a finished run stays
-visible. Verified live - with the run parked, `ps` showed only the daemon, and `nmmon status`,
-which is one-shot and has no memory, still reported all three rows. The server polls, so it
-catches `axi run` within a second of it starting and holds the answer.
+which is when the dashboard matters most. Without the memory the run would fall off the card of
+the session holding its gate, at the gate, onto an unattributable row nobody can act on - and
+again for as long as a failed run stays visible, since nothing of it is running by then either.
+Verified live - with the run parked, `ps` showed only the daemon, so `nmmon status`, which is
+one-shot and has no memory, had nothing to attribute the run with at all. The server polls, so
+it catches `axi run` within a second of it starting and holds the answer.
 
 **Ownership does not change hands between live sessions, and is released when the owner is
 gone.** The first half is the guard against a session that ran a driving command near the end
@@ -483,22 +543,32 @@ Five things it deliberately does not do:
   worktree with no branch to match on - a detached HEAD, which Treehouse produces routinely -
   gets no run at all rather than a guess.
 
-  **For display the branch requirement stops at the link; for ownership it applies
-  everywhere.** They differ because they are different questions. Display asks what pipeline
-  this checkout has recently seen, so a session physically inside the checkout still matches
-  by repo path alone, whatever branch it has since moved to - narrowing there would take the
-  pipeline off every session that changed branch after running it. Ownership asks which run
-  this session is *driving*, and `axi run` and `axi respond` both act on the branch they are
-  issued from, so a session cannot be driving a run for a branch it is not on. Narrowing a
-  sighting by branch is the definition of the question, not a heuristic answer to it.
+  **The branch requirement applies everywhere, for display as well as for ownership.** It
+  used to stop at the link, on the rule that display asks what pipeline this checkout has
+  recently seen - so a session physically inside the checkout matched by repo path alone,
+  whatever branch it had since moved to. That rule is gone: it put a *live* pipeline from
+  somebody else's branch on an idle `main` card, with a `Focus ↗` to a window that could not
+  answer its gate, and a checkout that has switched branch has said it is done with what ran
+  there. Ownership asks the narrower question - which run this session is *driving* - and
+  `axi run` and `axi respond` both act on the branch they are issued from, so a session
+  cannot be driving a run for a branch it is not on. Narrowing a sighting by branch is the
+  definition of that question, not a heuristic answer to it.
+
+  **What the branch may not narrow is identity.** The run a card shows and the repo a card is
+  *named* after are two answers, and `buildRows` resolves them separately: `identityRepo` from
+  the unfiltered `matchRunForCwd` on the session's own path, `checkoutRun` from the
+  branch-gated match. Resolving both from the second coupled a card's name to which runs
+  happened to be in the reading - a session in a subdirectory retitled itself from `repo` to
+  `packages/api` and back as runs came and went, and lost the pull request its transcript
+  reported, the slug guard comparing the URL's repository against that subdirectory's name.
 
   `RunOwners.observeFrom` therefore resolves a sighting through the same function - for the
   same reason it was given the link in the first place: if the two disagree about which run
   was seen, a genuine `axi run` from the second tree claims the first tree's run, is discarded
   as already owned, and the run it was really of falls through to a bystander - but it hands
   that function only the runs on the session's own branch, and a session with no branch to
-  read owns nothing at all. An unowned run still shows on every session in its repo, which is
-  the documented degradation rather than a new failure.
+  read owns nothing at all. An unowned run gets a card of its own, which is the documented
+  degradation rather than a new failure.
 
   **That was the third instance of one class, and the class is worth naming: rank standing in
   for the branch.** The link picked a run by rank; the link then fanned one run out across
@@ -519,16 +589,17 @@ Five things it deliberately does not do:
   session is genuinely inside it. Borrowing it here would anchor the worktree and the checkout
   on one path, and `disambiguateTitles` would have nothing left to grow - the `1/` and `2/`
   that name a Treehouse tree would vanish and both cards would read `repo`.
-- **a run reached through the link may not lend its branch.** `branch` falls back to the
-  matched run's when a checkout's own cannot be read, and that fallback is fine for a session
-  sitting *in* the run's repo. Through the link it is a known-wrong answer, because a worktree
-  exists to be on another branch. Caught the moment the link started matching: a tree on a
-  detached HEAD, legitimately branchless, took the name of the *sibling* tree's branch - and
-  since the pull request is gated on `run.branch === branch`, would have been handed that
-  branch's review as well. Requiring the branch through the link now shuts the same door from
-  the other side, since a branchless worktree reaches no run to borrow from; the guard stays
-  because the two rules are independent, and it is what keeps this true for any run reached by
-  a route other than the session's own cwd.
+- **a run may not lend its branch at all, and the fallback that let it is gone.** `branch` used
+  to fall back to the matched run's when a checkout's own could not be read, which was fine for
+  a session sitting *in* the run's repo and a known-wrong answer through the link, because a
+  worktree exists to be on another branch. Caught the moment the link started matching: a tree
+  on a detached HEAD, legitimately branchless, took the name of the *sibling* tree's branch -
+  and since the pull request is gated on `run.branch === branch`, would have been handed that
+  branch's review as well. Requiring the branch on *every* path then removed the fallback
+  entirely rather than narrowing it: a run is matched on the branch, so in the one case the
+  fallback existed for there is no matched run to borrow from, and the line could never have
+  run again. What remains is the rule it was protecting: the branch is the checkout's own, or
+  it is null.
 
 **Ownership of a *running* run decides which run a session's card shows; rank is the fallback
 for a session that owns nothing live.** This is the resolution of the class above rather than a
@@ -546,9 +617,11 @@ the one path that had not yet been closed. Inverting the consultation closes all
 there is no longer a place where rank decides something ownership knows.
 
 Two things it deliberately does not change. **Identity still follows the session's own path** -
-`title`, `titlePath` and `branch` all come from the rank-resolved match, so a session that owns
-a run is not retitled after it and two cards on one checkout keep looking alike. And the
-**branch requirement is unmoved**: ownership everywhere, display only through the link.
+`title` and `titlePath` come from `identityRepo`, the unfiltered match on the session's own cwd,
+so a session that owns a run is not retitled after it and two cards on one checkout keep looking
+alike whatever branch either is on. And the **branch requirement is unmoved**: it narrows which
+run a card shows and which run a sighting claims, and it never touches the name of the card.
+`branch` is the checkout's own, from `.git/HEAD` and nothing else.
 
 The consequence is accepted on purpose: a session owning a run on a branch its checkout has
 since left shows *that* run, for as long as it is still going, rather than the repo's newest.
@@ -566,6 +639,64 @@ it: this branch's own failure, reached from the other side. `run.parked` implies
 so a parked run is still preferred, which is the case with a gate actually waiting. A session
 whose owned run has finished falls back to the rank-resolved match, nulled when somebody else
 owns it, exactly as a session that never owned anything.
+
+**A session and its pipeline get a line each, because they are happening at once.** The card
+used to have one line for both, and the step won it: `summary` was set to `step <name>` whenever
+a run was attached, and the page then suppressed the summary line outright when a step existed.
+The justification was that the step says what is being done to the repo where the transcript
+title only says what the conversation is about - true, and beside the point. They are not
+alternatives. no-mistakes runs *while* you are talking to the session, so the moment a pipeline
+started, what you had been doing vanished off its own card.
+
+So `Row.summary` is always the session's own title, and `Row.pipeline` is what no-mistakes is
+doing, rendered as a marked line beneath it. Three shapes, because no-mistakes works in three
+different ways and only one of them has an agent to fold in:
+
+| Shape | Where the words come from |
+| --- | --- |
+| a step running a Claude agent (review, test) | the folded agent's `activity` |
+| the CI monitor rebasing a pull request | `step.lastActivity` - it runs **inside the daemon**, with no agent session at all |
+| parked at a gate | neither; the step name and the state word above it are the whole story |
+
+The middle row is the one worth remembering. A pipeline can be doing substantial work - a
+rebase, a conflict resolution, a re-push - with no Claude session anywhere, so nothing registers
+through the hooks and there is nothing to fold. Reported as "no no-mistakes attributed to that
+session", and the answer was that `step.lastActivity` had been reaching the page all along and
+being thrown away.
+
+**Presence follows the run existing, never the activity** - the same rule as the folded agent
+marker, and for the same reason. `activity` is null between every pair of tool calls, so a line
+rendered on it blinks several times a minute and reads as the pipeline stopping and starting.
+`Pipeline.what` may be null and the line still renders: a step that has not said anything yet
+is not a pipeline that has gone away.
+
+**`step.lastActivity` arrives prefixed, and `stepActivity` reads the prefix as an allowlist.**
+The vocabulary is no-mistakes' to grow - the live database carries `status:`, `step failed:` and
+`log:` - so an unrecognised prefix is dropped rather than shown raw, which is what keeps its
+transport noise off a card. `log:` is a line the step printed and the prefix goes. `status:` is
+dropped outright, because it restates the step status the line above is already carrying.
+`step failed:` is **kept, prefix and all**: it is why a run failed, and a failed run is the one
+finished run the page deliberately keeps - dropping it left exactly the card that must not go
+quiet showing a step name and nothing else, with the reason already on the row and thrown away.
+The word stays because "push to upstream: exit status 1" without it reads as something the step
+is doing rather than how it ended.
+
+**An unattributable run gets one card, and it says so.** A run we cannot tie to any session -
+started by hand, its session gone, or simply never observed because `axi run` returns at every
+gate and `nmmon status` has no ownership memory at all - is the one thing on this page that is
+not a session. It earns that by admitting what it does not know: `attributable: false`, a
+count of the live sessions sharing its repository, and no `Focus ↗`, because there is nothing
+to focus.
+
+The count is of the **logical** repo, not the path. With Treehouse, `work/repo`, `1/repo` and
+`2/repo` are one repository, which is exactly what `GitBranch.checkoutFor` already resolves.
+
+**It sorts below every session, whatever state either is in** - including parked, which
+normally outranks working. The page ranks by who you can go and help, and this card cannot
+take you anywhere. `sortRows` is not enough on its own: the page builds its groups by
+filtering the whole list per attention, so a parked run landed in "Pipeline parked at a gate"
+above every working session until the page was given a trailing section of its own. If you
+change one, check the other.
 
 **no-mistakes' own agent sessions are folded into the repo's row, never given one.**
 no-mistakes runs its pipeline steps as Claude sessions in a worktree at
@@ -594,29 +725,48 @@ agent of a run is kept**: a step's agent is still registered while the next one 
 letting the later write win would let an older calm agent mask a newly blocked one, which is
 exactly the signal folding is not allowed to swallow.
 
-**The marker's presence follows the agent existing, never `Agent.activity`.** `activity` is
-the tool with no result yet, so it is null between every pair of tool calls - most seconds, on
-a busy agent - and rendering on it blinked the marker in and out several times a minute, which
-on a pinned page reads as the pipeline starting and stopping. There is no second string to
-fall back on either: **a no-mistakes agent transcript carries no `ai-title`** (Claude Code
-writes those for interactive sessions only), so `Agent.summary` is always null for one of
-these. Hence `Agent.what`, which is never null. Do not re-derive the marker from `activity`.
+**The marker's presence never follows `Agent.activity`.** `activity` is the tool with no
+result yet, so it is null between every pair of tool calls - most seconds, on a busy agent -
+and rendering on it blinked the marker in and out several times a minute, which on a pinned
+page reads as the pipeline starting and stopping. There is no second string to fall back on
+either: **a no-mistakes agent transcript carries no `ai-title`** (Claude Code writes those for
+interactive sessions only), so `Agent.summary` is always null for one of these.
+
+**The rule survives; where it hangs has moved.** It used to hang on a never-null `Agent.what`,
+and the marker was the agent's own line. The card carries one pipeline line now, for the
+session's run and the folded agent alike, so presence follows **the run existing** and
+`Pipeline.what` is allowed to be null while the line still renders. `Agent.what` is gone
+rather than left unread - once both renderers moved to `Pipeline`, its `title || 'working'`
+fallback reached nothing. The accepted consequence: between two tool calls the line shows the
+step name alone, where the old one said "working". A step that has not spoken yet is not a
+pipeline that has gone away, which is the same statement the never-null rule was making.
+
+**`Agent` does not reach a renderer at all, and is not on `Row`.** It is how a stalled
+pipeline turns its repo's row red and lends it the message, and it is where `Pipeline.what`
+gets the tool in flight - the row carries those answers rather than the agent behind them. It
+was on `Row` until the page and then the CLI both moved to `Pipeline`, at which point it was
+unread payload crossing the event stream while looking load-bearing. What it feeds is not
+optional and has its own tests: assert the folding through the row's `attention`, `message`
+and `pipeline`, never by reaching for the agent.
 
 **A pull request has three possible sources, and they are ranked by how much they know.**
 A live no-mistakes run is being watched right now, so its `pr_state` is real. The database's
 history is branch-verified but frozen. The transcript is neither, and is the only one that
 sees a pull request no-mistakes never opened.
 
-**All three are gated on the checkout's branch, the run's own included.** `matchRunForCwd`
-places a run by repo path alone - deliberately, so the row keeps showing the repo's recent
-pipeline - which means a finished run still matches a session for the whole thirty minutes it
-counts as recent, long after the checkout has moved on. Taking its pull request
-unconditionally therefore put another branch's review beside `main`: exactly the confident
-wrong link the rest of this section is built to prevent. A checkout whose branch cannot be
-read is unaffected, because `branch` falls back to the run's own and the two agree by
-construction - but only for a session sitting inside the run's repo, never for one that
-reached the run through a worktree's link, where they are known to differ. See the branch
-bullet above.
+**All three are gated on the checkout's branch, the run's own included.** This was written when
+`matchRunForCwd` placed a run by repo path alone, so a finished run went on matching a session
+for the whole thirty minutes it counted as recent, long after the checkout had moved on -
+taking its pull request unconditionally put another branch's review beside `main`. The run
+match is branch-gated now and the recency window is gone, so the run can no longer *be* on
+another branch. **Keep the check anyway.** It costs nothing, it is the last line of defence on
+the source with the most to lose from being wrong, and it stops a future change to the match
+silently re-opening a confident wrong link.
+
+A checkout whose branch cannot be read gets no pull request at all, which is a change: the
+branch used to fall back to the matched run's, and there is no matched run to borrow from any
+more - a run is matched *on* the branch. Nothing is the right answer when the checkout will
+not say, because a borrowed branch was a borrowed review link.
 
 *The frozen part is the trap.* no-mistakes stops observing a pull request the moment its run
 reaches a terminal state - `pr_state_observed_at` never advances past `updated_at` - so every
@@ -647,11 +797,13 @@ knows which branch it opened each pull request from, so a sighting it recognises
 must stay that way: that is the entire case this source exists for. `src/transcript.js`
 reports what it saw and deliberately does not decide whose it is.
 
-**The branch comes from `.git/HEAD`, not from a matched run.** Borrowing it from no-mistakes
+**The branch comes from `.git/HEAD`, and from nowhere else.** Borrowing it from no-mistakes
 meant a session had a branch only while its pipeline run was recent, which is backwards - the
-branch belongs to the checkout. It is also load-bearing for the above, since a pull request is
-matched on it. `src/git-branch.js` reads the file directly (handling a worktree's `.git` file)
-and caches on mtime; it never shells out, because nothing reachable from the poll loop may.
+branch belongs to the checkout. It is also load-bearing twice over now: a pull request is
+matched on it, and so is the run itself, so a wrong branch is a wrong pipeline *and* a wrong
+review link. A checkout that will not say gets null and matches neither.
+`src/git-branch.js` reads the file directly (handling a worktree's `.git` file) and caches on
+mtime; it never shells out, because nothing reachable from the poll loop may.
 
 **A Claude Desktop session is identified by evidence, never by what it is missing.** The
 desktop app hosts a session by spawning its own bundled Claude Code with no controlling
@@ -812,9 +964,11 @@ Keep it that way - it has no build step and must open as a file.
 - Colour comes from the CSS custom properties in `:root`, with a
   `@media (prefers-color-scheme: dark)` block. **Add a variable to both blocks or neither.**
 - Attention colour is semantic and ordered: `blocked` > `review` > `parked` > `failed` >
-  `idle` > `working` > `done`, matching `ATTENTION_ORDER` in `dashboard.js`. Do not introduce
-  a colour that competes with `blocked` red - `review` sits under it because it is the same
-  thing wearing work clothes.
+  `idle` > `working`, matching `ATTENTION_ORDER` in `dashboard.js`. Do not introduce a colour
+  that competes with `blocked` red - `review` sits under it because it is the same thing
+  wearing work clothes. There is no state for a run that finished quietly: it leaves the page
+  rather than settling into one, `isDisplayable` being the exact complement of the condition
+  that would have produced it.
 - **Affordance must match capability.** A focusable row is a `<button>` and says `Focus ↗`; a
   row with no live session behind it is plain and does nothing. Never render a control that
   might not work.
@@ -822,6 +976,13 @@ Keep it that way - it has no build step and must open as a file.
   entry renders no chip at all. It used to default to `tab`, which turned every host we failed
   to recognise - a Claude Desktop session included - into a confident claim about a terminal
   window that was not there. An unplaceable session says `no window`.
+- **A card carries the session's line and the pipeline's line, never one in place of the
+  other.** They describe two things happening at once. The step used to take the summary line
+  outright, so starting a pipeline erased what you were working on. If a card ever has room for
+  only one of them, the answer is not to choose - it is that the card is doing too much.
+- **The `unattributed` chip goes where `Focus ↗` would be**, because it answers the same
+  question - *where is this?* - with the honest answer that we do not know. That is the
+  affordance rule again: a row you cannot act on must not offer a control, and must say why.
 - **The agent chip names pi and stays silent about Claude Code**, and `AGENT_LABELS` has no
   entry for it. Claude Code is most of the rows, and a chip on every card saying so is noise
   on a page whose whole job is to be scannable - the same reason `mode` hides `normal`. pi is
@@ -843,7 +1004,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 450 tests, no network, no dependencies, ~2s
+npm test          # 462 tests, no network, no dependencies, ~2s
 npm run lint      # oxlint over src, bin, hooks, public, test
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
@@ -931,7 +1092,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 ## Commands
 
 ```sh
-npm test                       # 450 tests, ~2s
+npm test                       # 462 tests, ~2s
 npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above

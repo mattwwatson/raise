@@ -317,8 +317,9 @@ async function cmdStatus() {
     sessions.filter((s) => polls.pipelineFor(s.host?.pid, agentPids)).map((s) => s.sessionId),
   );
   // One shot, so ownership is only what is running this instant - a run parked
-  // between `axi run` and `axi respond` has nothing to observe and shows on
-  // every session in its repo. The server, which polls, remembers instead.
+  // between `axi run` and `axi respond` has nothing to observe, and prints as a
+  // row of its own saying it could not be placed. The server, which polls,
+  // catches `axi run` as it starts and remembers instead.
   const runOwners = new RunOwners();
   runOwners.observeFrom(
     sessions,
@@ -366,7 +367,6 @@ async function cmdStatus() {
         : row.attention === 'parked'
           ? yellow
           : dim;
-    const step = row.run?.step ? ` ${dim(`step ${row.run.step.name}`)}` : '';
     // Same place as on the page - between the repo and the branch - so the two
     // tell one story about which session is which. The separator is the one
     // thing the page does without: there the name is prose beside a monospace
@@ -375,16 +375,39 @@ async function cmdStatus() {
     // missing either does not grow a dangling dot.
     const identity = [row.sessionName, row.branch].filter(Boolean).join(' · ');
     const named = identity ? ` ${dim(identity)}` : '';
-    console.log(`${colour(row.attentionLabel.padEnd(26))} ${bold(row.title)}${named}${step}`);
+    // Where the page puts its chip, in the one place a reader is already
+    // looking for what this row is. The page can afford to say it twice, in the
+    // chip and in a section heading; here it is said once and then explained.
+    const unplaceable = row.attributable === false ? ` ${dim('unattributed')}` : '';
+    console.log(
+      `${colour(row.attentionLabel.padEnd(26))} ${bold(row.title)}${named}${unplaceable}`,
+    );
     if (row.message) console.log(`  ${dim(row.message)}`);
-    // The summary is what the step line already says when there is a pipeline.
-    if (row.summary && !row.run?.step) console.log(`  ${dim(row.summary)}`);
-    if (row.activity && row.attention !== 'idle' && row.attention !== 'done') {
+    // Always, pipeline or no pipeline. This used to be dropped whenever a step
+    // existed, so the moment no-mistakes started, what you had been talking to
+    // the session about vanished off the row. They are concurrent, and the
+    // pipeline has a line of its own below.
+    if (row.summary) console.log(`  ${dim(row.summary)}`);
+    // Why an unplaceable run is here at all, in the same words as the page.
+    if (row.attributable === false) {
+      const guess = row.candidateSessions
+        ? ` - probably one of your ${row.candidateSessions} on this repo`
+        : '';
+      console.log(`  ${dim(`Not traceable to a session${guess}`)}`);
+    }
+    if (row.activity && row.attention !== 'idle') {
       console.log(`  ${dim(row.activity)}`);
     }
-    // The pipeline's own agent, on the repo's line rather than a row of its own.
-    if (row.agent && row.attention !== 'done') {
-      console.log(`  ${dim(`no-mistakes  ${row.agent.what}`)}`);
+    // What no-mistakes is doing, on the session's own row rather than a row of
+    // its own - and present because the *run* is, never because it is saying
+    // something. `what` covers all three shapes the pipeline takes, the folded
+    // agent's tool included, so this is the only pipeline line the CLI needs.
+    if (row.pipeline) {
+      const findings = row.run?.step?.findings
+        ? ` - ${row.run.step.findings} finding(s)`
+        : '';
+      const what = row.pipeline.what ? ` · ${row.pipeline.what}` : '';
+      console.log(`  ${dim(`no-mistakes  ${row.pipeline.step}${findings}${what}`)}`);
     }
     if (row.reviewUrl) console.log(`  ${row.reviewUrl}`);
     // The state word only while the run is live: no-mistakes stops observing a

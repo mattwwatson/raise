@@ -811,11 +811,15 @@ test('one empty reading does not forget who owns what', async () => {
       [null, null],
     );
 
-    // The run comes back finished, so nothing can be re-observed driving it -
+    // The run comes back terminal, so nothing can be re-observed driving it -
     // only the memory can still say whose it was. Without the guard above the
     // pipeline would be back on both cards, which is the bug this whole change
     // exists to fix.
-    insertRun('completed');
+    //
+    // `failed` rather than `completed`: a run that passed leaves the page the
+    // moment it does, so a completed one would prove nothing here. A failure is
+    // unfinished business and stays, which is exactly what this needs.
+    insertRun('failed');
     const rows = await state();
     const byId = new Map(rows.map((r) => [r.sessionId, r]));
     assert.equal(byId.get('driver')?.run?.runId, 'run-1');
@@ -907,9 +911,11 @@ test('a session reading we did not get releases nobody', async () => {
     for (let i = 0; i < 10; i += 1) await nextTick();
     assert.equal((await state()).find((r) => r.sessionId === 'driver')?.run?.runId, 'run-1');
 
-    // Finished before the bad reading, so nothing can be re-observed driving it
-    // afterwards - only the memory can still say whose run it was.
-    db.prepare("UPDATE runs SET status = 'completed'").run();
+    // Terminal before the bad reading, so nothing can be re-observed driving it
+    // afterwards - only the memory can still say whose run it was. `failed`
+    // rather than `completed`, because a run that passed leaves the page as
+    // soon as it does and there would be nothing left here to attribute.
+    db.prepare("UPDATE runs SET status = 'failed'").run();
 
     // The unreadable tick: no sessions come back at all, so the run stands
     // alone and there are no session rows for ownership to affect anyway.

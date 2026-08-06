@@ -39,6 +39,20 @@ const session = (over = {}) => ({
   ...over,
 });
 
+/**
+ * `buildRows` with every session on `main`, which is `run()`'s branch too.
+ *
+ * A run is matched on the branch now, so a session with no branch is matched to
+ * nothing - correct, and noise in the many cases here that are about something
+ * else entirely. Pass `branches` explicitly to override, including with an empty
+ * map when the point *is* a checkout whose branch could not be read.
+ */
+const build = (input) =>
+  buildRows({
+    branches: new Map((input.sessions || []).map((s) => [s.sessionId, 'main'])),
+    ...input,
+  });
+
 test('matchRunForCwd matches a session running inside the repo', () => {
   const runs = [run()];
   assert.equal(matchRunForCwd('/Users/x/work/repo/src', runs)?.runId, 'r1');
@@ -82,10 +96,6 @@ test('attentionFor covers the remaining states', () => {
   );
   assert.equal(attentionFor({ session: { state: 'idle' }, run: run() }), 'working');
   assert.equal(attentionFor({ session: { state: 'idle' }, run: null }), 'idle');
-  assert.equal(
-    attentionFor({ session: null, run: run({ active: false, status: 'completed' }) }),
-    'done',
-  );
 });
 
 test('a block is cleared once the transcript has carried on past it', () => {
@@ -167,7 +177,7 @@ test('a block with no announcement anchor is measured from stateSince', () => {
 });
 
 test('the waiting timer counts from when Claude asked, not from the restatement', () => {
-  const rows = buildRows({
+  const rows = build({
     sessions: [session({ state: 'blocked', stateSince: 1000, blockAnnouncedAt: 9000 })],
     runs: [],
     now: 21000,
@@ -188,7 +198,7 @@ test('a disproved block still yields to a live review', () => {
 });
 
 test('a disproved block drops the stale permission message and timer', () => {
-  const rows = buildRows({
+  const rows = build({
     sessions: [session({ state: 'blocked', stateSince: 1000, message: 'Claude needs your permission' })],
     runs: [],
     now: 90000,
@@ -234,7 +244,7 @@ test('a run with no session is never a review, whatever the summary says', () =>
 });
 
 test('buildRows carries the transcript summary onto a working row', () => {
-  const rows = buildRows({
+  const rows = build({
     sessions: [session({ state: 'working' })],
     runs: [],
     now: 5000,
@@ -251,7 +261,7 @@ test('buildRows carries the transcript summary onto a working row', () => {
 test('a session keeps both the name you gave it and the title Claude guessed', () => {
   // They answer different questions - what you meant it for, and what it is
   // actually doing - and they drift apart over a long session.
-  const rows = buildRows({
+  const rows = build({
     sessions: [session()],
     runs: [],
     now: 5000,
@@ -267,7 +277,7 @@ test('an unnamed session, and a run with no session, carry no name at all', () =
   // Most sessions are unnamed, and a run nobody is sitting in front of cannot
   // have been named by anyone. Both must be null rather than absent, or the two
   // row shapes diverge and the page has to guard for it.
-  const rows = buildRows({
+  const rows = build({
     sessions: [session()],
     runs: [run({ runId: 'r-orphan', repoPath: '/Users/x/work/other', repoName: 'other' })],
     now: 5000,
@@ -280,7 +290,7 @@ test('an unnamed session, and a run with no session, carry no name at all', () =
 test('a review row carries the link and drops the tool it is blocked in', () => {
   // "Running lavish-axi" beside "Waiting on your review" reads as work in
   // progress, which is the exact impression this state exists to correct.
-  const rows = buildRows({
+  const rows = build({
     sessions: [session({ state: 'working' })],
     runs: [],
     now: 5000,
@@ -295,20 +305,24 @@ test('a review row carries the link and drops the tool it is blocked in', () => 
   assert.equal(rows[0].activity, null);
 });
 
-test('the pipeline step wins over the transcript title as the summary', () => {
-  // The step says what is being done to the repo; the title says what the
-  // conversation is about. When there is a pipeline, the step is the answer.
-  const rows = buildRows({
+test('the transcript title is the summary, pipeline or no pipeline', () => {
+  // This used to be the other way round: the step replaced the title, because
+  // it says what is being done to the repo where the title only says what the
+  // conversation is about. Both are true *at the same time* - no-mistakes runs
+  // while you are still talking to the session - so the step now has `pipeline`
+  // and a line of its own instead of taking this one.
+  const rows = build({
     sessions: [session()],
     runs: [run({ step: { name: 'test' } })],
     now: 5000,
     summaries: new Map([['s1', { title: 'some-conversation', mode: null, activity: null, lavishFile: null }]]),
   });
-  assert.equal(rows[0].summary, 'step test');
+  assert.equal(rows[0].summary, 'some-conversation');
+  assert.equal(rows[0].pipeline?.step, 'test');
 });
 
 test('normal mode is not worth saying, so it is not carried', () => {
-  const rows = buildRows({
+  const rows = build({
     sessions: [session()],
     runs: [],
     now: 5000,
@@ -320,16 +334,17 @@ test('normal mode is not worth saying, so it is not carried', () => {
 test('buildRows works with no summaries at all', () => {
   // Transcripts are best-effort: a session started before the hooks, or one
   // whose transcript has been cleaned up, must still produce a row.
-  const rows = buildRows({ sessions: [session()], runs: [], now: 5000 });
+  const rows = build({ sessions: [session()], runs: [], now: 5000 });
   assert.equal(rows[0].summary, null);
   assert.equal(rows[0].activity, null);
   assert.equal(rows[0].reviewUrl, null);
 });
 
 test('buildRows joins sessions to runs and marks focusability', () => {
-  const rows = buildRows({
+  const rows = build({
     sessions: [session()],
     runs: [run({ branch: 'feature/x' })],
+    branches: new Map([['s1', 'feature/x']]),
     now: 5000,
   });
   assert.equal(rows.length, 1);
@@ -340,7 +355,7 @@ test('buildRows joins sessions to runs and marks focusability', () => {
 });
 
 test('buildRows marks a session with no window identity as not focusable', () => {
-  const rows = buildRows({ sessions: [session({ host: {} })], runs: [], now: 5000 });
+  const rows = build({ sessions: [session({ host: {} })], runs: [], now: 5000 });
   assert.equal(rows[0].focusable, false);
 });
 
@@ -349,12 +364,12 @@ test('buildRows will not call a session it cannot place a tab', () => {
   // probably one. It is not: a Claude Desktop session whose host went
   // unrecognised lands here too, and then the page confidently labels a desktop
   // session as a terminal tab. Saying nothing is the only honest answer.
-  const rows = buildRows({ sessions: [session({ host: {} })], runs: [], now: 5000 });
+  const rows = build({ sessions: [session({ host: {} })], runs: [], now: 5000 });
   assert.equal(rows[0].hostKind, 'unknown');
 });
 
 test('buildRows tags a tmux-hosted session', () => {
-  const rows = buildRows({
+  const rows = build({
     sessions: [session({ host: { tmux_pane: '%2' } })],
     runs: [],
     now: 5000,
@@ -366,7 +381,7 @@ test('buildRows tags a Claude Desktop session and keeps it focusable', () => {
   // The card this exists for: no tty, no terminal, and until now not focusable
   // either - so opening an old session in the desktop app put a row on the page
   // that you could see wanting you and could not click through to.
-  const rows = buildRows({
+  const rows = build({
     sessions: [
       session({
         sessionId: '2205e739-08bc-4ee6-a8d4-b15204bab998',
@@ -381,7 +396,7 @@ test('buildRows tags a Claude Desktop session and keeps it focusable', () => {
 });
 
 test('buildRows shows an unattached run but never offers to focus it', () => {
-  const rows = buildRows({ sessions: [], runs: [run({ repoPath: '/elsewhere' })], now: 5000 });
+  const rows = build({ sessions: [], runs: [run({ repoPath: '/elsewhere' })], now: 5000 });
   assert.equal(rows.length, 1);
   assert.equal(rows[0].kind, 'run');
   assert.equal(rows[0].focusable, false);
@@ -389,7 +404,7 @@ test('buildRows shows an unattached run but never offers to focus it', () => {
 
 test('buildRows hides old finished runs but keeps active ones', () => {
   const now = 10_000_000_000;
-  const rows = buildRows({
+  const rows = build({
     sessions: [],
     runs: [
       run({ runId: 'stale', active: false, status: 'completed', updatedAt: now - 60 * 60 * 1000 }),
@@ -404,7 +419,7 @@ test('buildRows hides old finished runs but keeps active ones', () => {
 });
 
 test('buildRows does not duplicate a run that a session already claimed', () => {
-  const rows = buildRows({ sessions: [session()], runs: [run()], now: 5000 });
+  const rows = build({ sessions: [session()], runs: [run()], now: 5000 });
   assert.equal(rows.length, 1);
 });
 
@@ -414,7 +429,7 @@ test('buildRows does not duplicate a run that a session already claimed', () => 
 // with it. The process table knows which session launched the run; these pin
 // what the dashboard does with that answer.
 test('a run belongs to the session that started it, not to every session in the repo', () => {
-  const rows = buildRows({
+  const rows = build({
     sessions: [
       session({ sessionId: 'owner', state: 'working' }),
       session({ sessionId: 'bystander', state: 'idle', host: { tty: '/dev/ttys005' } }),
@@ -436,7 +451,7 @@ test('a run nobody was seen to own still shows on every session in its repo', ()
   // Ownership narrows and never widens. A session restarted since the pipeline
   // began, or a run started by hand, leaves no process to walk up from - and an
   // unattributed run is better on all three rows than on none.
-  const rows = buildRows({
+  const rows = build({
     sessions: [session({ sessionId: 'a' }), session({ sessionId: 'b' })],
     runs: [run({ runId: 'r1' })],
     runOwners: new Map(),
@@ -452,7 +467,7 @@ test('a session that does not own the run is still titled after the repo it is i
   // The run says where a session *is* even when it says nothing about what the
   // pipeline is doing. Dropping it wholesale retitled a subdirectory session
   // after that subdirectory, so two cards on one repo stopped looking alike.
-  const rows = buildRows({
+  const rows = build({
     sessions: [session({ sessionId: 'bystander', cwd: '/Users/x/work/repo/src' })],
     runs: [run({ runId: 'r1' })],
     runOwners: new Map([['r1', 'owner']]),
@@ -474,7 +489,7 @@ test('a session that does not own the run is still titled after the repo it is i
 // answer the gate.
 test('a run started in a worktree belongs to the worktree session', () => {
   const worktree = '/Users/x/.treehouse/repo-9f/2/repo';
-  const rows = buildRows({
+  const rows = build({
     sessions: [
       session({ sessionId: 'worktree', cwd: worktree, state: 'working' }),
       session({ sessionId: 'main', cwd: '/Users/x/work/repo', state: 'idle' }),
@@ -504,7 +519,7 @@ test('a session shows the run it owns, not the higher-ranked one on the same pat
   // right one on it - so the driver was handed the parked run it has nothing to
   // do with (`rankRun` puts parked above active) and its own run fell through to
   // an unfocusable row of its own.
-  const rows = buildRows({
+  const rows = build({
     sessions: [session({ sessionId: 'driver' })],
     runs: [
       run({ runId: 'parked', branch: 'feat/other', parked: true, updatedAt: 2000 }),
@@ -532,7 +547,7 @@ test('owning a run moves the pipeline onto the card and leaves identity alone', 
   // Only `run` may follow ownership. `title` and `titlePath` keep coming from
   // the rank-resolved match on the session's own path - a session titled after
   // the run it owns would stop looking like the checkout it is sitting in.
-  const rows = buildRows({
+  const rows = build({
     sessions: [session({ sessionId: 'driver', cwd: '/Users/x/work/repo/src' })],
     runs: [
       run({ runId: 'parked', branch: 'feat/other', parked: true, updatedAt: 2000 }),
@@ -554,11 +569,13 @@ test('an ownership that has finished stops outranking the live run beside it', (
   // the card while the parked one next to it, the one with a gate open, loses
   // the only session that could answer it. The preference is over a live run
   // because the gate is the whole reason for it.
-  const rows = buildRows({
+  const rows = build({
     sessions: [session({ sessionId: 'driver' })],
     runs: [
       run({ runId: 'done', branch: 'feat/mine', status: 'completed', active: false }),
-      run({ runId: 'live', branch: 'feat/other', parked: true, updatedAt: 2000 }),
+      // On the driver's own branch, since a run is matched on it now - two runs
+      // for one branch is ordinary, having driven a second while the first ran.
+      run({ runId: 'live', branch: 'feat/mine', parked: true, updatedAt: 2000 }),
     ],
     branches: new Map([['driver', 'feat/mine']]),
     runOwners: new Map([['done', 'driver']]),
@@ -579,7 +596,7 @@ test('a worktree session keeps its own path, so two checkouts stay tellable apar
   // `titlePath` would give the worktree and the checkout it is linked to the
   // same anchor, and `disambiguateTitles` would have nothing left to grow - the
   // `1/` and `2/` that name a Treehouse tree would disappear from the page.
-  const rows = buildRows({
+  const rows = build({
     sessions: [
       session({ sessionId: 'worktree', cwd: '/Users/x/.treehouse/repo-9f/2/repo' }),
       session({ sessionId: 'main', cwd: '/Users/x/work/repo' }),
@@ -611,7 +628,7 @@ test('a worktree with no branch of its own gets nothing through the link', () =>
   // that branch's pull request with it. A worktree is on another branch by
   // definition, so a run reached this way is never a second-best answer; it is
   // a known-wrong one.
-  const rows = buildRows({
+  const rows = build({
     sessions: [session({ sessionId: 'detached', cwd: '/Users/x/.treehouse/repo-9f/1/repo' })],
     runs: [run({ runId: 'r1', branch: 'feat/thing', prUrl: 'https://github.com/x/repo/pull/9' })],
     mainCheckouts: new Map([['detached', '/Users/x/work/repo']]),
@@ -632,7 +649,7 @@ test('two runs on one checkout land on the worktrees that started them', () => {
   // added to fix, reproduced through the link. Ownership is deliberately empty
   // here: `nmmon status` is one-shot and has no memory of it, so the branch has
   // to be what separates them.
-  const rows = buildRows({
+  const rows = build({
     sessions: [
       session({ sessionId: 'a', cwd: '/Users/x/.treehouse/repo-9f/1/repo' }),
       session({ sessionId: 'b', cwd: '/Users/x/.treehouse/repo-9f/2/repo' }),
@@ -668,7 +685,7 @@ test('an unowned run does not fan out across a checkout\'s other worktrees', () 
   // sibling tree's card - its step, its gate, its folded agent and a Focus
   // button to a window that cannot answer it. Ownership must not be what saves
   // this, hence an empty map.
-  const rows = buildRows({
+  const rows = build({
     sessions: [
       session({ sessionId: 'driver', cwd: '/Users/x/.treehouse/repo-9f/2/repo', state: 'idle' }),
       session({ sessionId: 'sibling', cwd: '/Users/x/.treehouse/repo-9f/1/repo', state: 'idle' }),
@@ -691,35 +708,45 @@ test('an unowned run does not fan out across a checkout\'s other worktrees', () 
   assert.equal(byId.get('driver').run?.runId, 'r1');
   assert.equal(byId.get('sibling').run, null);
   assert.equal(byId.get('sibling').attention, 'idle');
-  // The session physically inside the checkout is the deliberate exception: a
-  // run is placed there by repo path alone, whatever branch the checkout has
-  // since moved to, so it keeps showing its repo's recent pipeline.
-  assert.equal(byId.get('checkout').run?.runId, 'r1');
+  // The session physically inside the checkout used to be the exception, on the
+  // rule that a run is placed there by repo path alone whatever branch it has
+  // moved to. That exception is gone: it is on `main`, the run is not, so the
+  // run is no more its business than the sibling worktree's.
+  assert.equal(byId.get('checkout').run, null);
 });
 
-test('a session inside the checkout keeps the repo\'s run on another branch', () => {
-  // The rule the link narrows must not narrow here. `matchRunForCwd` places a
-  // run by repo path alone on purpose - the row keeps showing the repo's recent
-  // pipeline - so a branch requirement on this path would take the pipeline off
-  // every session that had switched branch since it ran.
-  const rows = buildRows({
+test('a session inside the checkout does not keep a run from another branch', () => {
+  // The reverse of what this used to assert. The old rule - a row keeps showing
+  // its repo's recent pipeline whatever branch the checkout moved to - put a
+  // live pipeline from somebody else's branch on an idle card, with a Focus
+  // button to a window that could not answer its gate. A run belongs to the
+  // session driving it, and switching branch is how you say you are done.
+  const rows = build({
     sessions: [session({ sessionId: 's1', cwd: '/Users/x/work/repo/src' })],
     runs: [run({ runId: 'r1', branch: 'feat/thing' })],
     branches: new Map([['s1', 'main']]),
     now: 5000,
   });
-  assert.equal(rows[0].run?.runId, 'r1');
-  assert.equal(rows[0].branch, 'main');
+  const row = rows.find((r) => r.kind === 'session');
+  assert.equal(row.run, null);
+  assert.equal(row.branch, 'main');
 });
 
-test('a session inside the run\'s own repo still falls back to the run\'s branch', () => {
-  const rows = buildRows({
+test('a checkout with no readable branch is matched to nothing at all', () => {
+  // Fails closed, like every other match on this page. A detached HEAD is
+  // routine under Treehouse, and with nothing to match on a guess would be a
+  // confident wrong answer with a Focus button attached. The run is not lost -
+  // it goes to the unattributable card, which says why it is there.
+  const rows = build({
     sessions: [session({ sessionId: 's1', cwd: '/Users/x/work/repo/src' })],
     runs: [run({ runId: 'r1', branch: 'feat/thing' })],
     branches: new Map([['s1', null]]),
     now: 5000,
   });
-  assert.equal(rows[0].branch, 'feat/thing');
+  const row = rows.find((r) => r.kind === 'session');
+  assert.equal(row.run, null);
+  assert.equal(row.branch, null, 'and it does not borrow the run\'s branch either');
+  assert.equal(rows.find((r) => r.kind === 'run')?.attributable, false);
 });
 
 test('a worktree registered in its own right keeps its own run', () => {
@@ -727,7 +754,7 @@ test('a worktree registered in its own right keeps its own run', () => {
   // register a worktree as a repo of its own, and that run is the more specific
   // answer - the same rule `matchRunForCwd` already applies to nesting.
   const worktree = '/Users/x/.treehouse/repo-9f/2/repo';
-  const rows = buildRows({
+  const rows = build({
     sessions: [session({ sessionId: 'worktree', cwd: worktree })],
     runs: [
       run({ runId: 'main-run', repoPath: '/Users/x/work/repo' }),
@@ -742,7 +769,7 @@ test('a worktree registered in its own right keeps its own run', () => {
 test("a worktree session finds its branch's pull request in the main checkout", () => {
   // Pull requests are placed by the same prefix match, so they went missing on
   // a worktree session for exactly the same reason the run did.
-  const rows = buildRows({
+  const rows = build({
     sessions: [session({ sessionId: 'worktree', cwd: '/Users/x/.treehouse/repo-9f/2/repo' })],
     runs: [],
     mainCheckouts: new Map([['worktree', '/Users/x/work/repo']]),
@@ -766,7 +793,7 @@ test("a worktree session finds its branch's pull request in the main checkout", 
 test("a bystander keeps the branch's pull request, which is not the run's to lend", () => {
   // A pull request belongs to the checkout's branch, so every session on that
   // branch is waiting on the same review. Only the pipeline state is exclusive.
-  const rows = buildRows({
+  const rows = build({
     sessions: [session({ sessionId: 'bystander' })],
     runs: [run({ runId: 'r1' })],
     runOwners: new Map([['r1', 'owner']]),
@@ -794,7 +821,7 @@ test("the pipeline's own agent is folded into the owner's row alone", () => {
     state: 'blocked',
     message: 'Claude needs your permission to use Bash',
   });
-  const rows = buildRows({
+  const rows = build({
     sessions: [
       agentSession,
       session({ sessionId: 'owner' }),
@@ -805,19 +832,20 @@ test("the pipeline's own agent is folded into the owner's row alone", () => {
     now: 5000,
   });
   const byId = new Map(rows.map((r) => [r.sessionId, r]));
-  // A blocked pipeline agent has stalled the run, so the owner goes red.
+  // A blocked pipeline agent has stalled the run, so the owner goes red and
+  // carries the agent's own reason - the row is where the folded agent shows.
   assert.equal(byId.get('owner').attention, 'blocked');
-  assert.equal(byId.get('owner').agent?.state, 'blocked');
+  assert.equal(byId.get('owner').message, 'Claude needs your permission to use Bash');
   // The bystander cannot free it and must not be summoned for it.
-  assert.equal(byId.get('bystander').agent, null);
   assert.equal(byId.get('bystander').attention, 'idle');
+  assert.equal(byId.get('bystander').message, null);
 });
 
 test('a run whose owner is no longer registered gets a row of its own', () => {
   // The owning session ended while the pipeline carried on. Nobody claims the
   // run, so it falls through to the unattached-run pass rather than attaching
   // itself to whichever other session happens to share the directory.
-  const rows = buildRows({
+  const rows = build({
     sessions: [session({ sessionId: 'bystander' })],
     runs: [run({ runId: 'r1' })],
     runOwners: new Map([['r1', 'gone']]),
@@ -835,7 +863,7 @@ test('a run taken over by a live session lands on that session, not on a row of 
   // that answered it with `axi respond` is now the owner. That session must
   // carry the pipeline - it is the only window that can act on it - rather than
   // watching it render beside them as a row with no Focus button.
-  const rows = buildRows({
+  const rows = build({
     sessions: [
       session({ sessionId: 'taker', state: 'working' }),
       session({ sessionId: 'bystander', state: 'idle', host: { tty: '/dev/ttys005' } }),
@@ -878,14 +906,14 @@ test('summarise counts what the tab title and alerts need', () => {
 });
 
 test('a lone repo keeps its bare name', () => {
-  const rows = buildRows({ sessions: [session()], runs: [], now: 5000 });
+  const rows = build({ sessions: [session()], runs: [], now: 5000 });
   assert.equal(rows[0].title, 'repo');
 });
 
 test('two checkouts of the same repo are told apart by their parent directory', () => {
   // The real case this exists for: a repo and a worktree copy of it both
   // render as one word, and the page becomes a guessing game.
-  const rows = buildRows({
+  const rows = build({
     sessions: [
       session({ sessionId: 's1', cwd: '/Users/x/work/hexbattle' }),
       session({ sessionId: 's2', cwd: '/Users/x/.treehouse/hexbattle-04b649/2/hexbattle' }),
@@ -900,7 +928,7 @@ test('two checkouts of the same repo are told apart by their parent directory', 
 });
 
 test('sessions sharing a directory keep one name - a longer path cannot separate them', () => {
-  const rows = buildRows({
+  const rows = build({
     sessions: [
       session({ sessionId: 's1', cwd: '/Users/x/work/repo' }),
       session({ sessionId: 's2', cwd: '/Users/x/work/repo', state: 'blocked' }),
@@ -919,7 +947,7 @@ test('two sessions in one registered repo keep the repo name, subdirectory or no
   // directory would retitle the subpackage one "packages/api" and lose the
   // repo name entirely. The path the title came from is the repo, and it is
   // the same repo, so there is nothing to grow.
-  const rows = buildRows({
+  const rows = build({
     sessions: [
       session({ sessionId: 's1', cwd: '/Users/x/work/repo/packages/api' }),
       session({ sessionId: 's2', cwd: '/Users/x/work/repo' }),
@@ -934,7 +962,7 @@ test('two sessions in one registered repo keep the repo name, subdirectory or no
 });
 
 test('a run row is disambiguated against a session row in a different checkout', () => {
-  const rows = buildRows({
+  const rows = build({
     sessions: [session({ cwd: '/Users/x/work/repo' })],
     runs: [
       run({ runId: 'r1', repoPath: '/Users/x/work/repo' }),
@@ -987,7 +1015,7 @@ test('disambiguateTitles ignores rows with no directory to extend', () => {
 });
 
 test('waiting time is measured from when the session became blocked', () => {
-  const rows = buildRows({
+  const rows = build({
     sessions: [session({ state: 'blocked', stateSince: 4000 })],
     runs: [],
     now: 10_000,
@@ -1037,7 +1065,7 @@ test('matchPullRequest prefers the most specific repo for nested worktrees', () 
 test('a session keeps its pull request after the run that opened it has gone', () => {
   // The whole point: a run is interesting for half an hour, and the review it
   // opened is what you are waiting on for the rest of the day.
-  const rows = buildRows({
+  const rows = build({
     sessions: [session({ cwd: '/Users/x/work/repo' })],
     runs: [],
     branches: new Map([['s1', 'feat/x']]),
@@ -1050,7 +1078,7 @@ test('a session keeps its pull request after the run that opened it has gone', (
 test('the branch comes from the checkout, not from whichever run happened to match', () => {
   // A run's branch belongs to a pipeline that may have finished on a branch
   // since left behind. The checkout is the truth about where the session is.
-  const rows = buildRows({
+  const rows = build({
     sessions: [session()],
     runs: [run({ branch: 'old-branch' })],
     branches: new Map([['s1', 'feat/current']]),
@@ -1058,13 +1086,22 @@ test('the branch comes from the checkout, not from whichever run happened to mat
   assert.equal(rows[0].branch, 'feat/current');
 });
 
-test('the run"s branch is the fallback when .git could not be read', () => {
-  const rows = buildRows({ sessions: [session()], runs: [run({ branch: 'from-run' })] });
-  assert.equal(rows[0].branch, 'from-run');
+test('the branch is the checkout"s own, never borrowed from a run', () => {
+  // A run used to lend its branch to a session in its repo whose `.git` could
+  // not be read. There is nothing left to borrow from: a run is matched *on*
+  // the branch, so in the one case the fallback existed for there is no matched
+  // run. And the pull request is gated on the branch, so a borrowed branch was
+  // a borrowed review link.
+  const rows = build({
+    sessions: [session()],
+    runs: [run({ branch: 'from-run' })],
+    branches: new Map([['s1', null]]),
+  });
+  assert.equal(rows.find((r) => r.kind === 'session').branch, null);
 });
 
 test('a live run"s own pull request wins, and is reported as current', () => {
-  const rows = buildRows({
+  const rows = build({
     sessions: [session()],
     runs: [run({ active: true, prUrl: 'https://example.com/pull/9', prState: 'open' })],
     branches: new Map([['s1', 'main']]),
@@ -1080,7 +1117,7 @@ test('a run does not lend its pull request to a session that has moved on', () =
   // repo path alone - deliberately - so the run attaching is right and the
   // pull request coming with it is not. Same rule as `matchPullRequest`: the
   // branch has to agree, or there is no link.
-  const rows = buildRows({
+  const rows = build({
     sessions: [session()],
     runs: [
       run({
@@ -1099,7 +1136,7 @@ test('a run does not lend its pull request to a session that has moved on', () =
 
 test('a run on another branch still falls through to the branch-verified source', () => {
   // Rejecting the run's pull request must not cost the row the right one.
-  const rows = buildRows({
+  const rows = build({
     sessions: [session()],
     runs: [run({ branch: 'fix/other', prUrl: 'https://example.com/pull/5' })],
     branches: new Map([['s1', 'feat/x']]),
@@ -1108,19 +1145,25 @@ test('a run on another branch still falls through to the branch-verified source'
   assert.equal(rows[0].pr.number, 7);
 });
 
-test('a checkout whose branch could not be read takes the run"s word for it', () => {
-  // With no branch of our own the run's is all there is, and it is also what
-  // the row itself is showing - so the two still agree, which is the rule.
-  const rows = buildRows({
+test('a checkout whose branch could not be read gets no run and no pull request', () => {
+  // It used to take the run's word for both, on the grounds that the run's
+  // branch was all there was and the row showed it too, so the two agreed. They
+  // agreed with each other and not necessarily with the checkout: several runs
+  // now share one repo path, so "the run's branch" is whichever ranked highest.
+  // Nothing is better than a confident wrong review link.
+  const rows = build({
     sessions: [session()],
     runs: [run({ branch: 'feat/x', active: true, prUrl: 'https://example.com/pull/9' })],
+    branches: new Map([['s1', null]]),
   });
-  assert.equal(rows[0].branch, 'feat/x');
-  assert.equal(rows[0].pr.number, 9);
+  const row = rows.find((r) => r.kind === 'session');
+  assert.equal(row.branch, null);
+  assert.equal(row.run, null);
+  assert.equal(row.pr, null);
 });
 
 test('lastActivityAt reaches the row from the transcript', () => {
-  const rows = buildRows({
+  const rows = build({
     sessions: [session()],
     runs: [],
     summaries: new Map([['s1', { title: 't', mode: null, activity: null, lavishFile: null, lastActivityAt: 4242 }]]),
@@ -1129,7 +1172,7 @@ test('lastActivityAt reaches the row from the transcript', () => {
 });
 
 test('a run with no session behind it reports its own clock', () => {
-  const rows = buildRows({ sessions: [], runs: [run({ updatedAt: 777 })] });
+  const rows = build({ sessions: [], runs: [run({ updatedAt: 777 })] });
   assert.equal(rows[0].lastActivityAt, 777);
 });
 
@@ -1169,7 +1212,7 @@ test('the repository match ignores case but nothing else', () => {
 test('the database beats the transcript when it has a branch-matched answer', () => {
   // The database entry is verified against the branch; the transcript sighting
   // is only verified against the repo. Both being present should be rare.
-  const rows = buildRows({
+  const rows = build({
     sessions: [session({ cwd: '/Users/x/work/repo' })],
     runs: [],
     branches: new Map([['s1', 'feat/x']]),
@@ -1180,7 +1223,7 @@ test('the database beats the transcript when it has a branch-matched answer', ()
 });
 
 test('the transcript fills the gap when the database has nothing for this branch', () => {
-  const rows = buildRows({
+  const rows = build({
     sessions: [session({ cwd: '/Users/x/work/repo' })],
     runs: [],
     branches: new Map([['s1', 'feat/unrun']]),
@@ -1188,6 +1231,23 @@ test('the transcript fills the gap when the database has nothing for this branch
     summaries: new Map([['s1', seen()]]),
   });
   assert.equal(rows[0].pr.number, 40);
+});
+
+test("the transcript's pull request is checked against the repo, not against the run", () => {
+  // The slug guard compares the repository in the URL with the basename of the
+  // path it is given, so which path it is given decides whether a real review
+  // link survives. Handing it the branch-gated run match meant a session in a
+  // subdirectory, on a branch none of the repo's runs were on, compared `repo`
+  // against `api` and dropped the link its own transcript had reported.
+  const rows = build({
+    sessions: [session({ cwd: '/Users/x/work/repo/packages/api' })],
+    runs: [run({ runId: 'r1', branch: 'main' })],
+    branches: new Map([['s1', 'feat/unrun']]),
+    pullRequests: [],
+    summaries: new Map([['s1', seen()]]),
+    now: 5000,
+  });
+  assert.equal(rows.find((r) => r.kind === 'session').pr?.number, 40);
 });
 
 test('a pull request the database records on another branch is not ours', () => {
@@ -1238,7 +1298,7 @@ test('the run table no-mistakes injects does not put its first PR on the card', 
     number: 1,
     branch: 'feat/monitor-runs-and-sessions',
   });
-  const rows = buildRows({
+  const rows = build({
     sessions: [session({ cwd: '/Users/x/work/repo' })],
     runs: [],
     branches: new Map([['s1', 'feat/session-summaries-and-typecheck']]),
@@ -1270,26 +1330,27 @@ test('the run id has to be a whole path segment, not a substring of one', () => 
 test("the pipeline's agent does not get a row of its own", () => {
   // It used to arrive as a card titled with the bare run id, looking like an
   // unrelated repo nobody had heard of - and one you could never act on.
-  const rows = buildRows({
+  const rows = build({
     sessions: [
       session({ sessionId: 'human', cwd: '/Users/x/work/repo' }),
       session({ sessionId: 'agent', cwd: AGENT_CWD }),
     ],
-    runs: [agentRun()],
+    runs: [agentRun({ step: { name: 'review', status: 'running', findings: 0 } })],
     summaries: new Map([
       ['agent', { title: 'Review the terrain change', activity: 'Reading terrain.ts', mode: null, lavishFile: null, lastActivityAt: 9000, pullRequest: null }],
     ]),
   });
   assert.equal(rows.length, 1, 'one row per repo, never two');
   assert.equal(rows[0].sessionId, 'human');
-  assert.equal(rows[0].agent.activity, 'Reading terrain.ts');
+  // Folded in rather than lost: what the agent is doing is the pipeline line.
+  assert.equal(rows[0].pipeline?.what, 'Reading terrain.ts');
 });
 
 test('a blocked pipeline agent still reaches you, on the repo row', () => {
   // Folding the agent in must not swallow the one signal the tool exists for:
   // an agent on a permission prompt has stalled the pipeline, and only a human
   // can free it.
-  const rows = buildRows({
+  const rows = build({
     sessions: [
       session({ sessionId: 'human', cwd: '/Users/x/work/repo', state: 'working' }),
       session({ sessionId: 'agent', cwd: AGENT_CWD, state: 'blocked', message: 'Needs permission to push' }),
@@ -1306,7 +1367,7 @@ test("a granted agent prompt stops pinning the repo's row red", () => {
   // permission prompt and the end of the turn, so only the agent's own
   // transcript can say it carried on. Folding must not import the stale block
   // this branch exists to get rid of.
-  const rows = buildRows({
+  const rows = build({
     sessions: [
       session({ sessionId: 'human', cwd: '/Users/x/work/repo', state: 'working' }),
       session({
@@ -1317,50 +1378,51 @@ test("a granted agent prompt stops pinning the repo's row red", () => {
         message: 'Needs permission to push',
       }),
     ],
-    runs: [agentRun({ active: false, status: 'completed', updatedAt: 1000 })],
+    // Live, because a finished run now leaves the card altogether and takes its
+    // folded agent with it - there would be no agent left to assert about.
+    runs: [agentRun({ updatedAt: 1000 })],
     summaries: new Map([
       ['agent', { title: null, activity: 'Running npm', mode: null, lavishFile: null, lastActivityAt: 9000, pullRequest: null }],
     ]),
   });
-  assert.notEqual(rows[0].attention, 'blocked');
-  assert.equal(rows[0].agent.state, 'working');
+  assert.equal(rows[0].attention, 'working');
   assert.equal(rows[0].message, null, 'and the reason for a block that is over goes with it');
 });
 
 test("a live pipeline answers the agent's idle nudge and nothing else", () => {
-  const build = (message) =>
-    buildRows({
+  const rowFor = (message) =>
+    build({
       sessions: [session({ sessionId: 'agent', cwd: AGENT_CWD, state: 'blocked', message })],
       runs: [agentRun()],
       pipelines: new Set(['agent']),
     })[0];
 
-  assert.notEqual(build('Claude is waiting for your input').attention, 'blocked');
-  assert.equal(build('Claude needs your permission to use Bash').attention, 'blocked');
+  assert.notEqual(rowFor('Claude is waiting for your input').attention, 'blocked');
+  assert.equal(rowFor('Claude needs your permission to use Bash').attention, 'blocked');
 });
 
 test('the newest agent of a run is the one shown, not whichever wrote last', () => {
   // One step's agent is still registered while the next starts, and sessions
   // arrive newest first. An older calm agent must not mask a new blocked one.
-  const rows = buildRows({
+  const rows = build({
     sessions: [
       session({ sessionId: 'new-agent', cwd: AGENT_CWD, state: 'blocked', message: 'Needs permission to push' }),
       session({ sessionId: 'old-agent', cwd: AGENT_CWD, state: 'working' }),
     ],
-    runs: [agentRun()],
+    runs: [agentRun({ step: { name: 'push', status: 'running', findings: 0 } })],
     summaries: new Map([
       ['new-agent', { title: null, activity: 'Running git push', mode: null, lavishFile: null, lastActivityAt: 9000, pullRequest: null }],
       ['old-agent', { title: null, activity: 'Running npm test', mode: null, lavishFile: null, lastActivityAt: 8000, pullRequest: null }],
     ]),
   });
-  assert.equal(rows[0].agent.activity, 'Running git push');
+  assert.equal(rows[0].pipeline?.what, 'Running git push');
   assert.equal(rows[0].attention, 'blocked');
 });
 
 test("an agent's block is never captioned with the human's granted prompt", () => {
   // The registry keeps a message for as long as it holds the block, so a
   // session whose own prompt was granted still carries the text.
-  const rows = buildRows({
+  const rows = build({
     sessions: [
       session({
         sessionId: 'human',
@@ -1381,60 +1443,81 @@ test("an agent's block is never captioned with the human's granted prompt", () =
 });
 
 test('the agent lands on the run row when nobody else is in that repo', () => {
-  const rows = buildRows({
+  const rows = build({
     sessions: [session({ sessionId: 'agent', cwd: AGENT_CWD })],
-    runs: [agentRun()],
+    runs: [agentRun({ step: { name: 'test', status: 'running', findings: 0 } })],
     summaries: new Map([
       ['agent', { title: null, activity: 'Running npm', mode: null, lavishFile: null, lastActivityAt: 9000, pullRequest: null }],
     ]),
   });
   assert.equal(rows.length, 1);
   assert.equal(rows[0].kind, 'run');
-  assert.equal(rows[0].agent.activity, 'Running npm');
+  assert.equal(rows[0].pipeline?.what, 'Running npm');
   assert.equal(rows[0].lastActivityAt, 9000, "the agent's transcript beats the run's own clock");
 });
 
 test('an ordinary session is never mistaken for a pipeline agent', () => {
-  const rows = buildRows({
+  // Its own tool stays its own: read off the session line, and never folded
+  // into the pipeline's as though no-mistakes were running it.
+  const rows = build({
     sessions: [session({ sessionId: 'human', cwd: '/Users/x/work/repo' })],
-    runs: [agentRun()],
+    runs: [agentRun({ step: { name: 'test', status: 'running', findings: 0 } })],
+    summaries: new Map([
+      ['human', { title: null, activity: 'Editing terrain.ts', mode: null, lavishFile: null, lastActivityAt: 9000, pullRequest: null }],
+    ]),
   });
   assert.equal(rows[0].sessionId, 'human');
-  assert.equal(rows[0].agent, null);
+  assert.equal(rows[0].activity, 'Editing terrain.ts');
+  assert.equal(rows[0].pipeline?.what, null);
 });
 
-test('the agent marker does not blink out between two tool calls', () => {
+test('the pipeline line does not blink out between two tool calls', () => {
   // `activity` is the tool with no result yet, so it is null every time one
   // call finishes before the next begins - most seconds, on a busy agent.
   // Rendering on it made the marker flash in and out several times a minute,
-  // which on a pinned page reads as the pipeline starting and stopping.
+  // which on a pinned page reads as the pipeline starting and stopping. So
+  // presence follows the *run*, and the accepted consequence is that between
+  // two tool calls the line carries the step name alone.
   const between = new Map([
-    ['agent', { title: null, activity: null, mode: null, lavishFile: null, lastActivityAt: 9000, pullRequest: null }],
+    ['agent', { title: 'Review the terrain change', activity: null, mode: null, lavishFile: null, lastActivityAt: 9000, pullRequest: null }],
   ]);
-  const rows = buildRows({
+  const rows = build({
     sessions: [
       session({ sessionId: 'human', cwd: '/Users/x/work/repo' }),
       session({ sessionId: 'agent', cwd: AGENT_CWD }),
     ],
-    runs: [agentRun()],
+    runs: [agentRun({ step: { name: 'review', status: 'running', findings: 0 } })],
     summaries: between,
   });
-  assert.ok(rows[0].agent, 'the agent is still there between tools');
-  assert.equal(rows[0].agent.what, 'working', 'and still has something to say');
+  assert.ok(rows[0].pipeline, 'the line is still there between tools');
+  assert.equal(rows[0].pipeline.step, 'review');
+  assert.equal(rows[0].pipeline.what, null);
 });
 
-test('the agent marker prefers the live tool, then the title', () => {
-  const build = (summary) =>
-    buildRows({
+test("the pipeline line prefers the agent's live tool over the step's own report", () => {
+  // Two sources for one line, most specific first: a step running a Claude
+  // agent says what tool is in flight, and a step with no agent - the CI
+  // monitor, which runs inside the daemon - has only its own last activity.
+  const whatFor = (activity) =>
+    build({
       sessions: [session({ sessionId: 'agent', cwd: AGENT_CWD })],
-      runs: [agentRun()],
-      summaries: new Map([['agent', summary]]),
-    })[0].agent.what;
+      runs: [
+        agentRun({
+          step: {
+            name: 'ci',
+            status: 'running',
+            findings: 0,
+            lastActivity: 'log: base branch advanced, re-arming CI monitor',
+          },
+        }),
+      ],
+      summaries: new Map([
+        ['agent', { title: 'Review the change', activity, mode: null, lavishFile: null, lastActivityAt: 1, pullRequest: null }],
+      ]),
+    })[0].pipeline.what;
 
-  const base = { mode: null, lavishFile: null, lastActivityAt: 1, pullRequest: null };
-  assert.equal(build({ ...base, activity: 'Reading terrain.ts', title: 'Review the change' }), 'Reading terrain.ts');
-  assert.equal(build({ ...base, activity: null, title: 'Review the change' }), 'Review the change');
-  assert.equal(build({ ...base, activity: null, title: null }), 'working');
+  assert.equal(whatFor('Reading terrain.ts'), 'Reading terrain.ts');
+  assert.equal(whatFor(null), 'base branch advanced, re-arming CI monitor');
 });
 
 // -------------------------------------------- a running pipeline is not idle
@@ -1473,7 +1556,7 @@ test('without a type at all, the message still decides', () => {
 });
 
 test('a live pipeline answers a typed idle nudge', () => {
-  const [row] = buildRows({
+  const [row] = build({
     sessions: [
       session({
         state: 'blocked',
@@ -1490,7 +1573,7 @@ test('a live pipeline answers a typed idle nudge', () => {
 });
 
 test('a live pipeline does not answer a typed permission prompt', () => {
-  const [row] = buildRows({
+  const [row] = build({
     sessions: [
       session({
         state: 'blocked',
@@ -1516,7 +1599,7 @@ test('a running pipeline disproves "Claude is waiting for your input"', () => {
     stateSince: 5000,
     message: 'Claude is waiting for your input',
   });
-  const [row] = buildRows({
+  const [row] = build({
     sessions: [blocked],
     runs: [],
     now: 6000,
@@ -1531,7 +1614,7 @@ test('a running pipeline does NOT clear a real permission prompt', () => {
   // A permission prompt stops everything until a human answers, whether or not
   // something else is churning in the background. Clearing it would swallow
   // the one signal this tool exists to give.
-  const [row] = buildRows({
+  const [row] = build({
     sessions: [
       session({ state: 'blocked', stateSince: 5000, message: 'Claude needs your permission to use Bash' }),
     ],
@@ -1546,7 +1629,7 @@ test('a running pipeline does NOT clear a real permission prompt', () => {
 test('with no pipeline running, the idle nudge still means you', () => {
   // The escalation from a quiet Stop to a loud "waiting for you" is deliberate:
   // it is how a finished session asks for its next instruction.
-  const [row] = buildRows({
+  const [row] = build({
     sessions: [
       session({ state: 'blocked', stateSince: 5000, message: 'Claude is waiting for your input' }),
     ],
@@ -1557,7 +1640,7 @@ test('with no pipeline running, the idle nudge still means you', () => {
 });
 
 test('a row carries which agent is running it', () => {
-  const rows = buildRows({
+  const rows = build({
     sessions: [session({ agent: 'pi' })],
     runs: [],
   });
@@ -1566,13 +1649,274 @@ test('a row carries which agent is running it', () => {
 
 test('a session record written before pi existed is Claude Code', () => {
   // The field is simply absent on every record already on disk.
-  const rows = buildRows({ sessions: [session()], runs: [] });
+  const rows = build({ sessions: [session()], runs: [] });
   assert.equal(rows[0].agentKind, 'claude');
 });
 
 test('a run with no session behind it claims no agent', () => {
   // Nobody is running it - it is a pipeline the database knows about - and
   // naming an agent there would be an invention.
-  const rows = buildRows({ sessions: [], runs: [run()] });
+  const rows = build({ sessions: [], runs: [run()] });
   assert.equal(rows[0].agentKind, null);
+});
+
+// ---------------------------------------------------------------- the model
+//
+// These pin the reframing this tool went through: the session is the unit, and
+// a no-mistakes run is an *attribute* of one. Everything below follows from
+// that - a run may not displace what the session is doing, may not be claimed
+// by a session that is not on its branch, and may not be shown at all once it
+// has passed. Each one replaces a decision written when a run was the subject.
+
+test('an active pipeline does not displace what the session is working on', () => {
+  // The step used to overwrite the summary outright, so the moment no-mistakes
+  // started you lost sight of what you had been talking to the session about -
+  // and the two are concurrent, not alternatives.
+  const rows = build({
+    sessions: [session({ sessionId: 's1' })],
+    runs: [run({ runId: 'r1', step: { name: 'test', status: 'running', findings: 0 } })],
+    summaries: new Map([['s1', { title: 'Make app optional for phase one' }]]),
+    branches: new Map([['s1', 'main']]),
+    now: 5000,
+  });
+  assert.equal(rows[0].summary, 'Make app optional for phase one');
+  assert.equal(rows[0].pipeline?.step, 'test');
+});
+
+test('the pipeline line says what no-mistakes is doing when no agent exists', () => {
+  // The CI monitor runs inside the no-mistakes daemon, so there is no agent
+  // session to fold in - and `step.lastActivity` was already reaching the page
+  // and being thrown away. This is the case that reads as "nothing attributed".
+  const rows = build({
+    sessions: [session({ sessionId: 's1' })],
+    runs: [
+      run({
+        runId: 'r1',
+        step: {
+          name: 'ci',
+          status: 'running',
+          findings: 0,
+          lastActivity: 'log: base branch advanced (25185a53..b42e9299), re-arming CI monitor',
+        },
+      }),
+    ],
+    branches: new Map([['s1', 'main']]),
+    now: 5000,
+  });
+  assert.equal(rows[0].pipeline?.step, 'ci');
+  assert.match(rows[0].pipeline?.what, /base branch advanced/);
+  // The `log: ` prefix is a transport detail, not something to read on a card.
+  assert.doesNotMatch(rows[0].pipeline?.what, /^log:/);
+});
+
+test('a failed step says why, on the one card that must not go quiet', () => {
+  // Verbatim from the live database, where `step failed:` is the commonest
+  // prefix after `status:` - 79 rows of it. The allowlist knew only `log:`, so
+  // the reason a run failed was thrown away and the failed card, the one thing
+  // this page deliberately keeps after a run ends, showed a step name and an
+  // empty tail. The prefix is kept here: without it the reason reads as
+  // something the step is doing rather than how it ended.
+  const rows = build({
+    sessions: [session({ sessionId: 's1' })],
+    runs: [
+      run({
+        runId: 'r1',
+        status: 'failed',
+        active: false,
+        step: {
+          name: 'push',
+          status: 'failed',
+          findings: 0,
+          lastActivity: 'step failed: push to upstream: exit status 1',
+        },
+      }),
+    ],
+    branches: new Map([['s1', 'main']]),
+    now: 5000,
+  });
+  assert.equal(rows[0].pipeline?.what, 'step failed: push to upstream: exit status 1');
+});
+
+test('a status line, and a prefix no-mistakes has yet to invent, are both dropped', () => {
+  // `status:` restates the step status the line above already carries. An
+  // unrecognised prefix is dropped for a different reason: the vocabulary is
+  // no-mistakes' to grow, and an allowlist is what stops the next thing it adds
+  // arriving on a card raw.
+  const what = (lastActivity) =>
+    build({
+      sessions: [session({ sessionId: 's1' })],
+      runs: [run({ runId: 'r1', step: { name: 'ci', status: 'running', findings: 0, lastActivity } })],
+      branches: new Map([['s1', 'main']]),
+      now: 5000,
+    })[0].pipeline?.what;
+  assert.equal(what('status: completed'), null);
+  assert.equal(what('telemetry: 41 spans flushed'), null);
+  // And the line itself still renders, because presence follows the run.
+  assert.equal(
+    build({
+      sessions: [session({ sessionId: 's1' })],
+      runs: [run({ runId: 'r1', step: { name: 'ci', status: 'running', findings: 0, lastActivity: 'status: completed' } })],
+      branches: new Map([['s1', 'main']]),
+      now: 5000,
+    })[0].pipeline?.step,
+    'ci',
+  );
+});
+
+test('the branch narrows which run a card shows, never what the card is called', () => {
+  // One value was doing both jobs, so gating it by branch quietly renamed the
+  // card. A session in a subdirectory, on a branch none of the repo's runs are
+  // on, retitled itself from `repo` to `api` - and flipped back the moment a run
+  // on its branch entered the reading, changing name under the person reading
+  // it. Identity comes from the session's own path now; only the run moves.
+  const rowFor = (branch) =>
+    build({
+      sessions: [session({ sessionId: 's1', cwd: '/Users/x/work/repo/packages/api' })],
+      runs: [run({ runId: 'r1', branch: 'main' })],
+      branches: new Map([['s1', branch]]),
+      now: 5000,
+    }).find((r) => r.kind === 'session');
+
+  const onIt = rowFor('main');
+  const offIt = rowFor('feat/x');
+  assert.equal(offIt.title, onIt.title, 'the name does not move with the branch');
+  assert.equal(offIt.titlePath, onIt.titlePath);
+  assert.equal(offIt.title, 'repo');
+  assert.equal(offIt.titlePath, '/Users/x/work/repo');
+  // And the thing the branch is there to narrow is still narrowed.
+  assert.equal(onIt.run?.runId, 'r1');
+  assert.equal(offIt.run, null);
+});
+
+test('a checkout does not inherit a run from another branch', () => {
+  // The rule used to stop at the worktree link: a session sitting in the repo
+  // matched by path alone, so an idle `main` card claimed a live pipeline on a
+  // branch it was not on, with a Focus button to a window that could not answer
+  // its gate.
+  const rows = build({
+    sessions: [session({ sessionId: 's1', cwd: '/Users/x/work/repo' })],
+    runs: [run({ runId: 'r1', branch: 'feat/elsewhere', parked: true })],
+    branches: new Map([['s1', 'main']]),
+    now: 5000,
+  });
+  assert.equal(rows.find((r) => r.sessionId === 's1').run, null);
+  assert.equal(rows.find((r) => r.sessionId === 's1').attention, 'working');
+});
+
+test('a passed run drops off the card; a failed one stays', () => {
+  // Being back on a branch with a finished run means that task is done - except
+  // when it failed, which is unfinished business and the case you most need the
+  // card to keep saying something about.
+  const passed = build({
+    sessions: [session({ sessionId: 's1' })],
+    runs: [run({ runId: 'r1', status: 'completed', active: false })],
+    branches: new Map([['s1', 'main']]),
+    now: 5000,
+  });
+  assert.equal(passed.find((r) => r.sessionId === 's1').run, null);
+  assert.equal(passed.length, 1, 'and it does not fall through to a card of its own');
+
+  const failed = build({
+    sessions: [session({ sessionId: 's1' })],
+    runs: [run({ runId: 'r1', status: 'failed', active: false })],
+    branches: new Map([['s1', 'main']]),
+    now: 5000,
+  });
+  assert.equal(failed.find((r) => r.sessionId === 's1').run?.runId, 'r1');
+});
+
+test('a status no-mistakes has yet to invent stays on the page', () => {
+  // Only the two quiet endings are named, so a word added later - `timed_out`
+  // here, which does not exist today - cannot be dropped in silence. This fails
+  // *open*, the opposite way round to `isRunOwnerCommand`: an unrecognised
+  // driving verb must not claim a run, and an unrecognised status must not hide
+  // one.
+  const rows = build({
+    sessions: [session({ sessionId: 's1' })],
+    runs: [run({ runId: 'r1', status: 'timed_out', active: false })],
+    branches: new Map([['s1', 'main']]),
+    now: 5000,
+  });
+  assert.equal(rows.find((r) => r.sessionId === 's1').run?.runId, 'r1');
+
+  // And a run you cancelled still leaves. `ACTIVE_STATUSES` is an allowlist, so
+  // the two are only ever told apart by the word.
+  const cancelled = build({
+    sessions: [session({ sessionId: 's1' })],
+    runs: [run({ runId: 'r1', status: 'cancelled', active: false })],
+    branches: new Map([['s1', 'main']]),
+    now: 5000,
+  });
+  assert.equal(cancelled.find((r) => r.sessionId === 's1').run, null);
+  assert.equal(cancelled.length, 1);
+});
+
+test('a status no-mistakes has yet to invent is never rendered as a failure', () => {
+  // Being on the page is knowledge; being red is a claim. An unknown word could
+  // be a new ending (`errored`) or a new running state (`queued`) - and
+  // `ACTIVE_STATUSES` is an allowlist, so it is not `active` either way. Red
+  // that sometimes means nothing is wrong is how this page stops being
+  // believed, so it shows as work in progress instead.
+  const unknown = run({ runId: 'r1', status: 'timed_out', active: false });
+  assert.equal(attentionFor({ session: null, run: unknown }), 'working');
+  assert.equal(attentionFor({ session: { state: 'idle' }, run: unknown }), 'idle');
+
+  // The one known ending that stays on the page is untouched: `failed` is still
+  // a failure. The quiet ones have no state of their own to assert - they leave
+  // the page entirely, which the test above is what checks.
+  assert.equal(
+    attentionFor({ session: null, run: run({ status: 'failed', active: false }) }),
+    'failed',
+  );
+
+  const rows = build({
+    sessions: [session({ sessionId: 's1' })],
+    runs: [unknown],
+    branches: new Map([['s1', 'main']]),
+    now: 5000,
+  });
+  assert.equal(rows.find((r) => r.sessionId === 's1').attention, 'working');
+});
+
+test('a run nobody can be tied to gets one honest card, never a false attribute', () => {
+  // The old rule put an unattributed run on every session in its repo, on the
+  // grounds that showing it three times beat showing it never. Under a
+  // session-centric model that is two wrong cards and one right one, and you
+  // cannot tell which is which - so it is shown once and says what it is.
+  const rows = build({
+    sessions: [
+      session({ sessionId: 'a', cwd: '/Users/x/work/repo' }),
+      session({ sessionId: 'b', cwd: '/Users/x/.treehouse/repo-9f/2/repo' }),
+    ],
+    runs: [run({ runId: 'r1', branch: 'feat/nobody-here', parked: true })],
+    branches: new Map([
+      ['a', 'main'],
+      ['b', 'feat/other'],
+    ]),
+    mainCheckouts: new Map([['b', '/Users/x/work/repo']]),
+    now: 5000,
+  });
+  const sessions = rows.filter((r) => r.kind === 'session');
+  const runRows = rows.filter((r) => r.kind === 'run');
+  assert.deepEqual(sessions.map((r) => r.run), [null, null], 'no session claims it');
+  assert.equal(runRows.length, 1);
+  assert.equal(runRows[0].attributable, false);
+  // Both sessions resolve to the same logical repo, worktree included, so the
+  // card can say how many windows it might belong to instead of guessing.
+  assert.equal(runRows[0].candidateSessions, 2);
+});
+
+test('an unattributable run sorts below every session, whatever its state', () => {
+  // It cannot be focused, so it must never outrank a card you can act on - even
+  // parked, which normally outranks working.
+  const rows = build({
+    sessions: [session({ sessionId: 'a', state: 'idle' })],
+    runs: [run({ runId: 'r1', branch: 'feat/nobody-here', parked: true })],
+    branches: new Map([['a', 'main']]),
+    now: 5000,
+  });
+  assert.deepEqual(
+    rows.map((r) => r.kind),
+    ['session', 'run'],
+  );
 });
