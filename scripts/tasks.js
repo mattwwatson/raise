@@ -3,7 +3,6 @@
  *
  *   npm run tasks            the board
  *   npm run tasks:links      every docs/tasks reference resolves
- *   npm run tasks:gate       CI: this branch's spec says shipped
  *   npm run tasks:validate   the board, plus a Jira reconciliation REPORT
  *
  * Jira owns the ordering - backlog rank, epics, explicitly-set blockers - and
@@ -25,10 +24,11 @@ import { join } from 'node:path';
 import { buildBoard, renderBoard } from './task-board.js';
 import { defaultTaskFiles, repoRoot } from './task-files.js';
 import { fetchJiraIssues, reconcile, renderJiraFailure, renderValidation } from './task-jira.js';
+import { checkLinks, readTree, renderLinks } from './task-links.js';
 import { readSpecs, TASKS_DIR } from './task-specs.js';
 
 /** Subcommands, in the order `usage` lists them. */
-const COMMANDS = ['board', 'validate'];
+const COMMANDS = ['board', 'links', 'validate'];
 
 const DEFAULT_COMMAND = 'board';
 
@@ -44,6 +44,7 @@ function usage() {
   console.error('Usage: node scripts/tasks.js [%s]', COMMANDS.join(' | '));
   console.error('');
   console.error('  board     what is ready, what is blocked, what shipped');
+  console.error('  links     every docs/tasks reference resolves');
   console.error('  validate  the board, plus how disk and Jira differ (a report)');
 }
 
@@ -58,7 +59,17 @@ async function main() {
   }
 
   const colour = process.stdout.isTTY === true && !process.env.NO_COLOR;
-  const specs = readSpecs(join(repoRoot(), TASKS_DIR), defaultTaskFiles);
+  const root = repoRoot();
+
+  // `links` reads the tree rather than the specs, and answers on its own.
+  if (command === 'links') {
+    const report = checkLinks(readTree(root, defaultTaskFiles));
+    write(renderLinks(report, { colour }));
+    process.exitCode = report.exitCode;
+    return;
+  }
+
+  const specs = readSpecs(join(root, TASKS_DIR), defaultTaskFiles);
 
   const board = buildBoard(specs);
   write(renderBoard(board, { colour }));

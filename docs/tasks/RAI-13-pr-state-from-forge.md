@@ -8,7 +8,7 @@ depends: RAI-10
 
 **Self-contained brief.** No prior conversation needed. Written 06/08/2026.
 
-**Prerequisite: `PR-STATE-FRESHNESS.md` lands first.** That fixes the symptom cheaply, with no
+**Prerequisite: [docs/tasks/RAI-10-pr-state-freshness.md] lands first.** That fixes the symptom cheaply, with no
 network and no credentials. This is the larger follow-on, and it should not be used to justify
 skipping the small fix - a correct answer that needs no network is better than one that does.
 

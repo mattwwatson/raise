@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit",
     "coverage": "node --test --experimental-test-coverage test/*.test.js",
     "tasks": "node scripts/tasks.js board",
+    "tasks:links": "node scripts/tasks.js links",
     "tasks:validate": "node scripts/tasks.js validate"
   },
   "files": [
