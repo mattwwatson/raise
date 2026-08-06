@@ -1019,7 +1019,8 @@ All three must pass before anything is done, and `bitbucket-pipelines.yml` runs 
 pull request, on `main`, and on any other branch push. Tests run again on Node 22 to hold the
 `engines` floor honest; lint and typecheck do not, being version-independent. Why there is no
 coverage job, and what the two Node versions are each for, is in that file's own comments;
-renaming any of the three npm scripts means changing it there too.
+renaming any npm script it invokes - these three, or either roadmap gate below - means
+changing it there too.
 
 - **Reproduce a bug as a test first**, then fix what the test exposes.
 - Tests are `node:test` + `node:assert/strict`, one file per module, named after the
