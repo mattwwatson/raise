@@ -386,13 +386,13 @@ supported no-no-mistakes setup rather than a fault. `NM_HOME` moves where it loo
 ## Development
 
 ```sh
-npm test          # 462 tests, no network, no build step, ~2s
+npm test          # 596 tests, no network, no build step, ~2s
 npm run lint
 npm run typecheck
 ```
 
-Every pull request runs all three, and the tests again on Node 22 to keep the version
-requirement above honest.
+Every pull request runs all three, plus the two roadmap checks below, and the tests again on
+Node 22 to keep the version requirement above honest.
 
 Architecture, conventions, the file layout and the design decisions behind them are in
 [AGENTS.md](AGENTS.md).
@@ -403,3 +403,9 @@ Planned work lives in
 [Jira RAI](https://mattwwatson.atlassian.net/jira/software/c/projects/RAI/boards/6) - the
 backlog, top down, is the priority order. Each item's written spec is in
 [docs/tasks/](docs/tasks/): the ticket says what and why, the file says how.
+
+`npm run tasks` prints the same board from those files. `npm run tasks:links` and
+`npm run tasks:gate` are the two checks CI runs over them, the second asserting that the spec
+for a pull request's item already says `shipped`. What each command reports, and why only
+those two run in CI, is in
+[AGENTS.md](AGENTS.md#roadmap-and-task-tracking).

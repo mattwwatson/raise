@@ -21,5 +21,14 @@
     "strict": false,
     "skipLibCheck": true
   },
-  "include": ["src/**/*.js", "bin/**/*.js", "hooks/**/*.js", "public/**/*.js"]
+  "include": [
+    "src/**/*.js",
+    "bin/**/*.js",
+    "hooks/**/*.js",
+    "public/**/*.js",
+    // The roadmap tooling. It never ships - `files` in package.json does not
+    // list it - but it holds two CI gates, so its JSDoc is checked like the
+    // rest rather than being the one place a wrong claim goes unnoticed.
+    "scripts/**/*.js"
+  ]
 }

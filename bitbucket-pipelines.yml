@@ -32,6 +32,26 @@ definitions:
           - npm run lint
           - npm test
           - npm run typecheck
+          # The two roadmap gates. Both are disk-only, so neither can go red
+          # because a Jira token expired - which is also why `tasks:validate`,
+          # the one command that does talk to Jira, is deliberately not here.
+          #
+          # `tasks:links` runs everywhere: a spec filename is rewritten when its
+          # item is captured, and a reference left pointing at the old name is
+          # just as broken on main as on a branch.
+          #
+          # `tasks:gate` runs on pull requests ONLY. It asserts that this
+          # branch's spec says `shipped`, because merging is what transitions
+          # the ticket to Done and main must not land carrying a ticket marked
+          # Done and a file claiming the work never started. That is a question
+          # about *merging*, and the `default` pipeline below fires on every
+          # push including work in progress - where the spec correctly still
+          # says `in-progress`. Running it there would paint CI red all day, on
+          # branches making no claim to be mergeable, and no-mistakes watches
+          # these checks. `BITBUCKET_PR_ID` is set only by the pull-request
+          # pipeline, which is exactly the trigger that asks the merge question.
+          - npm run tasks:links
+          - if [ -n "$BITBUCKET_PR_ID" ]; then npm run tasks:gate; fi
 
     - step: &test-floor
         name: Tests on the engines floor (Node 22)
