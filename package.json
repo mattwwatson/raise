@@ -11,9 +11,10 @@
   },
   "scripts": {
     "test": "node --test test/*.test.js",
-    "lint": "oxlint src bin hooks public test",
+    "lint": "oxlint src bin hooks public test scripts",
     "typecheck": "tsc --noEmit",
-    "coverage": "node --test --experimental-test-coverage test/*.test.js"
+    "coverage": "node --test --experimental-test-coverage test/*.test.js",
+    "tasks": "node scripts/tasks.js board"
   },
   "files": [
     "bin/",
