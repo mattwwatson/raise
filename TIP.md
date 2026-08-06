@@ -99,6 +99,46 @@ Listed with their reasoning in the spec. In short: the gate regex accepts the br
 exists to reject; a truncated Jira page reads as data; the JQL excludes epics that have specs;
 `depends` cycles are undetected.
 
+### 3.6 Lint and typecheck coverage pulled forward into chunk 1 (decided 06/08/2026)
+
+Planned for chunk 5. Moved because without it `npm run lint` and `npm run typecheck` do not read
+`scripts/` at all, so chunks 1 to 4 would each report a green definition of done that had never
+looked at the code they added. `package.json`'s `lint` gains `scripts`; `tsconfig.json`'s
+`include` gains `scripts/**/*.js` with a comment saying why a non-shipping directory is checked.
+
+### 3.7 Frontmatter strips a trailing `# ...` comment (decided 06/08/2026)
+
+Not in the original, and not cosmetic. The canonical frontmatter block in the `roadmap-workflow`
+skill documents each field with an inline comment naming its legal values:
+
+```
+status: backlog          # backlog | in-progress | shipped | wont-do
+```
+
+Copying that block is what the skill is for, and without stripping it produces a `status` of
+`backlog          # backlog | ...` and an `unknown-status` fault on a correctly written file. No
+field in this format has a value that can legitimately contain a hash.
+
+### 3.8 Jira paging, and one shape instead of a union (decided 06/08/2026)
+
+Two things the live API settled that the port could not have guessed.
+
+**`/rest/api/3/search/jql` returns no `total` at all** - only `isLast` and `nextPageToken`,
+confirmed against the real endpoint. So the original's `maxResults=200` with no paging is worse
+than it looked: a truncated read is indistinguishable from a complete one, and every spec past
+the cut reads as a ticket that does not exist. `fetchJiraIssues` follows the token to the end,
+and running past `MAX_PAGES` is a **failure** rather than a short answer.
+
+**An epic is identified by `issuetype.hierarchyLevel`, not by the name being "Epic"** - the name
+is renameable in Jira's settings, the level is structural. The name stays as a fallback for a
+payload carrying no level.
+
+**`JiraFetchResult` is one object, not a `{ok: true}|{ok: false}` union.** The union reads
+better and does not survive this repository's deliberate `strict: false`: with `strictNullChecks`
+off, TypeScript stops narrowing on a boolean discriminant, so `if (!result.ok)` leaves the
+failure branch typed as the success member and the checker objects to the code that is correct.
+Optional-by-convention fields are what `Board` and `ValidationReport` already do.
+
 ### 3.x Stubs and placeholders register
 
 *Empty.* Anything intentionally fake goes here and must be gone before the endgame.
@@ -134,16 +174,22 @@ TIP-only commits get squashed at the end; this file is deleted in a final commit
 ## 8. Chunk breakdown
 
 1. **Core and board** - `task-format.js`, `task-files.js`, `task-specs.js`, `task-board.js`,
-   `tasks.js` with the board command, their tests, `npm run tasks`. *pending*
-   *E2E*: shows all 10 RAI items; RAI-3 blocked by RAI-2, RAI-13 blocked by RAI-10, the rest READY.
+   `tasks.js` with the board command, their tests, `npm run tasks`.
+   **implemented 06/08/2026 (pending review)** - 57 tests added, 462 to 519; lint, typecheck and
+   test green; `scripts/` now covered by both.
+   *E2E*: 11 items (the 10 plus this one), RAI-3 blocked by RAI-2, RAI-13 blocked by RAI-10, the
+   other seven READY. Verified.
 2. **Links** - `task-links.js` + tests + `npm run tasks:links`. *pending*
    *E2E*: passes on the tree; renaming a referenced spec makes it fail and name the referrer.
 3. **Gate** - `task-gate.js` + tests + `npm run tasks:gate`. *pending*
    *E2E*: fails on this branch while the spec says `in-progress`; passes when flipped to
    `shipped`; `fix/RAI-14-x` is rejected for putting the key second.
-4. **Validate** - `task-jira.js` + tests + `npm run tasks:validate`. *pending*
-   *E2E*: real run against RAI - RAI-4 to RAI-9 read as orphans, RAI-1 as an exempt epic, nothing
-   as a fault.
+4. **Validate** - `task-jira.js` + tests + `npm run tasks:validate`.
+   **implemented 06/08/2026 (pending review)** - brought forward ahead of links and gate at the
+   user's request; they are independent, so the swap cost nothing. 32 tests, 519 to 551.
+   *E2E*: real run against RAI - "every item matches Jira", RAI-1 exempt as an epic, RAI-4 to
+   RAI-9 as orphans, no faults, exit 0. Credential paths exercised live: no variables and a
+   wrong email both exit 2 with the right message, a bad cloud id gives the 404 explanation.
 5. **Wiring and docs** - `package.json`, `tsconfig.json`, `bitbucket-pipelines.yml`, `AGENTS.md`,
    `README.md` test count, `roadmap-workflow` SKILL.md, spec to `shipped` with
    `## Implementation notes`. *pending*

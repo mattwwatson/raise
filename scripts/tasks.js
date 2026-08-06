@@ -24,10 +24,11 @@ import { join } from 'node:path';
 
 import { buildBoard, renderBoard } from './task-board.js';
 import { defaultTaskFiles, repoRoot } from './task-files.js';
+import { fetchJiraIssues, reconcile, renderJiraFailure, renderValidation } from './task-jira.js';
 import { readSpecs, TASKS_DIR } from './task-specs.js';
 
 /** Subcommands, in the order `usage` lists them. */
-const COMMANDS = ['board'];
+const COMMANDS = ['board', 'validate'];
 
 const DEFAULT_COMMAND = 'board';
 
@@ -43,6 +44,7 @@ function usage() {
   console.error('Usage: node scripts/tasks.js [%s]', COMMANDS.join(' | '));
   console.error('');
   console.error('  board     what is ready, what is blocked, what shipped');
+  console.error('  validate  the board, plus how disk and Jira differ (a report)');
 }
 
 async function main() {
@@ -61,6 +63,21 @@ async function main() {
   const board = buildBoard(specs);
   write(renderBoard(board, { colour }));
   process.exitCode = board.exitCode;
+
+  if (command !== 'validate') return;
+
+  const fetched = await fetchJiraIssues({ env: process.env });
+  if (!fetched.ok) {
+    write(renderJiraFailure(fetched, { colour }));
+    // A failure to *ask* is not a failure of the repository, so it gets its own
+    // code rather than being folded into the structural 1.
+    process.exitCode = fetched.exitCode;
+    return;
+  }
+
+  const report = reconcile(specs.byTicket, fetched.issues);
+  write(renderValidation(report, { colour }));
+  process.exitCode = Math.max(board.exitCode, report.exitCode);
 }
 
 main().catch((err) => {

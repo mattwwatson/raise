@@ -14,7 +14,8 @@
     "lint": "oxlint src bin hooks public test scripts",
     "typecheck": "tsc --noEmit",
     "coverage": "node --test --experimental-test-coverage test/*.test.js",
-    "tasks": "node scripts/tasks.js board"
+    "tasks": "node scripts/tasks.js board",
+    "tasks:validate": "node scripts/tasks.js validate"
   },
   "files": [
     "bin/",
