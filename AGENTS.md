@@ -26,11 +26,16 @@ cross-platform focus adapters, auth, multi-user support or remote access specula
 
 ## Tech Stack
 
-- Node **22.5+**, ESM only (`"type": "module"`). `node:sqlite` and `node:test` need it. The
-  floor is tested rather than asserted - CI runs the suite on 22 as well as 24 - but read the
-  note in `bitbucket-pipelines.yml` before trusting the exact number: `node:sqlite` needed
-  `--experimental-sqlite` when it landed in 22.5 and does not on late 22.x, so the range is
-  honest about where it is exercised and optimistic at its lower edge.
+- Node **22.13+**, ESM only (`"type": "module"`). CI runs the suite on 22 as well as 24, so
+  the floor is tested rather than asserted.
+
+  **22.13 is exact, not cautious.** It used to read 22.5, which is when `node:sqlite` landed
+  - but it landed *behind* `--experimental-sqlite`, and `npm test` passes no flags, so every
+  version from 22.5 to 22.12 would have failed on the import in `src/nm-state.js` the moment
+  anyone tried. The flag came off in **22.13.0** (and 23.4.0), which the v22.12 and v22.13
+  docs confirm either side of the change. It also clears `oxlint`'s own `>=22.12.0`, so a
+  contributor on the floor no longer gets `EBADENGINE` from `npm ci` and a lint step that
+  fails on a skipped binary rather than on a lint error.
 - **Zero runtime dependencies.** Node builtins only: `node:test`, `node:assert/strict`,
   `node:sqlite`, `node:http`, `node:child_process`. This is absolute - `dependencies` in
   `package.json` stays empty.
