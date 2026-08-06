@@ -395,14 +395,14 @@ async function cmdStatus() {
         : '';
       console.log(`  ${dim(`Not traceable to a session${guess}`)}`);
     }
-    if (row.activity && row.attention !== 'idle' && row.attention !== 'done') {
+    if (row.activity && row.attention !== 'idle') {
       console.log(`  ${dim(row.activity)}`);
     }
     // What no-mistakes is doing, on the session's own row rather than a row of
     // its own - and present because the *run* is, never because it is saying
     // something. `what` covers all three shapes the pipeline takes, the folded
     // agent's tool included, so this is the only pipeline line the CLI needs.
-    if (row.pipeline && row.attention !== 'done') {
+    if (row.pipeline) {
       const findings = row.run?.step?.findings
         ? ` - ${row.run.step.findings} finding(s)`
         : '';

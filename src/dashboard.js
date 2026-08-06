@@ -29,7 +29,12 @@ import { pullRequestNumber } from './nm-state.js';
  * like work because the waiting happens inside a subprocess, so the hooks see a
  * busy session rather than a blocked one.
  *
- * @typedef {'blocked'|'review'|'parked'|'failed'|'idle'|'working'|'done'} Attention
+ * There is deliberately no `done`: a run that ended quietly leaves the page
+ * altogether rather than settling into a state of its own - see
+ * `isDisplayable`, whose condition is the exact complement of the one that
+ * would have produced it.
+ *
+ * @typedef {'blocked'|'review'|'parked'|'failed'|'idle'|'working'} Attention
  */
 
 /**
@@ -96,7 +101,6 @@ import { pullRequestNumber } from './nm-state.js';
  * to be missing.
  *
  * @typedef {object} Agent
- * @property {string} what the best description available, always something
  * @property {string|null} activity the tool it is running right now, if any
  * @property {string|null} summary what it is working on, in its own words
  * @property {import('./registry.js').SessionState|null} state
@@ -117,7 +121,6 @@ export const ATTENTION_ORDER = [
   'failed',
   'idle',
   'working',
-  'done',
 ];
 
 const ATTENTION_LABELS = {
@@ -127,7 +130,6 @@ const ATTENTION_LABELS = {
   failed: 'Failed',
   idle: 'Idle',
   working: 'Working',
-  done: 'Done',
 };
 
 /** @param {Attention} attention */
@@ -561,7 +563,6 @@ export function attentionFor({
   if (run?.active) return 'working';
   if (state === 'working') return 'working';
   if (state === 'idle') return 'idle';
-  if (run && FINISHED_QUIETLY.has(String(run.status))) return 'done';
   if (run) return 'working';
   return 'idle';
 }
@@ -668,9 +669,6 @@ export function buildRows({
     // just its own.
     const state = effectiveSessionState(session, summary, pipelines.has(session.sessionId));
     agents.set(owning.runId, {
-      // Falls through to a bare word rather than nothing, so the marker cannot
-      // blink out between one tool call and the next.
-      what: activity || title || 'working',
       activity,
       summary: title,
       state,

@@ -420,9 +420,6 @@
       .bar.working {
         background: var(--working);
       }
-      .bar.done {
-        background: var(--done);
-      }
       .body {
         flex: 1;
         min-width: 0;
@@ -524,9 +521,6 @@
       }
       .state.working {
         color: var(--working);
-      }
-      .state.done {
-        color: var(--done);
       }
       .msg {
         overflow: hidden;
@@ -764,7 +758,6 @@
         ['failed', 'Failed'],
         ['working', 'Working'],
         ['idle', 'Idle'],
-        ['done', 'Recently finished'],
       ];
 
       /*
@@ -815,7 +808,6 @@
         failed: '#7a271a',
         working: '#175cd3',
         idle: '#98a2b3',
-        done: '#067647',
       };
 
       /**
@@ -1097,8 +1089,8 @@
           line2.appendChild(msg);
         }
         // What it is doing this second, which only means anything while it is
-        // still doing it. A finished row's last tool is history, not status.
-        if (row.activity && row.attention !== 'done' && row.attention !== 'idle') {
+        // still doing it. An idle row's last tool is history, not status.
+        if (row.activity && row.attention !== 'idle') {
           const activity = document.createElement('span');
           activity.className = 'activity';
           activity.textContent = row.activity;
@@ -1145,7 +1137,7 @@
         // stopping and starting. So the line stays and only its tail changes -
         // and the tail may be empty, which is a step that has not said anything
         // yet rather than a pipeline that has gone away.
-        if (row.pipeline && row.attention !== 'done') {
+        if (row.pipeline) {
           const pipeline = document.createElement('div');
           pipeline.className = 'agent';
           const tag = document.createElement('span');

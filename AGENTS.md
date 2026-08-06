@@ -712,14 +712,14 @@ page reads as the pipeline starting and stopping. There is no second string to f
 either: **a no-mistakes agent transcript carries no `ai-title`** (Claude Code writes those for
 interactive sessions only), so `Agent.summary` is always null for one of these.
 
-**The rule survives; where it hangs has moved.** It used to hang on `Agent.what`, a
-never-null string, and the marker was the agent's own line. The card carries one pipeline line
-now, for the session's run and the folded agent alike, so presence follows **the run
-existing** and `Pipeline.what` is allowed to be null while the line still renders. The
-accepted consequence, since `Agent.what`'s `title || 'working'` fallback no longer reaches a
-renderer: between two tool calls the line shows the step name alone, where the old one said
-"working". A step that has not spoken yet is not a pipeline that has gone away, which is the
-same statement the never-null rule was making.
+**The rule survives; where it hangs has moved.** It used to hang on a never-null `Agent.what`,
+and the marker was the agent's own line. The card carries one pipeline line now, for the
+session's run and the folded agent alike, so presence follows **the run existing** and
+`Pipeline.what` is allowed to be null while the line still renders. `Agent.what` is gone
+rather than left unread - once both renderers moved to `Pipeline`, its `title || 'working'`
+fallback reached nothing. The accepted consequence: between two tool calls the line shows the
+step name alone, where the old one said "working". A step that has not spoken yet is not a
+pipeline that has gone away, which is the same statement the never-null rule was making.
 
 **`Agent` does not reach a renderer at all, and is not on `Row`.** It is how a stalled
 pipeline turns its repo's row red and lends it the message, and it is where `Pipeline.what`
@@ -944,9 +944,11 @@ Keep it that way - it has no build step and must open as a file.
 - Colour comes from the CSS custom properties in `:root`, with a
   `@media (prefers-color-scheme: dark)` block. **Add a variable to both blocks or neither.**
 - Attention colour is semantic and ordered: `blocked` > `review` > `parked` > `failed` >
-  `idle` > `working` > `done`, matching `ATTENTION_ORDER` in `dashboard.js`. Do not introduce
-  a colour that competes with `blocked` red - `review` sits under it because it is the same
-  thing wearing work clothes.
+  `idle` > `working`, matching `ATTENTION_ORDER` in `dashboard.js`. Do not introduce a colour
+  that competes with `blocked` red - `review` sits under it because it is the same thing
+  wearing work clothes. There is no state for a run that finished quietly: it leaves the page
+  rather than settling into one, `isDisplayable` being the exact complement of the condition
+  that would have produced it.
 - **Affordance must match capability.** A focusable row is a `<button>` and says `Focus ↗`; a
   row with no live session behind it is plain and does nothing. Never render a control that
   might not work.

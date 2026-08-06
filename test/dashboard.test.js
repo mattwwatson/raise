@@ -96,10 +96,6 @@ test('attentionFor covers the remaining states', () => {
   );
   assert.equal(attentionFor({ session: { state: 'idle' }, run: run() }), 'working');
   assert.equal(attentionFor({ session: { state: 'idle' }, run: null }), 'idle');
-  assert.equal(
-    attentionFor({ session: null, run: run({ active: false, status: 'completed' }) }),
-    'done',
-  );
 });
 
 test('a block is cleared once the transcript has carried on past it', () => {
@@ -1865,15 +1861,12 @@ test('a status no-mistakes has yet to invent is never rendered as a failure', ()
   assert.equal(attentionFor({ session: null, run: unknown }), 'working');
   assert.equal(attentionFor({ session: { state: 'idle' }, run: unknown }), 'idle');
 
-  // The known endings are untouched: `failed` is still a failure, and the quiet
-  // ones are still done.
+  // The one known ending that stays on the page is untouched: `failed` is still
+  // a failure. The quiet ones have no state of their own to assert - they leave
+  // the page entirely, which the test above is what checks.
   assert.equal(
     attentionFor({ session: null, run: run({ status: 'failed', active: false }) }),
     'failed',
-  );
-  assert.equal(
-    attentionFor({ session: null, run: run({ status: 'cancelled', active: false }) }),
-    'done',
   );
 
   const rows = build({
