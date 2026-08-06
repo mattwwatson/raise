@@ -113,26 +113,14 @@ leave positioning alone - which, in the old ordering, would have had it renaming
 it had just been told was wrong, while relying on that same documentation to understand the
 repo.
 
-Scope - what this tool *is*, not how it is promoted:
+**Shipped 06/08/2026 as RAI-2.** The scope - what this tool *is*, not how it is promoted -
+what was deliberately left to Phase 3, and what the documents actually said by the time it was
+picked up are all in [`RAI-2-what-this-tool-is.md`](RAI-2-what-this-tool-is.md). The audit that
+used to sit here describes a state that no longer exists.
 
-- `AGENTS.md` **Project Overview** still opens *"a single-page monitor for one developer's
-  machine"* and puts `no-mistakes` first in the sentence. Both are now false: it monitors
-  Claude Code and pi sessions, and no-mistakes is an optional signal source.
-- The **Architecture** table still reads no-mistakes-first.
-- `README.md` still lists `no-mistakes` under **Requirements** and opens on it.
-- The constraint list - *"do not add cross-platform focus adapters, auth, multi-user support
-  or remote access speculatively"* - keep the spirit, but it currently reads as "contributions
-  unwelcome" (see 0.3).
-- Both files still claim **314 tests**.
-
-Out of scope here, deliberately - these stay in Phase 3, after the rename:
-
-- the related-tools section (3.3)
-- promotional framing, the demo, install-for-strangers polish
-- anything mentioning the new name
-
-**Everything in "Design decisions worth knowing" stays exactly as it is.** That section is the
-reason the codebase is worth showing anyone, and it is already accurate.
+**Everything in "Design decisions worth knowing" stays exactly as it is**, for the rename and
+for Phase 3 as much as it did here. That section is the reason the codebase is worth showing
+anyone, and it is already accurate.
 
 **Sequencing:** all outstanding PRs merge → this → rename → Phase 3. Confirmed with the user
 06/08/2026.
