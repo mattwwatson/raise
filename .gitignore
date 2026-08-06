@@ -51,3 +51,4 @@ Thumbs.db
 
 # Claude Code local permission overrides - machine-specific
 .claude/settings.local.json
+treehouse.toml
