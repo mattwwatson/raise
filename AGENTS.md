@@ -411,17 +411,25 @@ two with nothing under them at all.
 > finished: you cancelled it, so nothing is waiting on you. See `isDisplayable`.
 >
 > **`FINISHED_QUIETLY` names the two endings that leave, and everything else stays** - so a
-> terminal status a later no-mistakes invents (`errored`, `timed_out`) cannot be dropped from
-> the page in silence. `attentionFor` reads the same set, so the filter and the colour cannot
-> drift: one vocabulary, and an unrecognised ending is `failed` on both. **This fails open, and
-> it is the opposite polarity to `isRunOwnerCommand` on purpose** - an unrecognised *driving
-> verb* must refuse to claim a run, because guessing there puts a pipeline on the wrong card,
-> while an unrecognised *ending* must refuse to hide one, because guessing there makes the one
-> card that must not go quiet disappear. Do not "fix" either to match the other.
+> status a later no-mistakes invents (`errored`, `timed_out`) cannot be dropped from the page
+> in silence. The status word decides it and whether the run carries an error deliberately does
+> not: every `cancelled` run in the real database has one, so reading that instead would put
+> back exactly what this drops.
 >
-> The status word decides it and `run.error` deliberately does not: every `cancelled` run in
-> the real database carries an error, so the obvious `|| run.error` puts back exactly what this
-> drops.
+> **Staying is not the same as being red, and the two rules fail in different directions.**
+> `isDisplayable` fails **open** - an unrecognised status keeps its card, because a card going
+> quiet is the worst thing this page can do. `attentionFor` fails **soft** - only `failed` is
+> coloured as a failure, and an unrecognised status reads as `working`. Being on the page is
+> knowledge; being red is a claim, and we genuinely do not know what a word we have never seen
+> means. `ACTIVE_STATUSES` in `nm-state.js` is an allowlist, so an unknown status is not
+> `active` either, and a new *running* state (`queued`, `waiting`) would arrive here looking
+> exactly like a new ending - red that sometimes means nothing is wrong is how this page stops
+> being believed. `ACTIVE_STATUSES` is the one place a new word would need adding.
+>
+> That makes three guards that fail three different ways, and the shape is the point: each
+> fails in the direction that is safe for the thing it guards. `isRunOwnerCommand` fails
+> **closed** - an unrecognised *driving verb* must refuse to claim a run, because guessing puts
+> a pipeline on the wrong card. Do not "fix" any of them to match the others.
 
 Nothing in no-mistakes' database says whose run it is - `runs.intent_session_id` is empty on
 every row, the same field that already fails to place the pipeline's own agents. The answer
@@ -974,7 +982,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 460 tests, no network, no dependencies, ~2s
+npm test          # 461 tests, no network, no dependencies, ~2s
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
 
@@ -1060,7 +1068,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 ## Commands
 
 ```sh
-npm test                       # 460 tests, ~2s
+npm test                       # 461 tests, ~2s
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
 ```

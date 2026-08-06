@@ -1829,36 +1829,60 @@ test('a passed run drops off the card; a failed one stays', () => {
   assert.equal(failed.find((r) => r.sessionId === 's1').run?.runId, 'r1');
 });
 
-test('a way of ending that no-mistakes has yet to invent stays on the page, as failed', () => {
-  // The display filter and the colour read the same list of statuses that mean
-  // nothing is waiting on you, so a terminal word added later - `timed_out`
-  // here, which does not exist today - cannot be quietly dropped by one while
-  // the other calls it a failure. This fails *open*, the opposite way round to
-  // `isRunOwnerCommand`: an unrecognised driving verb must not claim a run,
-  // and an unrecognised ending must not hide one.
-  const ended = run({ runId: 'r1', status: 'timed_out', active: false, error: null });
-  assert.equal(attentionFor({ session: null, run: ended }), 'failed');
-
+test('a status no-mistakes has yet to invent stays on the page', () => {
+  // Only the two quiet endings are named, so a word added later - `timed_out`
+  // here, which does not exist today - cannot be dropped in silence. This fails
+  // *open*, the opposite way round to `isRunOwnerCommand`: an unrecognised
+  // driving verb must not claim a run, and an unrecognised status must not hide
+  // one.
   const rows = build({
     sessions: [session({ sessionId: 's1' })],
-    runs: [ended],
+    runs: [run({ runId: 'r1', status: 'timed_out', active: false })],
     branches: new Map([['s1', 'main']]),
     now: 5000,
   });
-  const row = rows.find((r) => r.sessionId === 's1');
-  assert.equal(row.run?.runId, 'r1');
-  assert.equal(row.attention, 'failed');
+  assert.equal(rows.find((r) => r.sessionId === 's1').run?.runId, 'r1');
 
-  // And a run you cancelled still leaves, error field and all - which is why
-  // the status word decides this and `run.error` does not.
+  // And a run you cancelled still leaves. `ACTIVE_STATUSES` is an allowlist, so
+  // the two are only ever told apart by the word.
   const cancelled = build({
     sessions: [session({ sessionId: 's1' })],
-    runs: [run({ runId: 'r1', status: 'cancelled', active: false, error: 'cancelled by user' })],
+    runs: [run({ runId: 'r1', status: 'cancelled', active: false })],
     branches: new Map([['s1', 'main']]),
     now: 5000,
   });
   assert.equal(cancelled.find((r) => r.sessionId === 's1').run, null);
   assert.equal(cancelled.length, 1);
+});
+
+test('a status no-mistakes has yet to invent is never rendered as a failure', () => {
+  // Being on the page is knowledge; being red is a claim. An unknown word could
+  // be a new ending (`errored`) or a new running state (`queued`) - and
+  // `ACTIVE_STATUSES` is an allowlist, so it is not `active` either way. Red
+  // that sometimes means nothing is wrong is how this page stops being
+  // believed, so it shows as work in progress instead.
+  const unknown = run({ runId: 'r1', status: 'timed_out', active: false });
+  assert.equal(attentionFor({ session: null, run: unknown }), 'working');
+  assert.equal(attentionFor({ session: { state: 'idle' }, run: unknown }), 'idle');
+
+  // The known endings are untouched: `failed` is still a failure, and the quiet
+  // ones are still done.
+  assert.equal(
+    attentionFor({ session: null, run: run({ status: 'failed', active: false }) }),
+    'failed',
+  );
+  assert.equal(
+    attentionFor({ session: null, run: run({ status: 'cancelled', active: false }) }),
+    'done',
+  );
+
+  const rows = build({
+    sessions: [session({ sessionId: 's1' })],
+    runs: [unknown],
+    branches: new Map([['s1', 'main']]),
+    now: 5000,
+  });
+  assert.equal(rows.find((r) => r.sessionId === 's1').attention, 'working');
 });
 
 test('a run nobody can be tied to gets one honest card, never a false attribute', () => {

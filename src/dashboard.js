@@ -507,14 +507,12 @@ function effectiveSessionState(session, summary, pipelineRunning = false) {
  * The terminal statuses that mean nothing is waiting on you.
  *
  * `completed` is a run that passed and `cancelled` is one you stopped, so in
- * both cases the answer is known and the card has nothing left to say. Every
- * *other* way a run can end reads as a failure, and `isDisplayable` keeps it on
- * the page on the strength of the same set - one vocabulary, so the filter and
- * the colour cannot drift apart.
+ * both cases the answer is known and the card has nothing left to say. These
+ * two leave the page, and every other status stays on it - see `isDisplayable`.
  *
- * The word is what decides it, never `run.error`: every `cancelled` run in the
- * real database carries an error, so reading that instead would call a run you
- * stopped a failure and put it back on the page.
+ * The word is what decides it, and deliberately not whether the run carries an
+ * error: every `cancelled` run in the real database has one, so reading that
+ * instead would call a run you stopped a failure and put it back on the page.
  */
 const FINISHED_QUIETLY = new Set(['completed', 'cancelled']);
 
@@ -530,6 +528,17 @@ const FINISHED_QUIETLY = new Set(['completed', 'cancelled']);
  * this row is what stops the dashboard growing a second card per repo, but it
  * must not swallow the one signal the tool exists to give: an agent sitting on
  * a permission prompt has stalled the pipeline and only a human can free it.
+ *
+ * **Only `failed` is coloured as a failure, and that is a softer rule than the
+ * one deciding what stays on the page.** `isDisplayable` keeps a run whose
+ * status we do not recognise, because a card going quiet is the worst thing
+ * here; this refuses to call it failed, because being visible is knowledge and
+ * being red is a claim. A word we have never seen could be a new ending
+ * (`errored`, `timed_out`) or a new *running* state (`queued`, `waiting`) -
+ * `ACTIVE_STATUSES` is an allowlist, so an unknown one is not active either -
+ * and red that sometimes means nothing is wrong is how this page stops being
+ * believed. It reads as `working`: shown, uncommitted, and ranked below every
+ * session that actually wants a human.
  *
  * @param {{session: Session|{state: string}|null, run: Run|null,
  *          summary?: import('./transcript.js').TranscriptSummary|null,
@@ -548,11 +557,12 @@ export function attentionFor({
   if (agent?.state === 'blocked') return 'blocked';
   if (session && summary?.lavishFile) return 'review';
   if (run?.parked) return 'parked';
-  if (run && !run.active && !FINISHED_QUIETLY.has(String(run.status))) return 'failed';
+  if (run && !run.active && run.status === 'failed') return 'failed';
   if (run?.active) return 'working';
   if (state === 'working') return 'working';
   if (state === 'idle') return 'idle';
-  if (run && !run.active) return 'done';
+  if (run && FINISHED_QUIETLY.has(String(run.status))) return 'done';
+  if (run) return 'working';
   return 'idle';
 }
 
@@ -1035,15 +1045,14 @@ function stepActivity(lastActivity) {
  * So the quiet statuses are named and everything else shows. **This fails open,
  * which is the opposite polarity to `isRunOwnerCommand`, and deliberately so.**
  * A driving verb we do not recognise must not claim ownership of a run, because
- * the cost of guessing is a pipeline on the wrong card. A terminal status we do
- * not recognise must not hide a run, because the cost of guessing is the one
- * card that must not go quiet vanishing in silence. Each fails the safe way for
- * what it guards, and matching them up would break one of them. `attentionFor`
- * already reads an unrecognised terminal status as `failed`, so the two agree.
+ * the cost of guessing is a pipeline on the wrong card. A status we do not
+ * recognise must not hide a run, because the cost of guessing is the one card
+ * that must not go quiet vanishing in silence. Each fails the safe way for what
+ * it guards, and matching them up would break one of them.
  *
- * Checking the status word rather than `run.error` is load-bearing: every
- * `cancelled` run in the real database carries an error, so the obvious
- * `|| run.error` would put back exactly what this drops.
+ * Staying on the page is as far as it goes: `attentionFor` reads an
+ * unrecognised status as `working` rather than `failed`, so this decides that
+ * the run is *shown* and does not decide what it is shown as.
  *
  * @param {Run} run
  * @returns {boolean}

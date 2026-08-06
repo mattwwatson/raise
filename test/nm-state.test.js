@@ -105,7 +105,6 @@ test('normaliseRun converts unix seconds and flags a parked run', () => {
     head_sha: 'abcdef1234567890',
     created_at: 1_699_998_000,
     updated_at: 1_699_999_500,
-    error: null,
   };
   const run = normaliseRun(row, [{ step_name: 'review', status: 'running', findings_json: '[{}]' }], now);
 
@@ -416,13 +415,13 @@ test('the per-repo fallback is left again once the schema is one we know', () =>
   // gives, and upgrading or downgrading no-mistakes is how either one ends.
   const { dir, cleanup } = scratch();
   try {
-    const path = makeDb(dir, { omit: ['runs.error'] });
+    const path = makeDb(dir, { omit: ['runs.head_sha'] });
     const state = new NoMistakesState({ dbPath: path, execAsync: async () => '' });
     assert.equal(state.probe().mode, 'cli');
-    assert.match(state.warning, /missing runs\.error/);
+    assert.match(state.warning, /missing runs\.head_sha/);
 
     const db = new DatabaseSync(path);
-    db.exec('ALTER TABLE runs ADD COLUMN error TEXT');
+    db.exec('ALTER TABLE runs ADD COLUMN head_sha TEXT');
     db.close();
 
     const read = state.read({ candidateDirs: ['/repo-a'] });
