@@ -234,7 +234,7 @@ test('a run is attributed to the session driving it, and to no other', () => {
 test('ownsRunFor answers off the same scan as everything else', async () => {
   const calls = [];
   const watch = new PollWatch({
-    execAsync: async (cmd, args) => {
+    execAsync: async (cmd, _args) => {
       calls.push(cmd);
       return '  200   100 claude\n  400   200 /usr/local/bin/no-mistakes axi run\n';
     },

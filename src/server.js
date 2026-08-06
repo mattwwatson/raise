@@ -242,6 +242,9 @@ export function createMonitorServer({
     if (!force && json === lastPayloadJson) return;
     lastPayloadJson = json;
     const frame = `event: state\ndata: ${JSON.stringify(payload)}\n\n`;
+    // The copy is the point: `send` drops a client that fails to write, which
+    // deletes from `clients` while this loop is walking it.
+    // oxlint-disable-next-line unicorn/no-useless-spread
     for (const client of [...clients]) {
       send(client, frame);
     }
@@ -480,6 +483,9 @@ export function createMonitorServer({
         // watches for these and goes stale when they stop arriving.
         keepaliveTimer = setInterval(() => {
           const frame = `event: ping\ndata: ${Date.now()}\n\n`;
+          // Copied for the same reason as in `broadcast`: `send` can drop a
+          // client mid-loop, and a dead connection is exactly what this finds.
+          // oxlint-disable-next-line unicorn/no-useless-spread
           for (const client of [...clients]) send(client, frame);
         }, keepaliveMs);
         resolve(info);
@@ -490,6 +496,9 @@ export function createMonitorServer({
   function stop() {
     clearInterval(pollTimer);
     clearInterval(keepaliveTimer);
+    // `dropClient` deletes from `clients`, so this one is deleting from the
+    // collection it iterates on every single pass rather than only on failure.
+    // oxlint-disable-next-line unicorn/no-useless-spread
     for (const client of [...clients]) dropClient(client);
     clients.clear();
     nmState.close();

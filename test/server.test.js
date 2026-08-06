@@ -139,7 +139,7 @@ test('/focus never runs a synchronous child process', async () => {
       dbPath: join(dir, 'no-such.sqlite'),
       sessionsPath: join(dir, 'sessions'),
       exec: () => assert.fail('no blocking commands from the server'),
-      execAsync: async (command, args = []) => {
+      execAsync: async (command, _args = []) => {
         ran.push(command);
         return '';
       },

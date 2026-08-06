@@ -3,51 +3,72 @@
 # that had gone stale against main - or broken outright - was noticed by nothing
 # but a human reading the diff.
 #
-# It runs exactly what AGENTS.md calls mandatory, `npm test` and
-# `npm run typecheck`, and nothing else. There is deliberately no linter: this
-# repo has two devDependencies on purpose, and adding a third is a decision to
-# raise rather than smuggle in through CI. Coverage is left out for a different
-# reason - nothing enforces a threshold, so it would produce a number nobody
-# reads and a minute nobody gets back.
+# It runs exactly what AGENTS.md calls mandatory: `npm run lint`, `npm test` and
+# `npm run typecheck`. Coverage is deliberately left out - nothing enforces a
+# threshold, so it would produce a number nobody reads and a minute nobody gets
+# back.
 #
-# Node 24 only, and the version is the interesting decision. `engines` claims a
-# floor of 22.5, but three test files import `node:sqlite`, which needs
-# `--experimental-sqlite` until Node 23.4 - so a Node 22 job would most likely
-# go red on arrival, and the honest reading is that the floor claim is untested
-# rather than that CI is missing a job. 24 is what the docs tell a contributor
-# to install for coverage, so it is the version they are most likely on.
-# Testing the floor is worth doing once the claim itself has been settled.
-
-image: node:24
+# Two Node versions, and each earns its place. 24 is what the docs tell a
+# contributor to install for coverage, so it is the version they are most likely
+# on. 22 is the floor `engines` promises, and a promise nothing tests is a guess
+# - especially this one, which turns on `node:sqlite` being importable without
+# `--experimental-sqlite`. That flag came off in 22.13.0, which is exactly why
+# the floor says 22.13 and not the 22.5 the module was added in.
+#
+# The `node:22` image tracks the latest 22.x, so this job proves the line still
+# works rather than proving the floor itself. If it ever goes red on a
+# `node:sqlite` import, Node has moved, not us.
+#
+# Lint and typecheck run on 24 only: neither is version-dependent, so a second
+# copy would buy nothing but a minute.
 
 definitions:
   steps:
-    - step: &test-and-typecheck
-        name: Tests and typecheck
+    - step: &lint-test-typecheck
+        name: Lint, tests and typecheck (Node 24)
+        image: node:24
+        script:
+          - npm ci
+          - npm run lint
+          - npm test
+          - npm run typecheck
+
+    - step: &test-floor
+        name: Tests on the engines floor (Node 22)
+        image: node:22
         script:
           - npm ci
           - npm test
-          - npm run typecheck
 
 pipelines:
   # Every pull request, which is what the no-mistakes CI step watches.
   pull-requests:
     '**':
-      - step: *test-and-typecheck
+      - parallel:
+          - step: *lint-test-typecheck
+          - step: *test-floor
 
   # And main itself, so a merge that breaks the build says so rather than
   # waiting for the next pull request to discover it.
   branches:
     main:
-      - step: *test-and-typecheck
+      - parallel:
+          - step: *lint-test-typecheck
+          - step: *test-floor
 
   # The backstop, for the pushes neither of the above is guaranteed to see: a
   # branch with no open pull request, and a pull request whose merge with main
   # cannot be produced - a pull-request pipeline builds that merge, so the
   # conflicted PR this file exists to catch is exactly the case that might
-  # register no check at all. Bitbucket runs a pull-request pipeline *in
-  # addition to* `default` rather than instead of it, so a branch with an open
-  # PR now pays for two identical runs; that duplicate is the price of the
-  # backstop and is accepted knowingly.
+  # register no check at all.
+  #
+  # A pull request is a different trigger rather than a more specific ref match,
+  # so it does not displace `default` the way `branches: main` does: once a PR is
+  # open, every push runs both. They are not the same build, and that is the
+  # point - `default` builds the branch head as it stands, while the pull-request
+  # pipeline builds its merge with the base. The second is what catches a branch
+  # that passes alone and fails against main.
   default:
-    - step: *test-and-typecheck
+    - parallel:
+        - step: *lint-test-typecheck
+        - step: *test-floor
