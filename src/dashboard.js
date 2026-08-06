@@ -651,21 +651,32 @@ export function buildRows({
     });
   }
   for (const session of human) {
-    // A matched run answers two different questions, and only one of them is
-    // shared. `matchRunForCwd` places a run by repo path alone, so every
-    // session open on a checkout matches the same one - which is right for
-    // *identity* (the repo's name, the path a title grows from) and wrong for
-    // *state*: three sessions in one repo each carried the pipeline's step and
-    // its parked gate, and each offered a Focus button to a window that could
-    // not answer it.
+    // A matched run answers two different questions, and they are resolved
+    // separately because narrowing one of them must never narrow the other.
+    //
+    // **Identity** - the repo's name and the path a title grows from - is what
+    // the session's own directory sits in, and nothing about a pipeline may
+    // move it. `matchRunForCwd` places a run by repo path alone, so every
+    // session open on a checkout finds the same registration and every card on
+    // that checkout is named alike. Resolving it through the branch-gated match
+    // instead coupled the name of a card to which runs happened to be in the
+    // reading: a session in a subdirectory retitled itself from `repo` to
+    // `packages/api` and back as runs came and went, and the pull request its
+    // transcript reported was dropped, the slug guard comparing the URL's repo
+    // against that subdirectory's name.
+    //
+    // **State** is exclusive, and that is what the branch narrows: three
+    // sessions in one repo each carried the pipeline's step and its parked
+    // gate, and each offered a Focus button to a window that could not answer
+    // it.
     //
     // `runOwners` is what the process table saw: the session with a live
     // `no-mistakes axi run` underneath it, and when it names a *running* run for
     // this session that is the run the card shows. Rank is the fallback for a
     // session that owns nothing live, and there it still narrows and never
-    // widens - a run nobody was observed to own stays on every session in its
-    // repo, exactly as before, because an unattributed pipeline is better shown
-    // three times than not at all.
+    // widens - a run somebody else was observed to own is taken off this card,
+    // and a run nobody was observed to own is shown once, on a card of its own
+    // that says we could not place it.
     //
     // A session owning a run on a branch its checkout has since left therefore
     // shows that run, while it is still going, rather than the repo's newest.
@@ -677,10 +688,11 @@ export function buildRows({
     // this worktree's, all of them being registered against the one path.
     const mainCheckout = mainCheckouts.get(session.sessionId) || null;
     const checkoutBranch = branches.get(session.sessionId) || null;
-    const repo = matchRunForCheckout(session.cwd, mainCheckout, checkoutBranch, runs);
+    const identityRepo = matchRunForCwd(session.cwd, runs);
+    const checkoutRun = matchRunForCheckout(session.cwd, mainCheckout, checkoutBranch, runs);
     const owned = ownedRuns.get(session.sessionId) || null;
-    const owner = repo ? runOwners.get(repo.runId) || null : null;
-    const matched = owned || (!owner || owner === session.sessionId ? repo : null);
+    const owner = checkoutRun ? runOwners.get(checkoutRun.runId) || null : null;
+    const matched = owned || (!owner || owner === session.sessionId ? checkoutRun : null);
     // Claimed on the match rather than on what is shown, so a run this session
     // owns but has finished with cannot reappear as an unattributable card: it
     // was attributed, it is simply over.
@@ -707,10 +719,11 @@ export function buildRows({
       kind: 'session',
       sessionId: session.sessionId,
       cwd: session.cwd,
-      // Identity follows the repo the session is in, never the run it owns. A
-      // bystander session titled after its own subdirectory would stop looking
-      // like the same checkout as the one running the pipeline.
-      title: repo?.repoName || basename(session.cwd || '') || 'unknown',
+      // Identity follows the repo the session is in, never the run it owns or
+      // the branch it is on. A bystander session titled after its own
+      // subdirectory would stop looking like the same checkout as the one
+      // running the pipeline.
+      title: identityRepo?.repoName || basename(session.cwd || '') || 'unknown',
       // The path the title was taken from, which is what disambiguation grows.
       // For a session inside a registered repo that is the repo, not the
       // session's own directory - but only when the session really is inside
@@ -719,8 +732,8 @@ export function buildRows({
       // disambiguation would have nothing left to grow: the `1/` and `2/` that
       // name a Treehouse tree would vanish from the page.
       titlePath:
-        (repo?.repoName && isInside(session.cwd, repo.repoPath)
-          ? repo.repoPath
+        (identityRepo?.repoName && isInside(session.cwd, identityRepo.repoPath)
+          ? identityRepo.repoPath
           : session.cwd) || null,
       // What the human called it, which is the only thing that tells apart two
       // sessions on the same repo and the same branch. Deliberately not fed to
@@ -780,22 +793,33 @@ export function buildRows({
       // enough that leaving it out means no link at all on plain Claude work.
       //
       // The run's own pull request has to clear the same branch check as the
-      // other two, for the reason given above `branch`: `matchRunForCwd` places
-      // a run by repo path alone, so a finished run keeps matching this session
-      // for half an hour after the checkout has moved on, and handed over a
-      // link to the branch it ended on. The row then disagreed with itself -
-      // `main` beside another branch's review - which is exactly the confident
-      // wrong link the whole feature is built to avoid.
+      // other two, and it is kept even though a run is now matched *on* the
+      // branch and so can no longer be on another one. It costs nothing, it is
+      // the last line of defence on the source with the most to lose from being
+      // wrong - a row disagreeing with itself, `main` beside another branch's
+      // review - and it stops a later change to the match quietly re-opening
+      // that link.
       //
       // A pull request belongs to the branch, not to whoever started the run,
       // so the two branch-verified sources stay on every session in the
       // checkout. Only the first is the run's own to lend, and only its owner
       // may take it.
+      //
+      // The transcript's is checked against the repo the session is *in*, which
+      // is why it takes `identityRepo`: the slug guard compares the repository
+      // in the URL against this path's basename, so handing it a run match that
+      // a branch could take away would drop a real review link every time the
+      // pipeline was on another branch.
       pr:
         (run?.prUrl && run.branch === branch ? pullRequestForRun(run) : null) ||
         matchPullRequest(session.cwd, branch, pullRequests) ||
         matchPullRequest(mainCheckout, branch, pullRequests) ||
-        transcriptPullRequest(summary, repo?.repoPath || session.cwd, branch, pullRequests),
+        transcriptPullRequest(
+          summary,
+          identityRepo?.repoPath || session.cwd,
+          branch,
+          pullRequests,
+        ),
       lastActivityAt: summary?.lastActivityAt ?? null,
       agent,
     });
@@ -915,14 +939,12 @@ function hostKindFor(plan) {
  * times a minute, reading as the pipeline stopping and starting. The same trap
  * applies here and the same rule avoids it.
  *
- * `step.lastActivity` arrives prefixed - `log: ...` for a log line, `status:
- * ...` for a transition. The log prefix is stripped as transport noise; a
- * status line is dropped entirely, because it restates the step status that
- * line two is already showing.
+ * `step.lastActivity` arrives prefixed, and the set of prefixes is no-mistakes'
+ * to grow - so `stepActivity` reads it as an allowlist rather than trying to
+ * enumerate it.
  *
  * @typedef {object} Pipeline
  * @property {string} step which step is running
- * @property {string|null} status the step's own status
  * @property {string|null} what what it is doing right now, if it says
  */
 
@@ -935,21 +957,48 @@ function pipelineFor(run, agent) {
   if (!run?.step?.name) return null;
   return {
     step: run.step.name,
-    status: run.step.status || null,
     what: agent?.activity || stepActivity(run.step.lastActivity) || null,
   };
 }
 
 /**
+ * The prefixes on `step.lastActivity` worth putting on a card, and what they
+ * are worth saying as.
+ *
+ * `log:` is a line the step printed and the prefix is pure transport noise.
+ * `step failed:` is why a run failed, and a failed run is the one finished run
+ * the page deliberately keeps - so dropping it left the card that must not go
+ * quiet showing a step name and nothing else, with the reason sitting on the
+ * row unread. The word is kept because without it "push to upstream: exit
+ * status 1" reads as something the step is doing rather than how it ended.
+ *
+ * `status:` is deliberately absent: it restates the step status the line above
+ * is already showing.
+ */
+const STEP_ACTIVITY_PREFIXES = [
+  { prefix: 'log:', keep: false },
+  { prefix: 'step failed:', keep: true },
+];
+
+/**
  * The readable half of a step's `lastActivity`, or null.
+ *
+ * An allowlist, and the shape matters more than the entries: no-mistakes owns
+ * this vocabulary and adds to it, so a prefix we do not recognise is dropped
+ * rather than shown raw. That is what stops its transport noise reaching a card.
  *
  * @param {string|null|undefined} lastActivity
  * @returns {string|null}
  */
 function stepActivity(lastActivity) {
   const text = String(lastActivity || '').trim();
-  if (!text.startsWith('log:')) return null;
-  return text.slice(4).trim() || null;
+  for (const { prefix, keep } of STEP_ACTIVITY_PREFIXES) {
+    if (!text.startsWith(prefix)) continue;
+    const rest = text.slice(prefix.length).trim();
+    if (!rest) return null;
+    return keep ? `${prefix} ${rest}` : rest;
+  }
+  return null;
 }
 
 /**

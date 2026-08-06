@@ -440,11 +440,12 @@ Two rules keep it from becoming a confident wrong answer of its own:
 **`RunOwners` is a memory because the evidence is intermittent, not because it is expensive.**
 `axi run` *returns* at every approval gate and does not run again until the agent answers with
 `axi respond`, so there is no process to walk up from for exactly as long as a run is parked -
-which is when the dashboard matters most. Without the memory the row would scatter back across
-every session in the repo at the gate, and again for the half hour a finished run stays
-visible. Verified live - with the run parked, `ps` showed only the daemon, and `nmmon status`,
-which is one-shot and has no memory, still reported all three rows. The server polls, so it
-catches `axi run` within a second of it starting and holds the answer.
+which is when the dashboard matters most. Without the memory the run would fall off the card of
+the session holding its gate, at the gate, onto an unattributable row nobody can act on - and
+again for as long as a failed run stays visible, since nothing of it is running by then either.
+Verified live - with the run parked, `ps` showed only the daemon, so `nmmon status`, which is
+one-shot and has no memory, had nothing to attribute the run with at all. The server polls, so
+it catches `axi run` within a second of it starting and holds the answer.
 
 **Ownership does not change hands between live sessions, and is released when the owner is
 gone.** The first half is the guard against a session that ran a driving command near the end
@@ -501,14 +502,24 @@ Five things it deliberately does not do:
   worktree with no branch to match on - a detached HEAD, which Treehouse produces routinely -
   gets no run at all rather than a guess.
 
-  **For display the branch requirement stops at the link; for ownership it applies
-  everywhere.** They differ because they are different questions. Display asks what pipeline
-  this checkout has recently seen, so a session physically inside the checkout still matches
-  by repo path alone, whatever branch it has since moved to - narrowing there would take the
-  pipeline off every session that changed branch after running it. Ownership asks which run
-  this session is *driving*, and `axi run` and `axi respond` both act on the branch they are
-  issued from, so a session cannot be driving a run for a branch it is not on. Narrowing a
-  sighting by branch is the definition of the question, not a heuristic answer to it.
+  **The branch requirement applies everywhere, for display as well as for ownership.** It
+  used to stop at the link, on the rule that display asks what pipeline this checkout has
+  recently seen - so a session physically inside the checkout matched by repo path alone,
+  whatever branch it had since moved to. That rule is gone: it put a *live* pipeline from
+  somebody else's branch on an idle `main` card, with a `Focus ↗` to a window that could not
+  answer its gate, and a checkout that has switched branch has said it is done with what ran
+  there. Ownership asks the narrower question - which run this session is *driving* - and
+  `axi run` and `axi respond` both act on the branch they are issued from, so a session
+  cannot be driving a run for a branch it is not on. Narrowing a sighting by branch is the
+  definition of that question, not a heuristic answer to it.
+
+  **What the branch may not narrow is identity.** The run a card shows and the repo a card is
+  *named* after are two answers, and `buildRows` resolves them separately: `identityRepo` from
+  the unfiltered `matchRunForCwd` on the session's own path, `checkoutRun` from the
+  branch-gated match. Resolving both from the second coupled a card's name to which runs
+  happened to be in the reading - a session in a subdirectory retitled itself from `repo` to
+  `packages/api` and back as runs came and went, and lost the pull request its transcript
+  reported, the slug guard comparing the URL's repository against that subdirectory's name.
 
   `RunOwners.observeFrom` therefore resolves a sighting through the same function - for the
   same reason it was given the link in the first place: if the two disagree about which run
@@ -565,9 +576,11 @@ the one path that had not yet been closed. Inverting the consultation closes all
 there is no longer a place where rank decides something ownership knows.
 
 Two things it deliberately does not change. **Identity still follows the session's own path** -
-`title`, `titlePath` and `branch` all come from the rank-resolved match, so a session that owns
-a run is not retitled after it and two cards on one checkout keep looking alike. And the
-**branch requirement is unmoved**: ownership everywhere, display only through the link.
+`title` and `titlePath` come from `identityRepo`, the unfiltered match on the session's own cwd,
+so a session that owns a run is not retitled after it and two cards on one checkout keep looking
+alike whatever branch either is on. And the **branch requirement is unmoved**: it narrows which
+run a card shows and which run a sighting claims, and it never touches the name of the card.
+`branch` is the checkout's own, from `.git/HEAD` and nothing else.
 
 The consequence is accepted on purpose: a session owning a run on a branch its checkout has
 since left shows *that* run, for as long as it is still going, rather than the repo's newest.
@@ -614,9 +627,18 @@ being thrown away.
 marker, and for the same reason. `activity` is null between every pair of tool calls, so a line
 rendered on it blinks several times a minute and reads as the pipeline stopping and starting.
 `Pipeline.what` may be null and the line still renders: a step that has not said anything yet
-is not a pipeline that has gone away. `step.lastActivity` arrives prefixed - `log:` for a log
-line, `status:` for a transition - and only the log half is shown, because a status line
-restates the step status the line above is already carrying.
+is not a pipeline that has gone away.
+
+**`step.lastActivity` arrives prefixed, and `stepActivity` reads the prefix as an allowlist.**
+The vocabulary is no-mistakes' to grow - the live database carries `status:`, `step failed:` and
+`log:` - so an unrecognised prefix is dropped rather than shown raw, which is what keeps its
+transport noise off a card. `log:` is a line the step printed and the prefix goes. `status:` is
+dropped outright, because it restates the step status the line above is already carrying.
+`step failed:` is **kept, prefix and all**: it is why a run failed, and a failed run is the one
+finished run the page deliberately keeps - dropping it left exactly the card that must not go
+quiet showing a step name and nothing else, with the reason already on the row and thrown away.
+The word stays because "push to upstream: exit status 1" without it reads as something the step
+is doing rather than how it ended.
 
 **An unattributable run gets one card, and it says so.** A run we cannot tie to any session -
 started by hand, its session gone, or simply never observed because `axi run` returns at every
@@ -923,7 +945,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 455 tests, no network, no dependencies, ~2s
+npm test          # 459 tests, no network, no dependencies, ~2s
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
 
@@ -1009,7 +1031,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 ## Commands
 
 ```sh
-npm test                       # 455 tests, ~2s
+npm test                       # 459 tests, ~2s
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
 ```

@@ -1236,6 +1236,23 @@ test('the transcript fills the gap when the database has nothing for this branch
   assert.equal(rows[0].pr.number, 40);
 });
 
+test("the transcript's pull request is checked against the repo, not against the run", () => {
+  // The slug guard compares the repository in the URL with the basename of the
+  // path it is given, so which path it is given decides whether a real review
+  // link survives. Handing it the branch-gated run match meant a session in a
+  // subdirectory, on a branch none of the repo's runs were on, compared `repo`
+  // against `api` and dropped the link its own transcript had reported.
+  const rows = build({
+    sessions: [session({ cwd: '/Users/x/work/repo/packages/api' })],
+    runs: [run({ runId: 'r1', branch: 'main' })],
+    branches: new Map([['s1', 'feat/unrun']]),
+    pullRequests: [],
+    summaries: new Map([['s1', seen()]]),
+    now: 5000,
+  });
+  assert.equal(rows.find((r) => r.kind === 'session').pr?.number, 40);
+});
+
 test('a pull request the database records on another branch is not ours', () => {
   // The transcript only guesses which branch a URL belongs to. no-mistakes
   // knows, because it opened it, so a sighting it recognises elsewhere is
@@ -1672,6 +1689,85 @@ test('the pipeline line says what no-mistakes is doing when no agent exists', ()
   assert.match(rows[0].pipeline?.what, /base branch advanced/);
   // The `log: ` prefix is a transport detail, not something to read on a card.
   assert.doesNotMatch(rows[0].pipeline?.what, /^log:/);
+});
+
+test('a failed step says why, on the one card that must not go quiet', () => {
+  // Verbatim from the live database, where `step failed:` is the commonest
+  // prefix after `status:` - 79 rows of it. The allowlist knew only `log:`, so
+  // the reason a run failed was thrown away and the failed card, the one thing
+  // this page deliberately keeps after a run ends, showed a step name and an
+  // empty tail. The prefix is kept here: without it the reason reads as
+  // something the step is doing rather than how it ended.
+  const rows = build({
+    sessions: [session({ sessionId: 's1' })],
+    runs: [
+      run({
+        runId: 'r1',
+        status: 'failed',
+        active: false,
+        step: {
+          name: 'push',
+          status: 'failed',
+          findings: 0,
+          lastActivity: 'step failed: push to upstream: exit status 1',
+        },
+      }),
+    ],
+    branches: new Map([['s1', 'main']]),
+    now: 5000,
+  });
+  assert.equal(rows[0].pipeline?.what, 'step failed: push to upstream: exit status 1');
+});
+
+test('a status line, and a prefix no-mistakes has yet to invent, are both dropped', () => {
+  // `status:` restates the step status the line above already carries. An
+  // unrecognised prefix is dropped for a different reason: the vocabulary is
+  // no-mistakes' to grow, and an allowlist is what stops the next thing it adds
+  // arriving on a card raw.
+  const what = (lastActivity) =>
+    build({
+      sessions: [session({ sessionId: 's1' })],
+      runs: [run({ runId: 'r1', step: { name: 'ci', status: 'running', findings: 0, lastActivity } })],
+      branches: new Map([['s1', 'main']]),
+      now: 5000,
+    })[0].pipeline?.what;
+  assert.equal(what('status: completed'), null);
+  assert.equal(what('telemetry: 41 spans flushed'), null);
+  // And the line itself still renders, because presence follows the run.
+  assert.equal(
+    build({
+      sessions: [session({ sessionId: 's1' })],
+      runs: [run({ runId: 'r1', step: { name: 'ci', status: 'running', findings: 0, lastActivity: 'status: completed' } })],
+      branches: new Map([['s1', 'main']]),
+      now: 5000,
+    })[0].pipeline?.step,
+    'ci',
+  );
+});
+
+test('the branch narrows which run a card shows, never what the card is called', () => {
+  // One value was doing both jobs, so gating it by branch quietly renamed the
+  // card. A session in a subdirectory, on a branch none of the repo's runs are
+  // on, retitled itself from `repo` to `api` - and flipped back the moment a run
+  // on its branch entered the reading, changing name under the person reading
+  // it. Identity comes from the session's own path now; only the run moves.
+  const rowFor = (branch) =>
+    build({
+      sessions: [session({ sessionId: 's1', cwd: '/Users/x/work/repo/packages/api' })],
+      runs: [run({ runId: 'r1', branch: 'main' })],
+      branches: new Map([['s1', branch]]),
+      now: 5000,
+    }).find((r) => r.kind === 'session');
+
+  const onIt = rowFor('main');
+  const offIt = rowFor('feat/x');
+  assert.equal(offIt.title, onIt.title, 'the name does not move with the branch');
+  assert.equal(offIt.titlePath, onIt.titlePath);
+  assert.equal(offIt.title, 'repo');
+  assert.equal(offIt.titlePath, '/Users/x/work/repo');
+  // And the thing the branch is there to narrow is still narrowed.
+  assert.equal(onIt.run?.runId, 'r1');
+  assert.equal(offIt.run, null);
 });
 
 test('a checkout does not inherit a run from another branch', () => {

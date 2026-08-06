@@ -48,9 +48,10 @@ gave the session, if you gave it one.
 
 ## Every row says what it is about
 
-"Working" across four repos tells you nothing about which one to look at. When no-mistakes is
-driving, the row shows the pipeline step. When it is just Claude - which is most of the time -
-the row shows Claude's own name for the session, and the tool it is running this second:
+"Working" across four repos tells you nothing about which one to look at. Every row shows
+Claude's own name for the session and the tool it is running this second - and when
+no-mistakes is driving, what the pipeline is doing gets a line of its own beneath, because the
+two are happening at once:
 
 ```
 WAITING FOR YOU
@@ -383,7 +384,7 @@ supported no-no-mistakes setup rather than a fault. `NM_HOME` moves where it loo
 ## Development
 
 ```sh
-npm test          # 455 tests, no network, no build step, ~2s
+npm test          # 459 tests, no network, no build step, ~2s
 npm run typecheck
 ```
 
