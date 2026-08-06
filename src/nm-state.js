@@ -50,7 +50,6 @@ import { basename } from 'node:path';
  * @property {number|null} awaiting_agent_since
  * @property {string|null} pr_url
  * @property {string|null} pr_state
- * @property {string|null} head_sha
  * @property {number|null} updated_at
  * @property {number|null} created_at
  */
@@ -126,7 +125,6 @@ import { basename } from 'node:path';
  * @property {number|null} parkedForMs
  * @property {string|null} prUrl
  * @property {string|null} prState
- * @property {string|null} headSha abbreviated to 8 characters
  * @property {number|null} updatedAt epoch ms
  * @property {number|null} createdAt epoch ms
  * @property {RunStep|null} step
@@ -153,7 +151,6 @@ export const REQUIRED_RUN_COLUMNS = [
   'pr_url',
   'pr_state',
   'pr_state_observed_at',
-  'head_sha',
 ];
 
 export const REQUIRED_REPO_COLUMNS = ['id', 'working_path'];
@@ -179,7 +176,6 @@ const RUNS_QUERY = `
     r.awaiting_agent_since AS awaiting_agent_since,
     r.pr_url        AS pr_url,
     r.pr_state      AS pr_state,
-    r.head_sha      AS head_sha,
     r.created_at    AS created_at,
     r.updated_at    AS updated_at,
     p.working_path  AS repo_path
@@ -642,7 +638,6 @@ export function normaliseRun(row, steps, now = Date.now()) {
     parkedForMs: awaitingSince ? now - awaitingSince : null,
     prUrl: row.pr_url || null,
     prState: row.pr_state || null,
-    headSha: row.head_sha ? String(row.head_sha).slice(0, 8) : null,
     updatedAt: row.updated_at ? row.updated_at * 1000 : null,
     createdAt: row.created_at ? row.created_at * 1000 : null,
     step: step
@@ -761,7 +756,6 @@ export function parseAxiStatus(out, repoPath) {
     parkedForMs: null,
     prUrl: field('pr'),
     prState: null,
-    headSha: field('head'),
     updatedAt: null,
     createdAt: null,
     step: null,

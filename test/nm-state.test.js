@@ -102,7 +102,6 @@ test('normaliseRun converts unix seconds and flags a parked run', () => {
     status: 'running',
     awaiting_agent_since: 1_699_999_000,
     pr_url: 'https://example.com/pr/1',
-    head_sha: 'abcdef1234567890',
     created_at: 1_699_998_000,
     updated_at: 1_699_999_500,
   };
@@ -113,7 +112,6 @@ test('normaliseRun converts unix seconds and flags a parked run', () => {
   assert.equal(run.parked, true, 'awaiting_agent_since is the gate marker');
   assert.equal(run.parkedSince, 1_699_999_000_000);
   assert.equal(run.parkedForMs, 1_000_000);
-  assert.equal(run.headSha, 'abcdef12');
   assert.equal(run.step.name, 'review');
   assert.equal(run.step.findings, 1);
 });
@@ -259,7 +257,6 @@ test('the probe covers every column the queries select, not just the obvious one
   for (const column of [
     'runs.pr_url',
     'runs.pr_state_observed_at',
-    'runs.head_sha',
     'runs.created_at',
     'repos.working_path',
   ]) {
@@ -415,13 +412,13 @@ test('the per-repo fallback is left again once the schema is one we know', () =>
   // gives, and upgrading or downgrading no-mistakes is how either one ends.
   const { dir, cleanup } = scratch();
   try {
-    const path = makeDb(dir, { omit: ['runs.head_sha'] });
+    const path = makeDb(dir, { omit: ['runs.pr_url'] });
     const state = new NoMistakesState({ dbPath: path, execAsync: async () => '' });
     assert.equal(state.probe().mode, 'cli');
-    assert.match(state.warning, /missing runs\.head_sha/);
+    assert.match(state.warning, /missing runs\.pr_url/);
 
     const db = new DatabaseSync(path);
-    db.exec('ALTER TABLE runs ADD COLUMN head_sha TEXT');
+    db.exec('ALTER TABLE runs ADD COLUMN pr_url TEXT');
     db.close();
 
     const read = state.read({ candidateDirs: ['/repo-a'] });
