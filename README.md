@@ -396,3 +396,10 @@ requirement above honest.
 
 Architecture, conventions, the file layout and the design decisions behind them are in
 [AGENTS.md](AGENTS.md).
+
+## Roadmap
+
+Planned work lives in
+[Jira RAI](https://mattwwatson.atlassian.net/jira/software/c/projects/RAI/boards/6) - the
+backlog, top down, is the priority order. Each item's written spec is in
+[docs/tasks/](docs/tasks/): the ticket says what and why, the file says how.

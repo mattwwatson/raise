@@ -48,3 +48,6 @@ Thumbs.db
 *.mov
 *.wmv
 
+
+# Claude Code local permission overrides - machine-specific
+.claude/settings.local.json

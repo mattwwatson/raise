@@ -1089,6 +1089,30 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 - Flag any change to the poll interval, `KEEPALIVE_MS` or `STALE_AFTER_MS` - they are tuned
   against each other.
 
+## Roadmap and task tracking
+
+**Jira project [RAI][board] owns ordering and workflow state; this repo owns the
+specification.** Each work item is one ticket plus one spec file named for it,
+`docs/tasks/RAI-12-stale-page-code.md`. The ticket says what and why; the file says how.
+There is no ordered list of work in the repo - what to do next is the backlog, top down.
+
+Branch as `<KEY>-<short-name>` (key **first** - the automation is anchored there). Move the
+ticket to In Progress by hand when you pick it up, because nothing transitions until a
+branch exists. The PR that ships an item sets `status: shipped` and `shipped:` in its spec
+file and adds `## Implementation notes`.
+
+An Epic gets a spec too, and it carries the shared background for everything under it -
+`docs/tasks/RAI-1-open-source-release.md` holds the reasoning behind the whole open-source
+push, so its children need their own file only when one is picked up. **No branch without a
+spec file.**
+
+Full workflow - capturing, picking up, shipping, and the Jira-vs-disk rules - is the
+[roadmap-workflow skill](.claude/skills/roadmap-workflow/SKILL.md). **Load it before
+creating a ticket or touching anything under `docs/tasks/`.** Note the branch-driven
+transitions it describes are not set up in RAI yet; transition by hand until they are.
+
+[board]: https://mattwwatson.atlassian.net/jira/software/c/projects/RAI/boards/6
+
 ## Commands
 
 ```sh
