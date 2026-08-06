@@ -159,18 +159,22 @@ to differ.
 key; a ring of three is silently never READY with nothing saying why. A ring is a structural
 fault naming the ring in order.
 
-### One contradiction in the original, resolved the other way
+### The branch rule is a convention, and that is why it needs a check
 
-Its branch regex `/(?:^|\/)([A-Z]+-\d+)-/` allows a path prefix, while its failure message three
-lines below says a prefixed branch transitions nothing because the Jira automation is anchored on
-the key. Both cannot be right.
+Jira finds a ticket key **anywhere** in a branch name. `wip-RAI-14-tooling` links its commits and
+transitions its ticket exactly as `RAI-14-tooling` does, so nothing upstream will ever object to
+any of this.
 
-**The regex is what this repository adopts.** A key at the start of a path segment names its
-ticket, so `RAI-14-roadmap-tooling` and `fix/RAI-14-roadmap-tooling` are equally valid and the
-gate accepts both. A prefix is an ordinary way to name a branch and refusing one buys this tool
-nothing. What is still refused is a key buried mid-segment - `wip-RAI-14-tooling` - where the key
-has stopped naming the branch and become a substring inside a word. The *message* is what
-changed, not the behaviour.
+The original says otherwise - its failure message claims a prefixed branch transitions nothing
+because the automation is anchored on the key - and its own regex, which allows a path prefix,
+already disagreed with the message. Neither the claim nor the anchoring is real.
+
+**So this is our convention: the key starts the branch name or a path element of it.**
+`RAI-14-roadmap-tooling` and `fix/RAI-14-roadmap-tooling` both pass; `wip-RAI-14-roadmap-tooling`
+does not, the key there having stopped naming the branch and become a substring inside a word.
+What we are protecting is a branch list that can be scanned by key. Precisely because Jira does
+not care, `tasks:gate` is the only thing that can hold the convention, which is a better reason
+to check it than if Jira had been doing it for us.
 
 Two smaller departures. The board groups by `phase`, a field this repo's frontmatter does not
 have, and sorts by `legacy-id`, which it also does not have - ported literally every row lands in

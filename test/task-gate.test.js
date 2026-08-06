@@ -69,7 +69,18 @@ test('a checkout with no branch fails as "no branch", not as a bad branch name',
 test('a branch with no key at all fails the gate and explains the naming rule', () => {
   const result = gateBranch('tidy-up', indexed([spec()]));
   assert.equal(result.outcome, 'no-key');
-  assert.ok(text(renderGate(result)).includes('start the'));
+  const rendered = text(renderGate(result));
+  assert.ok(rendered.includes('RAI-14-roadmap-tooling'));
+  assert.ok(rendered.includes('fix/RAI-14-roadmap-tooling'));
+});
+
+test('the naming failure says this is our convention rather than a Jira constraint', () => {
+  // Jira finds the key anywhere in a branch name, so nothing upstream enforces
+  // this. Saying otherwise - as the original does - sends somebody looking for
+  // an automation rule that was never the reason.
+  const rendered = text(renderGate(gateBranch('tidy-up', indexed([spec()]))));
+  assert.ok(rendered.includes('our convention'));
+  assert.ok(rendered.includes('anywhere'));
 });
 
 test('a branch whose key has no spec fails and names the file to create', () => {

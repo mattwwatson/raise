@@ -95,9 +95,16 @@ epic's spec than as a loose document.
    anchored on the branch, so nothing transitions until a branch is pushed - and the gap
    between starting to think about an item and pushing anything can be hours. Transitioning
    on pickup is what stops the board lying about what is being worked on.
-2. **Branch off `main` as `<KEY>-<short-name>`** - e.g. `RAI-12-stale-page-code`. The key
-   must be at the **start** of the branch name: the automation is anchored there, so
-   `fix/RAI-12-foo` transitions nothing.
+2. **Branch off `main` as `<KEY>-<short-name>`** - e.g. `RAI-12-stale-page-code`.
+
+   Jira will find the key **anywhere** in a branch name, `wip-RAI-12-foo` included, so this
+   is a convention rather than a constraint. The convention is that the key starts the
+   branch name or a path element of it: `RAI-12-stale-page-code` or `fix/RAI-12-stale-page-code`,
+   never `wip-RAI-12-stale-page-code`. A key buried inside a word has stopped naming the
+   branch and become a substring, and a branch list you cannot scan by key is the thing this
+   is protecting.
+
+   `npm run tasks:gate` enforces it, which is the only reason it is worth writing down.
 3. **Set `status: in-progress` and `branch:`** in the spec file.
 4. **Flesh the spec out before writing code** - problem, decisions with their reasoning,
    what is deliberately *not* being built. Record decisions as they are taken; a decision
@@ -130,9 +137,9 @@ in a commit message or PR description **mentions RAI-10 to Jira**. Automation tr
 what it sees mentioned, so an unrelated backlog item can be dragged along by a commit that
 merely referenced its file.
 
-The guard is on the Jira side - the transition rules are conditioned on the **branch name**
-(`^{{issue.key}}-`), not on the mention, so only the item whose branch it is can move. The
-mention still *links* the commit, which is wanted.
+The guard is on the Jira side - the transition rules are conditioned on the **branch name**,
+not on the mention, so only the item whose branch it is can move. The mention still *links*
+the commit, which is wanted.
 
 - **Only your own ticket's key goes in the subject line.**
 - **Naming another item's spec file in the body is fine** - it links, it must not

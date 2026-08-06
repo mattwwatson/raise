@@ -1096,10 +1096,12 @@ specification.** Each work item is one ticket plus one spec file named for it,
 `docs/tasks/RAI-12-stale-page-code.md`. The ticket says what and why; the file says how.
 There is no ordered list of work in the repo - what to do next is the backlog, top down.
 
-Branch as `<KEY>-<short-name>` (key **first** - the automation is anchored there). Move the
-ticket to In Progress by hand when you pick it up, because nothing transitions until a
-branch exists. The PR that ships an item sets `status: shipped` and `shipped:` in its spec
-file and adds `## Implementation notes`.
+Branch as `<KEY>-<short-name>`, with the key starting the branch name or a path element of
+it - `RAI-12-stale-page-code` or `fix/RAI-12-stale-page-code`. Jira finds the key **anywhere**
+in a branch name, so this is our convention rather than its constraint, and
+`npm run tasks:gate` is what enforces it. Move the ticket to In Progress by hand when you
+pick it up, because nothing transitions until a branch exists. The PR that ships an item
+sets `status: shipped` and `shipped:` in its spec file and adds `## Implementation notes`.
 
 An Epic gets a spec too, and it carries the shared background for everything under it -
 `docs/tasks/RAI-1-open-source-release.md` holds the reasoning behind the whole open-source
