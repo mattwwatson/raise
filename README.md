@@ -366,9 +366,13 @@ supported no-no-mistakes setup rather than a fault. `NM_HOME` moves where it loo
 ## Development
 
 ```sh
-npm test          # 444 tests, no network, no build step, ~2s
+npm test          # 449 tests, no network, no build step, ~2s
+npm run lint
 npm run typecheck
 ```
+
+Every pull request runs all three, and the tests again on Node 22 to keep the version
+requirement above honest.
 
 Architecture, conventions, the file layout and the design decisions behind them are in
 [AGENTS.md](AGENTS.md).

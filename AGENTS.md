@@ -26,13 +26,28 @@ cross-platform focus adapters, auth, multi-user support or remote access specula
 
 ## Tech Stack
 
-- Node **22.5+**, ESM only (`"type": "module"`). `node:sqlite` and `node:test` need it.
+- Node **22.5+**, ESM only (`"type": "module"`). `node:sqlite` and `node:test` need it. The
+  floor is tested rather than asserted - CI runs the suite on 22 as well as 24 - but read the
+  note in `bitbucket-pipelines.yml` before trusting the exact number: `node:sqlite` needed
+  `--experimental-sqlite` when it landed in 22.5 and does not on late 22.x, so the range is
+  honest about where it is exercised and optimistic at its lower edge.
 - **Zero runtime dependencies.** Node builtins only: `node:test`, `node:assert/strict`,
   `node:sqlite`, `node:http`, `node:child_process`. This is absolute - `dependencies` in
   `package.json` stays empty.
-- **devDependencies are `typescript` and `@types/node`, and that is the whole list.** They
-  exist only for `npm run typecheck`; nothing ships or runs against them. Adding a third -
-  a linter, a formatter, a test framework, a bundler - needs raising first, not just doing.
+- **devDependencies are `typescript`, `@types/node` and `oxlint`, and that is the whole
+  list.** They exist only for `npm run typecheck` and `npm run lint`; nothing ships or runs
+  against them. Adding a fourth - a formatter, a test framework, a bundler - needs raising
+  first, not just doing.
+
+  The linter was raised and agreed rather than assumed, and `oxlint` was chosen over ESLint
+  and Biome on the terms this section sets: it is a single binary with **no dependencies of
+  its own**, where ESLint means several direct devDependencies and a plugin tree. Biome was
+  the other zero-dependency candidate and lost because it bundles a formatter, and turning
+  that on would reformat the codebase against the deliberate choice recorded below - so it
+  would have meant adding a tool and immediately disabling half of it.
+
+  It runs with no config file, on purpose. The version is pinned by `package-lock.json`, so
+  `npm ci` cannot surprise CI with rules a later release added.
 - Frontend is plain HTML/CSS/JS in `public/`, served as files. No framework, no bundler, no
   build step.
 - Coverage via `node --test --experimental-test-coverage`.
@@ -824,13 +839,15 @@ Keep it that way - it has no build step and must open as a file.
 
 ```sh
 npm test          # 449 tests, no network, no dependencies, ~2s
+npm run lint      # oxlint over src, bin, hooks, public, test
 npm run typecheck # tsc --noEmit over src, bin, hooks, public
 ```
 
-Both must pass before anything is done, and `bitbucket-pipelines.yml` runs the same two on
-every pull request, on `main`, and on any other branch push - nothing else, on Node 24 only.
-Why there is no linter, no coverage and no second Node version is in that file's own comments;
-renaming either npm script means changing it there too.
+All three must pass before anything is done, and `bitbucket-pipelines.yml` runs them on every
+pull request, on `main`, and on any other branch push. Tests run again on Node 22 to hold the
+`engines` floor honest; lint and typecheck do not, being version-independent. Why there is no
+coverage job, and what the two Node versions are each for, is in that file's own comments;
+renaming any of the three npm scripts means changing it there too.
 
 - **Reproduce a bug as a test first**, then fix what the test exposes.
 - Tests are `node:test` + `node:assert/strict`, one file per module, named after the
@@ -910,6 +927,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 
 ```sh
 npm test                       # 449 tests, ~2s
+npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
 ```

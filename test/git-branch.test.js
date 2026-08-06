@@ -205,7 +205,6 @@ test('a directory known not to be a repo is not walked again', () => {
   // Walking up to twenty-four levels once a second, per session, for a
   // directory that will never be a repo, is the one case this could get
   // expensive in.
-  const files = fakeFiles();
   const stats = [];
   const counting = {
     stat(path) {
