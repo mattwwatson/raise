@@ -1108,8 +1108,7 @@ spec file.**
 
 Full workflow - capturing, picking up, shipping, and the Jira-vs-disk rules - is the
 [roadmap-workflow skill](.claude/skills/roadmap-workflow/SKILL.md). **Load it before
-creating a ticket or touching anything under `docs/tasks/`.** Note the branch-driven
-transitions it describes are not set up in RAI yet; transition by hand until they are.
+creating a ticket or touching anything under `docs/tasks/`.**
 
 [board]: https://mattwwatson.atlassian.net/jira/software/c/projects/RAI/boards/6
 

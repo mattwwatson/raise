@@ -113,16 +113,15 @@ epic's spec than as a loose document.
 Never write a commit hash into the spec - you cannot know the merge commit from inside it,
 and Jira's development panel already holds every commit, branch and PR for the ticket.
 
-### Prerequisite: the Jira automation is not set up yet
+### What the automation does and does not cover
 
-RAI is a new project. The branch-driven transitions described here - **To Do → In Progress**
-on branch creation, **In Review** on opening a PR, **Done** on merge - mirror the rules in
-the HXB project and **have to be created in RAI before they will fire**.
+The branch-driven transitions are live in RAI: **To Do → In Progress** on branch creation,
+**In Review** on opening a pull request, **Done** on merge. Do not transition those by hand -
+you will be racing the automation.
 
-Until they are, transition tickets by hand at each step. Everything else in this workflow -
-the branch naming, the key in commit subjects, the spec frontmatter - is unaffected and
-should be followed exactly as written, because it is what the automation will key off once
-it exists.
+**The gap it cannot close is the one before the branch**, which is why step 1 above exists.
+Nothing fires until a branch is pushed, and the stretch between picking an item up and having
+something to push can be hours. That transition is yours to make.
 
 ### Mentioning another item's key moves that item
 
