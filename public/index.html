@@ -1180,7 +1180,7 @@
           const label = document.createElement('span');
           label.textContent = row.pr.number ? 'PR #' + row.pr.number : 'PR';
           a.appendChild(label);
-          if (row.pr.live && row.pr.state && row.pr.state !== 'none') {
+          if (row.pr.current && row.pr.state && row.pr.state !== 'none') {
             const state = document.createElement('span');
             state.className = 'pr-state ' + row.pr.state;
             state.textContent = row.pr.state;

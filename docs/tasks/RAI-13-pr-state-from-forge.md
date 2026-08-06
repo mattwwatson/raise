@@ -12,6 +12,21 @@ depends: RAI-10
 network and no credentials. This is the larger follow-on, and it should not be used to justify
 skipping the small fix - a correct answer that needs no network is better than one that does.
 
+> **RAI-10 has shipped, and it narrows this.** It asked whether a useful freshness threshold
+> exists, on the understanding that if none did, the forge query became the only honest fix.
+> One does: no-mistakes re-observes a live pull request every ~2 minutes (worst case measured
+> at 112s), so a five-minute gate catches a dead monitor without ever firing on a healthy run.
+> Two residuals are left for this item, and they are the whole of its remaining case:
+>
+> - the ~2 minutes between a merge and no-mistakes noticing, where the reading is honestly
+>   fresh and honestly wrong;
+> - **any pull request nobody is monitoring** - once the run finishes, or for one opened by
+>   hand, there is no observer at all, and the page correctly goes quiet rather than guessing.
+>
+> The second is the bigger prize and is the one to design around. Read RAI-10's implementation
+> notes before starting: the source ranking below is now stated in terms of `PullRequest.current`
+> rather than `live`, and the measurements are recorded there.
+
 **Design first, implement second.** Several decisions below are the user's, not yours. Bring
 them back before writing the network layer.
 

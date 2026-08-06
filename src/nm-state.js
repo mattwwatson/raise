@@ -50,6 +50,7 @@ import { basename } from 'node:path';
  * @property {number|null} awaiting_agent_since
  * @property {string|null} pr_url
  * @property {string|null} pr_state
+ * @property {number|null} pr_state_observed_at
  * @property {number|null} updated_at
  * @property {number|null} created_at
  */
@@ -61,14 +62,24 @@ import { basename } from 'node:path';
  * interesting for half an hour after it stops, and the pull request it opened
  * is interesting until it is merged, which may be days later.
  *
- * `live` is the load-bearing field. no-mistakes stops observing a pull request
- * the moment its run reaches a terminal state - `pr_state_observed_at` never
- * advances past `updated_at` - so `state` is frozen at whatever it was when the
- * run ended. Every cancelled run in a real database still says `open`, days
- * after the fact. The state may therefore only be presented as current while
- * `live` is true; otherwise it is a historical reading and has to be shown as
- * one, or not at all. Linking to a stale PR is fine. Asserting a stale *state*
- * is the quiet staleness this tool exists to avoid.
+ * `current` is the load-bearing field, and it answers one question: may `state`
+ * be presented as the state *now*? Two things have to hold, and they are not
+ * the same thing.
+ *
+ * The run that owns it has to still be going. no-mistakes stops observing a
+ * pull request the moment its run reaches a terminal state - so `state` is
+ * frozen at whatever it was when the run ended, and every cancelled run in a
+ * real database still says `open`, days after the fact.
+ *
+ * And the reading itself has to be recent. This half was missing, and it is the
+ * bug RAI-10 reports: the field used to be called `live` and meant only "the
+ * run is still going", which is a fact about the *run* being read as a fact
+ * about the *reading*. The two come apart whenever the CI monitor stops
+ * observing without the run stopping - a daemon restart while a run sits in the
+ * `ci` step is enough, and did happen. See `PR_STATE_FRESH_MS`.
+ *
+ * Linking to a stale pull request is fine, and the link is kept in every case.
+ * Asserting a stale *state* is the quiet staleness this tool exists to avoid.
  *
  * @typedef {object} PullRequest
  * @property {string} url
@@ -77,8 +88,8 @@ import { basename } from 'node:path';
  * @property {number|null} observedAt epoch ms the state was last checked
  * @property {string|null} branch the branch it was opened from
  * @property {string} repoPath
- * @property {boolean} live whether the run that owns it is still going, which
- *   is the only condition under which `state` can be trusted as current
+ * @property {boolean} current whether `state` may be presented as the state
+ *   now: the run is still going *and* the reading is fresh
  */
 
 /**
@@ -125,6 +136,8 @@ import { basename } from 'node:path';
  * @property {number|null} parkedForMs
  * @property {string|null} prUrl
  * @property {string|null} prState
+ * @property {number|null} prStateObservedAt epoch ms the pull request state was
+ *   last checked, which is not `updatedAt` - see `PR_STATE_FRESH_MS`
  * @property {number|null} updatedAt epoch ms
  * @property {number|null} createdAt epoch ms
  * @property {RunStep|null} step
@@ -176,6 +189,7 @@ const RUNS_QUERY = `
     r.awaiting_agent_since AS awaiting_agent_since,
     r.pr_url        AS pr_url,
     r.pr_state      AS pr_state,
+    r.pr_state_observed_at AS pr_state_observed_at,
     r.created_at    AS created_at,
     r.updated_at    AS updated_at,
     p.working_path  AS repo_path
@@ -238,6 +252,35 @@ const RECENT_WINDOW_MS = 30 * 60 * 1000;
  * whole history of every repo on the machine.
  */
 const PR_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * How old a pull request state reading may be and still be shown as the state
+ * *now*. Tuned against no-mistakes' observation cadence, so it is one of the
+ * constants AGENTS.md asks to be flagged when changed.
+ *
+ * **Measured, not chosen.** no-mistakes writes `pr_state` and
+ * `pr_state_observed_at` in one statement on every poll of its `ci` step, not
+ * only when the state changes - across 46 runs still recorded as `open`, the
+ * observation is up to 45 hours later than the `pr` step that opened the pull
+ * request, so it is genuinely re-observed rather than stamped once. The cadence
+ * comes from the 43 runs whose last write was a cancel or a failure, which
+ * samples "time since the last observation" without bias: median 64s, and a
+ * maximum of **112s**. Five minutes is 2.7x that worst case, so the chip never
+ * blinks out during a healthy run.
+ *
+ * What it catches is observation stopping without the *run* stopping, which is
+ * the case `live` alone could not see. Two runs in the same database were last
+ * observed at the same second - 2026-07-22T13:45:13Z, a daemon restart - and
+ * then sat in the `ci` step, status `running`, for a further **7h23m** carrying
+ * a frozen `open`. That window is unbounded, and it is what put a confident
+ * `OPEN` chip over a merged pull request.
+ *
+ * What it deliberately does *not* fix: the gap between a merge happening and
+ * no-mistakes noticing it, which is the cadence itself - up to ~2 minutes of
+ * honestly-fresh, honestly-wrong `open`. Closing that means asking the forge,
+ * which is RAI-13 and needs credentials this does not.
+ */
+export const PR_STATE_FRESH_MS = 5 * 60 * 1000;
 
 /**
  * How long a degraded-mode reading stays good for.
@@ -501,7 +544,7 @@ export class NoMistakesState {
 
   #readPullRequestsFromDb(now) {
     const floorSeconds = Math.floor((now - PR_WINDOW_MS) / 1000);
-    return newestPullRequests(this.#open().prepare(PULL_REQUESTS_QUERY).all(floorSeconds));
+    return newestPullRequests(this.#open().prepare(PULL_REQUESTS_QUERY).all(floorSeconds), now);
   }
 
   /**
@@ -638,6 +681,7 @@ export function normaliseRun(row, steps, now = Date.now()) {
     parkedForMs: awaitingSince ? now - awaitingSince : null,
     prUrl: row.pr_url || null,
     prState: row.pr_state || null,
+    prStateObservedAt: row.pr_state_observed_at ? row.pr_state_observed_at * 1000 : null,
     updatedAt: row.updated_at ? row.updated_at * 1000 : null,
     createdAt: row.created_at ? row.created_at * 1000 : null,
     step: step
@@ -683,20 +727,43 @@ export function pullRequestNumber(url) {
  */
 
 /**
+ * Whether a pull request state reading may be presented as the state now.
+ *
+ * Both halves are required and they fail closed together: a run that has ended
+ * is no longer observing, and a reading nobody has refreshed is not an answer
+ * about now however alive the run is. A reading that never happened - the
+ * degraded `axi status` path has none to offer, and an older no-mistakes may
+ * leave the column null - is not current either. Showing the state word is a
+ * claim, so the absence of evidence has to read as no.
+ *
+ * @param {string|null|undefined} status the run's raw no-mistakes status
+ * @param {number|null} observedAt epoch ms the state was last checked
+ * @param {number} now
+ * @returns {boolean}
+ */
+export function prStateIsCurrent(status, observedAt, now) {
+  if (!ACTIVE_STATUSES.includes(String(status))) return false;
+  if (!observedAt) return false;
+  return now - observedAt <= PR_STATE_FRESH_MS;
+}
+
+/**
  * Shape one row of the pull request query.
  *
  * @param {PullRequestRow} row
+ * @param {number} [now]
  * @returns {PullRequest}
  */
-export function normalisePullRequest(row) {
+export function normalisePullRequest(row, now = Date.now()) {
+  const observedAt = row.pr_state_observed_at ? Number(row.pr_state_observed_at) * 1000 : null;
   return {
     url: row.pr_url,
     number: pullRequestNumber(row.pr_url),
     state: row.pr_state || null,
-    observedAt: row.pr_state_observed_at ? Number(row.pr_state_observed_at) * 1000 : null,
+    observedAt,
     branch: row.branch || null,
     repoPath: row.repo_path,
-    live: ACTIVE_STATUSES.includes(row.status),
+    current: prStateIsCurrent(row.status, observedAt, now),
   };
 }
 
@@ -706,19 +773,20 @@ export function normalisePullRequest(row) {
  * A branch can be run through the pipeline many times, and every run after the
  * first carries the same pull request URL. Rows arrive newest first, so the
  * first sighting of a branch is the one to keep - and it is the one whose
- * `live` and `state` are least out of date.
+ * `state` is least out of date.
  *
  * @param {PullRequestRow[]} rows newest first, as `PULL_REQUESTS_QUERY` returns
+ * @param {number} [now]
  * @returns {PullRequest[]}
  */
-export function newestPullRequests(rows) {
+export function newestPullRequests(rows, now = Date.now()) {
   /** @type {Map<string, PullRequest>} */
   const byBranch = new Map();
   for (const row of rows) {
     if (!row?.pr_url || !row.repo_path) continue;
     const key = `${row.repo_path}\n${row.branch || ''}`;
     if (byBranch.has(key)) continue;
-    byBranch.set(key, normalisePullRequest(row));
+    byBranch.set(key, normalisePullRequest(row, now));
   }
   return [...byBranch.values()];
 }
@@ -756,6 +824,10 @@ export function parseAxiStatus(out, repoPath) {
     parkedForMs: null,
     prUrl: field('pr'),
     prState: null,
+    // `axi status` reports no state and therefore no observation of one. Both
+    // stay null rather than borrowing the run's clock, which is what let a
+    // proxy pass for an observation in the first place.
+    prStateObservedAt: null,
     updatedAt: null,
     createdAt: null,
     step: null,

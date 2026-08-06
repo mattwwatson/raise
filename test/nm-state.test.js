@@ -191,10 +191,12 @@ test('a URL with no number is still linkable, just unnumbered', () => {
   assert.equal(pullRequestNumber(null), null);
 });
 
-test('a pull request is only "live" while the run that owns it is', () => {
+test('a pull request state is current only while its run is going AND the reading is fresh', () => {
   // no-mistakes stops observing a pull request when its run ends, so the state
   // freezes at that moment - every cancelled run in a real database still says
-  // "open" days later. `live` is what stops the page presenting that as now.
+  // "open" days later. That was the whole of the rule, and it left the other
+  // half open: a run can go on running long after anything stopped observing
+  // its pull request.
   const row = {
     pr_url: 'https://example.com/pull/3',
     pr_state: 'open',
@@ -202,29 +204,64 @@ test('a pull request is only "live" while the run that owns it is', () => {
     branch: 'feat/x',
     repo_path: '/repo',
   };
-  assert.equal(normalisePullRequest({ ...row, status: 'running' }).live, true);
-  assert.equal(normalisePullRequest({ ...row, status: 'cancelled' }).live, false);
-  assert.equal(normalisePullRequest({ ...row, status: 'completed' }).live, false);
+  const at = (seconds) => 1_700_000 + seconds * 1000;
+  assert.equal(normalisePullRequest({ ...row, status: 'running' }, at(60)).current, true);
+  assert.equal(normalisePullRequest({ ...row, status: 'cancelled' }, at(60)).current, false);
+  assert.equal(normalisePullRequest({ ...row, status: 'completed' }, at(60)).current, false);
+  // The run is still going and nothing has looked at the pull request for seven
+  // hours. Exactly the shape of the two runs that produced the reported bug.
+  assert.equal(normalisePullRequest({ ...row, status: 'running' }, at(7 * 3600)).current, false);
+  // A row that has never been observed has nothing to be current about.
+  const never = { ...row, status: 'running', pr_state_observed_at: null };
+  assert.equal(normalisePullRequest(never, at(0)).current, false);
   // The state itself is reported either way - it is the caller's job to say
   // whether it is current, and the observation time is what lets it.
-  assert.equal(normalisePullRequest({ ...row, status: 'cancelled' }).state, 'open');
-  assert.equal(normalisePullRequest({ ...row, status: 'cancelled' }).observedAt, 1_700_000);
+  assert.equal(normalisePullRequest({ ...row, status: 'cancelled' }, at(60)).state, 'open');
+  assert.equal(normalisePullRequest({ ...row, status: 'cancelled' }, at(60)).observedAt, 1_700_000);
 });
 
 test('newestPullRequests keeps one per branch, the most recent', () => {
   // A branch run through the pipeline repeatedly carries the same PR on every
   // run after the first. The newest sighting has the least stale state.
   const rows = [
-    { pr_url: 'https://e.com/pull/9', pr_state: 'open', branch: 'b', repo_path: '/repo', status: 'running' },
+    { pr_url: 'https://e.com/pull/9', pr_state: 'open', pr_state_observed_at: 1700, branch: 'b', repo_path: '/repo', status: 'running' },
     { pr_url: 'https://e.com/pull/9', pr_state: 'none', branch: 'b', repo_path: '/repo', status: 'failed' },
     { pr_url: 'https://e.com/pull/4', pr_state: 'merged', branch: 'a', repo_path: '/repo', status: 'completed' },
   ];
-  const prs = newestPullRequests(rows);
+  const prs = newestPullRequests(rows, 1_700_000 + 60_000);
   assert.equal(prs.length, 2);
   assert.equal(prs[0].branch, 'b');
   assert.equal(prs[0].state, 'open', 'the newest row won');
-  assert.equal(prs[0].live, true);
+  assert.equal(prs[0].current, true);
   assert.equal(prs[1].number, 4);
+});
+
+test('a run carries when its pull request state was observed, not just when the run moved', () => {
+  // The column was in REQUIRED_RUN_COLUMNS - probed, so a schema without it
+  // degraded correctly - and then not selected by RUNS_QUERY, so nothing
+  // downstream could read it. `pullRequestForRun` substituted `updated_at`,
+  // which advances whenever the run does anything, and a pull request nobody
+  // had looked at for hours went on looking freshly observed. This asserts the
+  // query and the shape stay in step.
+  const { dir, cleanup } = scratch();
+  try {
+    const path = makeDb(dir);
+    const db = new DatabaseSync(path);
+    db.exec(`INSERT INTO repos (id, working_path) VALUES ('p1', '/repo-a')`);
+    db.exec(
+      `INSERT INTO runs (id, repo_id, branch, status, pr_url, pr_state, pr_state_observed_at, updated_at)
+       VALUES ('r1', 'p1', 'main', 'running', 'https://e.com/pull/3', 'open', 1700, 26000)`,
+    );
+    db.close();
+
+    const state = new NoMistakesState({ dbPath: path });
+    const [run] = state.read({ candidateDirs: ['/repo-a'] }).runs;
+    assert.equal(run.prStateObservedAt, 1_700_000);
+    assert.notEqual(run.prStateObservedAt, run.updatedAt, 'the two are different questions');
+    state.close();
+  } finally {
+    cleanup();
+  }
 });
 
 test('newestPullRequests separates branches that share a repo, and repos that share a branch', () => {

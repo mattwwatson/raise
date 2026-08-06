@@ -410,11 +410,11 @@ async function cmdStatus() {
       console.log(`  ${dim(`no-mistakes  ${row.pipeline.step}${findings}${what}`)}`);
     }
     if (row.reviewUrl) console.log(`  ${row.reviewUrl}`);
-    // The state word only while the run is live: no-mistakes stops observing a
-    // pull request when its run ends, so anything later is a frozen reading.
+    // The state word only while the reading is current - the run still going
+    // *and* the state observed recently. The link is printed either way.
     if (row.pr) {
       const label = row.pr.number ? `PR #${row.pr.number}` : 'PR';
-      const state = row.pr.live && row.pr.state ? ` ${row.pr.state}` : '';
+      const state = row.pr.current && row.pr.state ? ` ${row.pr.state}` : '';
       console.log(`  ${dim(`${label}${state}`)} ${row.pr.url}`);
     }
   }

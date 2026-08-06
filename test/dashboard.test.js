@@ -782,7 +782,7 @@ test("a worktree session finds its branch's pull request in the main checkout", 
         observedAt: 900,
         branch: 'feat/thing',
         repoPath: '/Users/x/work/repo',
-        live: true,
+        current: true,
       },
     ],
     now: 5000,
@@ -806,7 +806,7 @@ test("a bystander keeps the branch's pull request, which is not the run's to len
         observedAt: 900,
         branch: 'main',
         repoPath: '/Users/x/work/repo',
-        live: true,
+        current: true,
       },
     ],
     now: 5000,
@@ -1032,7 +1032,7 @@ const pr = (over = {}) => ({
   observedAt: 1000,
   branch: 'feat/x',
   repoPath: '/Users/x/work/repo',
-  live: false,
+  current: false,
   ...over,
 });
 
@@ -1072,7 +1072,7 @@ test('a session keeps its pull request after the run that opened it has gone', (
     pullRequests: [pr()],
   });
   assert.equal(rows[0].pr.number, 7);
-  assert.equal(rows[0].pr.live, false, 'and it is honest that the state is a past reading');
+  assert.equal(rows[0].pr.current, false, 'and it is honest that the state is a past reading');
 });
 
 test('the branch comes from the checkout, not from whichever run happened to match', () => {
@@ -1103,11 +1103,60 @@ test('the branch is the checkout"s own, never borrowed from a run', () => {
 test('a live run"s own pull request wins, and is reported as current', () => {
   const rows = build({
     sessions: [session()],
-    runs: [run({ active: true, prUrl: 'https://example.com/pull/9', prState: 'open' })],
+    runs: [
+      run({
+        active: true,
+        prUrl: 'https://example.com/pull/9',
+        prState: 'open',
+        prStateObservedAt: 9000,
+      }),
+    ],
     branches: new Map([['s1', 'main']]),
+    now: 10_000,
   });
   assert.equal(rows[0].pr.number, 9);
-  assert.equal(rows[0].pr.live, true);
+  assert.equal(rows[0].pr.current, true);
+});
+
+test('a live run whose pull request stopped being observed does not claim its state', () => {
+  // The bug: a merged pull request still rendered an `open` chip. `live` meant
+  // "the run that owns it is still going", which is not "this reading is
+  // current" - and the two come apart whenever the CI monitor stops observing
+  // without the run stopping. Measured in the real database: two runs were last
+  // observed at the same second, 2026-07-22T13:45:13Z, and stayed `running` in
+  // the `ci` step for a further 7h23m carrying `pr_state = 'open'`.
+  const rows = build({
+    sessions: [session()],
+    runs: [
+      run({
+        active: true,
+        prUrl: 'https://example.com/pull/9',
+        prState: 'open',
+        prStateObservedAt: 1000,
+        // The run keeps working, so its own clock keeps advancing. This is why
+        // `updatedAt` cannot stand in for an observation time.
+        updatedAt: 7 * 60 * 60 * 1000,
+      }),
+    ],
+    branches: new Map([['s1', 'main']]),
+    now: 7 * 60 * 60 * 1000,
+  });
+  assert.equal(rows[0].pr.number, 9, 'the link survives - only the state word is a claim');
+  assert.equal(rows[0].pr.state, 'open', 'and the reading is still reported, as a past one');
+  assert.equal(rows[0].pr.current, false);
+});
+
+test('a run with no observation time at all cannot present a state as current', () => {
+  // The degraded `axi status` path has no observation time to offer, and a
+  // schema too old to carry one reads as null. Fail closed: showing the word is
+  // a claim, and we have nothing to base it on.
+  const rows = build({
+    sessions: [session()],
+    runs: [run({ active: true, prUrl: 'https://example.com/pull/9', prState: 'open' })],
+    branches: new Map([['s1', 'main']]),
+    now: 10_000,
+  });
+  assert.equal(rows[0].pr.current, false);
 });
 
 test('a run does not lend its pull request to a session that has moved on', () => {
@@ -1193,7 +1242,7 @@ test('a pull request the transcript reported is attributed to its own checkout',
   const pr = transcriptPullRequest(seen(), '/Users/x/work/repo', 'feat/x');
   assert.equal(pr.number, 40);
   assert.equal(pr.branch, 'feat/x');
-  assert.equal(pr.live, false, 'nothing is watching it, so the state is not current');
+  assert.equal(pr.current, false, 'nothing is watching it, so the state is not current');
 });
 
 test("a pull request in some other project is not this row's", () => {
