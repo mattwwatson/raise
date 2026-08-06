@@ -3,6 +3,7 @@
  *
  *   npm run tasks            the board
  *   npm run tasks:links      every docs/tasks reference resolves
+ *   npm run tasks:gate       CI: this branch's spec says shipped
  *   npm run tasks:validate   the board, plus a Jira reconciliation REPORT
  *
  * Jira owns the ordering - backlog rank, epics, explicitly-set blockers - and
@@ -21,14 +22,16 @@
 
 import { join } from 'node:path';
 
+import { GitBranch } from '../src/git-branch.js';
 import { buildBoard, renderBoard } from './task-board.js';
 import { defaultTaskFiles, repoRoot } from './task-files.js';
+import { gateBranch, renderGate, renderGateFaults } from './task-gate.js';
 import { fetchJiraIssues, reconcile, renderJiraFailure, renderValidation } from './task-jira.js';
 import { checkLinks, readTree, renderLinks } from './task-links.js';
 import { readSpecs, TASKS_DIR } from './task-specs.js';
 
 /** Subcommands, in the order `usage` lists them. */
-const COMMANDS = ['board', 'links', 'validate'];
+const COMMANDS = ['board', 'links', 'gate', 'validate'];
 
 const DEFAULT_COMMAND = 'board';
 
@@ -45,7 +48,23 @@ function usage() {
   console.error('');
   console.error('  board     what is ready, what is blocked, what shipped');
   console.error('  links     every docs/tasks reference resolves');
+  console.error('  gate      CI: this branch\'s spec says shipped');
   console.error('  validate  the board, plus how disk and Jira differ (a report)');
+}
+
+/**
+ * The branch this checkout is on.
+ *
+ * `BITBUCKET_BRANCH` first, because on a pull-request build it is the source
+ * branch and the checkout may not be on it. Otherwise `.git/HEAD`, read through
+ * the module the server already uses - which handles a linked worktree and
+ * costs no subprocess. A detached HEAD has no branch, and the gate says so.
+ *
+ * @returns {string|null}
+ */
+function currentBranch() {
+  if (process.env.BITBUCKET_BRANCH) return process.env.BITBUCKET_BRANCH;
+  return new GitBranch().checkoutFor(repoRoot()).branch;
 }
 
 async function main() {
@@ -70,6 +89,15 @@ async function main() {
   }
 
   const specs = readSpecs(join(root, TASKS_DIR), defaultTaskFiles);
+
+  // The gate is one assertion and deliberately prints no board.
+  if (command === 'gate') {
+    const result = gateBranch(currentBranch(), specs.byTicket);
+    write(renderGateFaults(specs.faults, { colour }));
+    write(renderGate(result, { colour, today: new Date().toISOString().slice(0, 10) }));
+    process.exitCode = Math.max(result.exitCode, specs.faults.length > 0 ? 1 : 0);
+    return;
+  }
 
   const board = buildBoard(specs);
   write(renderBoard(board, { colour }));
