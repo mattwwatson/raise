@@ -8,7 +8,7 @@ that are easy to undo by accident.
 
 ## Project Overview
 
-`nmmon` is a single-page monitor for one developer's machine. It shows every agent session -
+`nmmon` is a single-page monitor for the machine it runs on. It shows every agent session -
 Claude Code in a terminal, Claude Desktop, or pi - across every repo, ranks them by who needs
 a human, and focuses the window when you click a row.
 
@@ -41,8 +41,15 @@ shows a confident green dot over state that stopped updating is worse than one t
 visibly down, because you stop checking. Any change that could let the page or the CLI assert
 something it no longer knows is a bug, even if nothing throws.
 
-Personal tool, macOS-only for focusing (monitoring itself is portable). Do not add
-cross-platform focus adapters, auth, multi-user support or remote access speculatively.
+**nmmon watches one machine and serves the one person sitting at it.** No auth, no multi-user
+support, no remote access. Those are scope boundaries rather than gaps waiting to be filled -
+each of them turns a local page into a service, and none should be added speculatively.
+
+**Focusing is macOS-only; monitoring itself is portable.** That is a fact about where it has been
+run, not a position the design takes, and the seam for another platform is cheap by design - a
+terminal is one entry, per the rule under [Architecture](#architecture). What is not worth
+writing is an adapter for a terminal or a platform nobody is on: it cannot be exercised against
+a real session, so it is guesswork in the shape of support.
 
 ## Tech Stack
 
@@ -83,14 +90,17 @@ runtime.
 
 ## Architecture
 
-Four sources of truth, joined into one list:
+Four sources of truth, joined into one list. **They are listed in the order they matter**, which
+is an editorial claim and meant as one: the hooks answer the question the product exists for and
+are the only source that works on a machine with nothing else installed, while the no-mistakes
+database is optional and comes last. Do not reorder them back.
 
 | Source | Module | Answers |
 | --- | --- | --- |
-| no-mistakes SQLite DB (polled, 1s) | `src/nm-state.js` | is a pipeline run parked, working, failed? |
 | agent hooks (pushed) | `src/registry.js` | is the agent blocked waiting for a human? |
 | the session's own transcript (tail, on change) | `src/transcript.js` | what is it working on, what is it doing right now, and did it open a pull request? |
 | the process table (one `ps`, every 3s) | `src/poll-watch.js` | is a review still open, is a pipeline still running, and whose is it? |
+| no-mistakes SQLite DB (polled, 1s) | `src/nm-state.js` | is a pipeline run parked, working, failed? |
 
 | Path | What |
 | --- | --- |
