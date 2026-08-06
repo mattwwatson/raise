@@ -91,9 +91,11 @@ runtime.
 ## Architecture
 
 Four sources of truth, joined into one list. **They are listed in the order they matter**, which
-is an editorial claim and meant as one: the hooks answer the question the product exists for and
-are the only source that works on a machine with nothing else installed, while the no-mistakes
-database is optional and comes last. Do not reorder them back.
+is an editorial claim and meant as one: the hooks and the transcript need nothing but the agent
+itself, so they lead - the hooks first because they answer the one question the product exists
+for, is a human needed, and the transcript because it is what qualifies that answer. The process
+table and the database both speak about somebody else's tool, and the database is the optional
+one, so it comes last. Do not reorder them back.
 
 | Source | Module | Answers |
 | --- | --- | --- |
