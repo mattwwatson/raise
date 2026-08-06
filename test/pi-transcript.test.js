@@ -157,6 +157,24 @@ test('an extension"s custom tool is named, never given a borrowed verb', () => {
   assert.equal(summariseTranscript(records).activity, 'Deploy_thing');
 });
 
+test('a tool call that carries no arguments at all still normalises', () => {
+  // A nullary tool writes no `arguments` key, so the rename spreads nothing.
+  // That is a no-op in an object literal rather than a throw, which is why the
+  // `|| {}` guard that used to stand here was dead - but the case it was
+  // guarding is real, so it is asserted rather than assumed.
+  const records = parsePiTranscriptTail(
+    jsonl(
+      entry({
+        role: 'assistant',
+        content: [{ type: 'toolCall', id: 'tc_1', name: 'deploy_thing' }],
+      }),
+    ),
+  );
+  const [block] = records[0].message.content;
+  assert.deepEqual(block.input, {});
+  assert.equal(summariseTranscript(records).activity, 'Deploy_thing');
+});
+
 test('pi generates no title, and the summary invents nothing', () => {
   // Claude Code writes `ai-title`; pi does not generate one at all. The row
   // falls back to the directory name, which is honest.

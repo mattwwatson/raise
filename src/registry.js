@@ -238,7 +238,7 @@ export class SessionRegistry {
       // tells a permission prompt from the sixty-second nudge without reading
       // the message. Kept and dropped with the message for the same reason.
       notificationType: state === 'blocked' ? payload.notification_type || null : null,
-      host: { ...(previous.host || {}), ...(payload.host || {}) },
+      host: { ...previous.host, ...payload.host },
       startedAt: previous.startedAt || now,
       updatedAt: now,
       stateSince: previous.state === state ? previous.stateSince || now : now,

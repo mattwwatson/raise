@@ -80,7 +80,7 @@ function toolName(name) {
 
 /** @param {string} name @param {Record<string, any>} args */
 function toolInput(name, args) {
-  const input = { ...(args || {}) };
+  const input = { ...args };
   if (PATH_TOOLS.has(name) && input.path !== undefined && input.file_path === undefined) {
     input.file_path = input.path;
   }
