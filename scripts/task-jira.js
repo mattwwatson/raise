@@ -439,6 +439,10 @@ export function renderValidation(report, { colour = false } = {}) {
     out.push(paint(ANSI.dim, `  ${report.orphans.length} Jira ${plural} with no spec file: ${keys}`));
     out.push(paint(ANSI.dim, "  Expected rather than a gap - an epic's children need no spec"));
     out.push(paint(ANSI.dim, '  until one of them is picked up.'));
+    if (report.orphans.some((orphan) => orphan.isEpic)) {
+      out.push(paint(ANSI.dim, '  An (epic) above is the exception: an epic gets a spec of its'));
+      out.push(paint(ANSI.dim, '  own, so one without a file is worth a look rather than expected.'));
+    }
     out.push('');
   }
 

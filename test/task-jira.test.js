@@ -290,6 +290,19 @@ test('an orphaned epic is marked as one, because an epic gets a spec like anythi
   assert.equal(report.exitCode, 0);
 });
 
+test('the epic exception is printed only when an orphan actually is an epic', () => {
+  // The reason under the list explains why an epic's children need no spec,
+  // which reads as reassurance about the one entry the marker singles out. The
+  // second sentence answers that, and would be noise on the ordinary case.
+  const ordinary = renderValidation(reconcile(indexed([]), [issue({ key: 'RAI-4' })]));
+  assert.ok(!ordinary.out.join('\n').includes('worth a look'));
+
+  const withEpic = renderValidation(
+    reconcile(indexed([]), [issue({ key: 'RAI-4' }), issue({ key: 'RAI-20', isEpic: true })]),
+  );
+  assert.ok(withEpic.out.join('\n').includes('worth a look'));
+});
+
 test('a Jira status we have never seen is reported as unmapped rather than as divergence', () => {
   // Fails soft on purpose: a word we have not seen is new, not wrong.
   const report = reconcile(indexed([spec({ status: 'backlog' })]), [issue({ status: 'Blocked' })]);
