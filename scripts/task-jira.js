@@ -432,7 +432,9 @@ export function renderValidation(report, { colour = false } = {}) {
   }
 
   if (report.orphans.length > 0) {
-    const keys = report.orphans.map((orphan) => orphan.key).join(', ');
+    const keys = report.orphans
+      .map((orphan) => (orphan.isEpic ? `${orphan.key} (epic)` : orphan.key))
+      .join(', ');
     const plural = report.orphans.length === 1 ? 'issue' : 'issues';
     out.push(paint(ANSI.dim, `  ${report.orphans.length} Jira ${plural} with no spec file: ${keys}`));
     out.push(paint(ANSI.dim, "  Expected rather than a gap - an epic's children need no spec"));

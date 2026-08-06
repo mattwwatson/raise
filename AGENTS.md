@@ -1010,9 +1010,9 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 594 tests, no network, no dependencies, ~2s
-npm run lint      # oxlint over src, bin, hooks, public, test
-npm run typecheck # tsc --noEmit over src, bin, hooks, public
+npm test          # 595 tests, no network, no dependencies, ~2s
+npm run lint      # oxlint over src, bin, hooks, public, test, scripts
+npm run typecheck # tsc --noEmit over src, bin, hooks, public, scripts
 ```
 
 All three must pass before anything is done, and `bitbucket-pipelines.yml` runs them on every
@@ -1136,7 +1136,7 @@ before creating a ticket or touching anything under `docs/tasks/`.**
 ## Commands
 
 ```sh
-npm test                       # 594 tests, ~2s
+npm test                       # 595 tests, ~2s
 npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above

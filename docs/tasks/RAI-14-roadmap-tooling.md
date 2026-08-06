@@ -246,8 +246,8 @@ build to run there and **not** on a plain branch push.
 
 Shipped as 8 modules in `scripts/` and 6 test files, ~1,000 source lines against the ticket's
 estimate of 400. The multiplier is module comments, JSDoc typedefs, the render/logic split and
-the guards below; the executable logic is barely larger than the original. **132 tests added,
-462 to 594.**
+the guards below; the executable logic is barely larger than the original. **133 tests added,
+462 to 595.**
 
 **The structure is the part that differs most from the port.** Every command is *pure core -
 result object - pure renderer*, and `scripts/tasks.js` is the only file that reads a directory,

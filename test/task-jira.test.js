@@ -275,6 +275,21 @@ test('the orphan line says why an orphan is expected rather than implying a gap'
   assert.ok(out.join('\n').includes('need no spec'));
 });
 
+test('an orphaned epic is marked as one, because an epic gets a spec like anything else', () => {
+  // An epic's children need no spec until picked up, which is why orphans are
+  // never a fault - but the epic itself is expected to have one, so an epic
+  // sitting in that list is the more notable entry rather than the less.
+  const report = reconcile(indexed([]), [
+    issue({ key: 'RAI-4' }),
+    issue({ key: 'RAI-20', isEpic: true }),
+  ]);
+  const { out } = renderValidation(report);
+  const line = out.find((one) => one.includes('with no spec file'));
+  assert.ok(line.includes('RAI-20 (epic)'));
+  assert.ok(!line.includes('RAI-4 (epic)'));
+  assert.equal(report.exitCode, 0);
+});
+
 test('a Jira status we have never seen is reported as unmapped rather than as divergence', () => {
   // Fails soft on purpose: a word we have not seen is new, not wrong.
   const report = reconcile(indexed([spec({ status: 'backlog' })]), [issue({ status: 'Blocked' })]);
