@@ -288,6 +288,14 @@ whose window nmmon could not place says `no window` rather than guessing at one.
 otherwise silent, since the window arriving in front of you is the answer; a short message
 means you were raised onto something less than the row you clicked.
 
+A quieter chip says who *started* the window, and today the only tool that declares itself is
+[firstmate](https://github.com/kunchenguid/firstmate) - so a crewmate running on your behalf
+is distinguishable from a session you opened yourself. It marks the crew and the first mate
+alike, and only on firstmate's own evidence: an `fm-` tmux window, or firstmate's lock file
+naming the session. Having firstmate's source open is not enough to earn it, a window some
+other tool spawned gets nothing, and on a machine without firstmate nothing is looked for at
+all. `nmmon status` prints the same word.
+
 The dot in the header is **positive evidence, not the absence of an error**. The server sends
 a `ping` event every 20 seconds; if nothing arrives for 50 the dot goes red, the header reads
 `no response for 2m`, and the whole page dims, because everything on it is now a snapshot of

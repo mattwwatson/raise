@@ -116,6 +116,7 @@ one, so it comes last. Do not reorder them back.
 | `src/git-branch.js` | the branch a checkout is on, and the checkout a worktree belongs to, read from `.git` |
 | `src/lavish.js` | resolving a Lavish artifact to the page waiting on you |
 | `src/poll-watch.js` | which sessions are in a `lavish-axi poll`, which have a pipeline running, and which are driving one |
+| `src/firstmate.js` | which sessions firstmate started, from the markers it sets on itself |
 | `src/run-owner.js` | which session started which run, remembered across the gaps |
 | `src/dashboard.js` | joins them all into ranked rows (pure) |
 | `src/focus/` | tmux resolution, per-terminal adapters, and raising Claude Desktop |
@@ -872,6 +873,56 @@ Focusing is a branch of its own in `focus/index.js` and a sibling module, not an
 `terminals.js`, because the `Terminal` interface is `{sessionUuid, tty}` and this host has
 neither. Checked before every other branch, since all of them would fall through.
 
+**A firstmate session is identified by what firstmate declares, and it is the same rule again.**
+firstmate runs a crew of agents on your behalf, each an ordinary Claude Code session in a tmux
+window and a treehouse worktree - so everything we compute already works on one unchanged, and
+that is the problem: on a page about which session needs you, there was no way to tell a session
+you started from one something else started for you.
+
+Nothing a crewmate *lacks* identifies it. No tty, a treehouse worktree and
+`--dangerously-skip-permissions` in argv are each equally true of a handoff worker and of a
+no-mistakes pipeline agent. Two positive markers hold, both of them firstmate declaring itself,
+and `src/firstmate.js` uses those and nothing else:
+
+| | Evidence |
+| --- | --- |
+| crew | the pane's tmux **window** name starts `fm-` |
+| the captain | `<session cwd>/state/.lock` exists and holds this session's `host.pid` |
+| anything else | no chip |
+
+Two near-misses are refused on purpose, and either would be the failure this exists to prevent.
+The tmux **session** name is shared by the captain and its crew, so keying on it would chip the
+captain as crew - and the captain's own *window* name is no good either, because firstmate pins
+`allow-rename off` on a crew window and leaves it *on* for its own, so Claude Code can retitle
+it and a chip that silently stops appearing is worse than one that was never there. And the
+**working directory** would chip anyone who merely has firstmate's source open: someone fixing
+firstmate is not the first mate, and the lock is exactly what separates running it from working
+on it, since an editing session's pid is not in it.
+
+One answer for both, because a secondmate goes through the same spawn path and gets an `fm-<id>`
+window; telling them apart would mean reading firstmate's private `state/<id>.meta`. The field
+is `Row.spawnedBy` - *which tool spawned this window* rather than a firstmate boolean - because
+handoff uses the same mechanism with a `handoff-` prefix and is the obvious next entry.
+
+**The cost is on the poll loop, so it is paid once per pane.** RAI-18 introduced the same
+`list-panes -a` query, but on the focus *click* path; this one builds cards. The name is pinned
+for the life of the window, so a pane is resolved when it is first seen and cached, and the read
+is fired and never awaited the way `lavish.js` does - the chip appears a tick later rather than
+the loop waiting on tmux. An empty or failed reading keeps the last answer, because a reading we
+did not get is not evidence. The pane tables are keyed by the **socket path**, through the same
+`socketPath` that `-S` is built from, because a pane id is unique only within a server: keyed on
+the raw `$TMUX` instead - whose last field is the *session* index - one server would hold a table,
+a rate limit and a `list-panes -a` per session on it, and the once-per-pane claim above would not
+be true. The lock is one small file, cached on its own mtime like
+`git-branch.js` caches HEAD; the *stat* is not cached, because the lock is written after the
+captain's session exists and caching its absence would mean the captain never got a chip at all.
+
+Nothing runs for a session with no tmux pane, and nothing anywhere looks for firstmate itself. A
+machine without it has no lock and no `fm-` window, which means no chip, no warning and no
+subprocess - the same terms no-mistakes and Lavish are held to. Backends firstmate also supports
+(herdr, cmux, zellij, orca) have no `fm-<id>` window and get nothing; guessing from a treehouse
+worktree path would chip handoff workers as crew.
+
 **Claude Desktop cannot be asked to select a session it is already hosting, and the link that
 looks like it does something else.** `claude://resume?session=<uuid>` is an *import*, and its
 only guard against doing it twice is `if (sessions.get('local_' + idFromTheUrl))`. The app
@@ -1083,6 +1134,12 @@ Keep it that way - it has no build step and must open as a file.
   worth marking because what its states can mean differs: a pi row never turns red for a
   permission prompt, because pi has none. It is outlined and `--faint`, quieter than the host
   chip beside it, since provenance must not compete with where your window actually is.
+- **The spawner chip says who started the window, and `SPAWNER_LABELS` has no fallback
+  either.** It sits beside the agent chip, wears the same outlined `--faint` style and comes
+  first, because it answers the earlier question - who started this, then what is running in it.
+  A tool we do not recognise gets no chip, and a session nobody in particular started - most of
+  them - says nothing rather than saying so. That silence is the rule from `src/firstmate.js`
+  reaching the page: positive evidence, never absence.
 - **The expanded panel names the agent that wrote each line**, through `AGENT_NAMES`, which
   *does* carry Claude Code - a label on a line is required where a chip on a card is not. The
   record itself cannot say, because both agents write the same parsed shape, so the row is
@@ -1098,7 +1155,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 612 tests, no network, no dependencies, ~2s
+npm test          # 633 tests, no network, no dependencies, ~2s
 npm run lint      # oxlint over src, bin, hooks, public, test, scripts
 npm run typecheck # tsc --noEmit over src, bin, hooks, public, scripts
 ```
@@ -1227,7 +1284,7 @@ before creating a ticket or touching anything under `docs/tasks/`.**
 ## Commands
 
 ```sh
-npm test                       # 612 tests, ~2s
+npm test                       # 633 tests, ~2s
 npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above

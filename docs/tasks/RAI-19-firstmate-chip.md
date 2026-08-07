@@ -1,8 +1,10 @@
 ---
 ticket: RAI-19
-status: backlog
+status: shipped
 size: S
 depends: -
+branch: RAI-19-firstmate-chip
+shipped: 2026-08-07
 ---
 # RAI-19 - Mark firstmate sessions on the card
 
@@ -150,3 +152,44 @@ The lock is one small file read, cached the same way.
 - **Anything that runs when firstmate is absent.** Same rule as no-mistakes and Lavish: absence
   is a supported setup, not a degraded one. No lock and no `fm-` window means no chip, no
   banner, and no subprocess looking for one.
+
+---
+
+## Implementation notes
+
+`src/firstmate.js` holds both markers and nothing else does. `FirstmateWatch.spawnedBy(session)`
+returns `'firstmate'` or null, from the two positive markers above and no third source.
+
+**Crew** comes from a tmux pane table - `list-panes -a -F '#{pane_id}\t#{window_name}'` - keyed
+by the socket path out of `$TMUX`, through the `socketPath` that `-S` is built from, because a
+pane id is only unique within a server and `$TMUX`'s last field is the *session* index rather
+than anything about the server. A pane is resolved when it is first seen and then cached, so in
+a steady state the query does not run at all; an unknown pane
+can trigger at most one read per `REFRESH_MS`. The read is fired and never awaited, the way
+`lavish.js` does its lookup, so the poll loop cannot stall on tmux - the chip appears on the next
+tick. An empty or failed reading keeps the previous answer, because a reading we did not get is
+not evidence, and dropping the chip off every card for one tick is exactly the flicker the
+never-null rule on the pipeline marker exists to avoid.
+
+**The captain** comes from `<cwd>/state/.lock` - the path built from the session's own cwd, never
+hardcoded - cached on the lock's own mtime like `git-branch.js` caches HEAD. The *stat* is
+deliberately not cached: the lock records the harness pid and so is written after the session
+exists, and caching its absence would mean the captain never got a chip at all. A lock rewritten
+by a restarted first mate is picked up on the next tick, so the old card stops claiming it.
+
+`Row.spawnedBy` carries it to both renderers. The page has `SPAWNER_LABELS = { firstmate:
+'firstmate' }` with no fallback, rendering the outlined `--faint` chip before the agent chip;
+`nmmon status` prints the same word dimmed after the session name. Nothing else on the card moved
+- no title, no ordering, no colour.
+
+Tests are `test/firstmate.test.js` (both markers, both near-misses, the caching and rate-limiting
+claims, two tmux servers not sharing a pane id and two sessions on one server sharing a single
+table and a single read), three in `test/dashboard.test.js` for the
+row field, and two in `test/server.test.js`: one end to end across a crewmate, the captain, a
+`handoff-` window and a session with firstmate's source open, and one extending the existing
+absence guard so `tmux` joins `no-mistakes` and `lavish-axi` as a command that must not run for a
+session with no pane. 633 tests, lint and typecheck green.
+
+Verified against the live installation this was written on: `%360 fm-rai-19-firstmate-chip` chips,
+`%330 handoff-sls-75-4d7a` does not, and the captain's `First Mate` window - whose `allow-rename`
+really is on - is identified by its lock rather than its name.

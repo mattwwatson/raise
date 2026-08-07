@@ -1702,6 +1702,27 @@ test('a session record written before pi existed is Claude Code', () => {
   assert.equal(rows[0].agentKind, 'claude');
 });
 
+test('a row carries which tool started its window, when one declared itself', () => {
+  const rows = build({
+    sessions: [session()],
+    runs: [],
+    spawnedBy: new Map([['s1', 'firstmate']]),
+  });
+  assert.equal(rows[0].spawnedBy, 'firstmate');
+});
+
+test('a session nobody in particular started claims nothing', () => {
+  // Positive evidence or nothing: an absent answer is the ordinary case, not a
+  // gap to guess at. Most sessions on this page are ones you started yourself.
+  const rows = build({ sessions: [session()], runs: [] });
+  assert.equal(rows[0].spawnedBy, null);
+});
+
+test('a run with no session behind it has no window for anyone to have started', () => {
+  const rows = build({ sessions: [], runs: [run()] });
+  assert.equal(rows[0].spawnedBy, null);
+});
+
 test('a run with no session behind it claims no agent', () => {
   // Nobody is running it - it is a pipeline the database knows about - and
   // naming an agent there would be an invention.
