@@ -296,6 +296,16 @@ naming the session. Having firstmate's source open is not enough to earn it, a w
 other tool spawned gets nothing, and on a machine without firstmate nothing is looked for at
 all. `nmmon status` prints the same word.
 
+The dot in the header is **positive evidence, not the absence of an error**. The server sends
+a `ping` event every 20 seconds; if nothing arrives for 50 the dot goes red, the header reads
+`no response for 2m`, and the whole page dims, because everything on it is now a snapshot of
+the past. The page then reopens the stream to find out which it is.
+
+This matters more than it sounds. A connection can stop carrying data long before it visibly
+breaks - a suspended laptop, a frozen server, a dropped NAT entry - and for a tool whose only
+job is telling you something needs you, quietly showing stale data is the worst thing it can
+do. So the page never infers that it is live; it waits to be told.
+
 ## Telling a nudge it was not needed
 
 Claude Code turns a finished turn into a loud **Waiting for you** after sixty idle seconds, and
@@ -319,16 +329,6 @@ you, so there is nothing there to dismiss, and a control that must not be used i
 turns red again for its pipeline, or starts working because its transcript ran on, the row says
 that and only that - the marker is there to tell a quiet row apart from one with nothing to say,
 and a row that is neither has no use for it.
-
-The dot in the header is **positive evidence, not the absence of an error**. The server sends
-a `ping` event every 20 seconds; if nothing arrives for 50 the dot goes red, the header reads
-`no response for 2m`, and the whole page dims, because everything on it is now a snapshot of
-the past. The page then reopens the stream to find out which it is.
-
-This matters more than it sounds. A connection can stop carrying data long before it visibly
-breaks - a suspended laptop, a frozen server, a dropped NAT entry - and for a tool whose only
-job is telling you something needs you, quietly showing stale data is the worst thing it can
-do. So the page never infers that it is live; it waits to be told.
 
 ## How focusing works
 
