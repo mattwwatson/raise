@@ -257,6 +257,28 @@ test('two tmux servers do not share a pane id', async () => {
   assert.equal(watch.spawnedBy(onB), null);
 });
 
+test('two sessions on one tmux server share a table and read it once', async () => {
+  // `$TMUX` is "<socket>,<server pid>,<session index>", so two sessions on one
+  // server differ in the last field. Keyed on the raw string that is two tables,
+  // two rate limits and two `list-panes -a` for one server.
+  let reads = 0;
+  const watch = new FirstmateWatch({
+    execAsync: async () => {
+      reads += 1;
+      return PANES;
+    },
+    files: files(),
+  });
+  const first = session({ host: { pid: 1, tmux: '/tmp/default,29202,0', tmux_pane: '%358' } });
+  const second = session({ host: { pid: 2, tmux: '/tmp/default,29202,187', tmux_pane: '%323' } });
+  watch.spawnedBy(first, 0);
+  watch.spawnedBy(second, 0);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(reads, 1, 'one server, one read');
+  assert.equal(watch.spawnedBy(first, 0), 'firstmate');
+  assert.equal(watch.spawnedBy(second, 0), null);
+});
+
 test('load answers without waiting for a second tick, for the one-shot CLI', async () => {
   const watch = new FirstmateWatch({ execAsync: async () => PANES, files: files() });
   const crew = session({ host: { pid: 100, tmux: '', tmux_pane: '%358' } });

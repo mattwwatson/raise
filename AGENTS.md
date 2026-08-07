@@ -909,7 +909,11 @@ handoff uses the same mechanism with a `handoff-` prefix and is the obvious next
 for the life of the window, so a pane is resolved when it is first seen and cached, and the read
 is fired and never awaited the way `lavish.js` does - the chip appears a tick later rather than
 the loop waiting on tmux. An empty or failed reading keeps the last answer, because a reading we
-did not get is not evidence. The lock is one small file, cached on its own mtime like
+did not get is not evidence. The pane tables are keyed by the **socket path**, through the same
+`socketPath` that `-S` is built from, because a pane id is unique only within a server: keyed on
+the raw `$TMUX` instead - whose last field is the *session* index - one server would hold a table,
+a rate limit and a `list-panes -a` per session on it, and the once-per-pane claim above would not
+be true. The lock is one small file, cached on its own mtime like
 `git-branch.js` caches HEAD; the *stat* is not cached, because the lock is written after the
 captain's session exists and caching its absence would mean the captain never got a chip at all.
 
@@ -1151,7 +1155,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 632 tests, no network, no dependencies, ~2s
+npm test          # 633 tests, no network, no dependencies, ~2s
 npm run lint      # oxlint over src, bin, hooks, public, test, scripts
 npm run typecheck # tsc --noEmit over src, bin, hooks, public, scripts
 ```
@@ -1280,7 +1284,7 @@ before creating a ticket or touching anything under `docs/tasks/`.**
 ## Commands
 
 ```sh
-npm test                       # 632 tests, ~2s
+npm test                       # 633 tests, ~2s
 npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above

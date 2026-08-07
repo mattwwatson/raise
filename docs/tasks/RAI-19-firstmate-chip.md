@@ -161,8 +161,10 @@ The lock is one small file read, cached the same way.
 returns `'firstmate'` or null, from the two positive markers above and no third source.
 
 **Crew** comes from a tmux pane table - `list-panes -a -F '#{pane_id}\t#{window_name}'` - keyed
-per tmux socket, because a pane id is only unique within a server. A pane is resolved when it is
-first seen and then cached, so in a steady state the query does not run at all; an unknown pane
+by the socket path out of `$TMUX`, through the `socketPath` that `-S` is built from, because a
+pane id is only unique within a server and `$TMUX`'s last field is the *session* index rather
+than anything about the server. A pane is resolved when it is first seen and then cached, so in
+a steady state the query does not run at all; an unknown pane
 can trigger at most one read per `REFRESH_MS`. The read is fired and never awaited, the way
 `lavish.js` does its lookup, so the poll loop cannot stall on tmux - the chip appears on the next
 tick. An empty or failed reading keeps the previous answer, because a reading we did not get is
@@ -181,11 +183,12 @@ by a restarted first mate is picked up on the next tick, so the old card stops c
 - no title, no ordering, no colour.
 
 Tests are `test/firstmate.test.js` (both markers, both near-misses, the caching and rate-limiting
-claims, and two tmux servers not sharing a pane id), three in `test/dashboard.test.js` for the
+claims, two tmux servers not sharing a pane id and two sessions on one server sharing a single
+table and a single read), three in `test/dashboard.test.js` for the
 row field, and two in `test/server.test.js`: one end to end across a crewmate, the captain, a
 `handoff-` window and a session with firstmate's source open, and one extending the existing
 absence guard so `tmux` joins `no-mistakes` and `lavish-axi` as a command that must not run for a
-session with no pane. 632 tests, lint and typecheck green.
+session with no pane. 633 tests, lint and typecheck green.
 
 Verified against the live installation this was written on: `%360 fm-rai-19-firstmate-chip` chips,
 `%330 handoff-sls-75-4d7a` does not, and the captain's `First Mate` window - whose `allow-rename`

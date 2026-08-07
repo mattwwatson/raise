@@ -60,7 +60,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { tmuxCommand } from './focus/tmux.js';
+import { socketPath, tmuxCommand } from './focus/tmux.js';
 
 /** @typedef {import('./registry.js').Session} Session */
 
@@ -165,8 +165,12 @@ export class FirstmateWatch {
   #execAsync;
   #files;
   /**
-   * One entry per tmux server, keyed by the socket a session reported. Pane ids
-   * are only unique within a server, so they cannot share a map.
+   * One entry per tmux server, keyed by the socket path out of the `$TMUX` a
+   * session reported - `socketPath`, the same value `-S` is given. Pane ids are
+   * only unique within a server, so they cannot share a map; and keying on the
+   * raw `$TMUX` would be one entry per *session* instead, since its trailing
+   * field is the session index - a table, a rate limit and a `list-panes -a`
+   * each, for one server.
    *
    * @type {Map<string, {names: Map<string, string>, at: number|null, reading: boolean}>}
    */
@@ -224,7 +228,7 @@ export class FirstmateWatch {
   async load(sessions) {
     if (!this.#execAsync) return;
     const sockets = new Set(
-      sessions.filter((s) => s?.host?.tmux_pane).map((s) => String(s.host.tmux || '')),
+      sessions.filter((s) => s?.host?.tmux_pane).map((s) => socketPath(s.host.tmux)),
     );
     await Promise.all([...sockets].map((socket) => this.#read(socket)));
   }
@@ -250,7 +254,7 @@ export class FirstmateWatch {
   #isCrew(host, now) {
     const pane = host?.tmux_pane;
     if (!pane) return false;
-    const socket = String(host.tmux || '');
+    const socket = socketPath(host.tmux);
     const server = this.#serverFor(socket);
     const name = server.names.get(pane);
     if (name !== undefined) return isCrewWindowName(name);

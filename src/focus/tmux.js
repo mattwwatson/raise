@@ -20,14 +20,28 @@
  */
 
 /**
+ * The socket a `$TMUX` value names, which is what identifies the *server* - the
+ * two fields after it are the server pid and the session index, so the same
+ * server reaches us under a different `$TMUX` from every session on it. The one
+ * place that splits the string, so anything keying on a server keys on the same
+ * thing `-S` is given.
+ *
+ * @param {string|null|undefined} tmuxEnv
+ * @returns {string} empty for no `$TMUX` at all, meaning the default server
+ */
+export function socketPath(tmuxEnv) {
+  if (!tmuxEnv) return '';
+  return String(tmuxEnv).split(',')[0];
+}
+
+/**
  * A custom tmux socket must be honoured or we would query the wrong server.
  * $TMUX is "<socket path>,<pid>,<session index>".
  */
 export function socketArgs(tmuxEnv) {
-  if (!tmuxEnv) return [];
-  const socketPath = String(tmuxEnv).split(',')[0];
-  if (!socketPath) return [];
-  return ['-S', socketPath];
+  const path = socketPath(tmuxEnv);
+  if (!path) return [];
+  return ['-S', path];
 }
 
 export function tmuxCommand(tmuxEnv, args) {

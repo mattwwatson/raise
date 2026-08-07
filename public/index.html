@@ -1238,7 +1238,10 @@
           const spawner = document.createElement('span');
           spawner.className = 'agent-chip';
           spawner.textContent = SPAWNER_LABELS[row.spawnedBy];
-          spawner.title = 'Started by ' + SPAWNER_LABELS[row.spawnedBy] + ', not by you';
+          // The chip covers the captain as well as the crew, and the captain is
+          // the session you started firstmate from - so the tooltip asserts only
+          // what the two markers prove, and never who started the window.
+          spawner.title = SPAWNER_LABELS[row.spawnedBy] + ' session';
           meta.appendChild(spawner);
         }
         if (AGENT_LABELS[row.agentKind]) {
