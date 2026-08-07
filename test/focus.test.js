@@ -3,7 +3,14 @@ import assert from 'node:assert/strict';
 
 import { planFocus, itermUuid, focusSession, titleNeedle } from '../src/focus/index.js';
 import { orderedTerminals, ALL_TERMINALS } from '../src/focus/terminals.js';
-import { socketArgs, resolveTmuxTarget, parseClients } from '../src/focus/tmux.js';
+import {
+  socketArgs,
+  resolveTmuxTarget,
+  parseClients,
+  parsePaneSessions,
+  chooseTmuxClient,
+  selectPane,
+} from '../src/focus/tmux.js';
 import {
   itermFocusScript,
   itermFocusByTitleScript,
@@ -178,12 +185,14 @@ test('socketArgs honours a custom tmux socket', () => {
 
 test('resolveTmuxTarget returns the attached client tty', async () => {
   const exec = fakeExec({
-    'display-message': 'firstmate',
-    'list-clients': '/dev/ttys002\t0',
+    'list-panes': '%1\t$0\t@0\t1\tfirstmate',
+    'list-clients': '/dev/ttys002\t0\t$0\t@0',
   });
   assert.deepEqual(await resolveTmuxTarget(exec, { pane: '%1', tmuxEnv: null }), {
     ok: true,
     session: 'firstmate',
+    sessionId: '$0',
+    windowId: '@0',
     tty: '/dev/ttys002',
     controlMode: false,
     title: null,
@@ -196,21 +205,22 @@ test('resolveTmuxTarget refuses to hand back a control mode client tty', async (
   // that shows none of the panes. Treating it as the host tty meant every
   // focus click raised that one tab, whichever session you clicked.
   const exec = fakeExec({
-    '#{session_name}': 'firstmate',
-    'list-clients': '/dev/ttys002\t1',
+    'list-panes': '%289\t$0\t@0\t1\tfirstmate',
+    'list-clients': '/dev/ttys002\t1\t$0\t@0',
     '#{pane_title}': '✹ Enroll multiple operations in webapp',
   });
   const target = await resolveTmuxTarget(exec, { pane: '%289', tmuxEnv: null });
   assert.equal(target.ok, true);
   assert.equal(target.controlMode, true);
   assert.equal(target.tty, null, 'the control client tty must never be offered as the host');
+  assert.equal(target.sessionId, null, 'and there is no session to select in either');
   assert.equal(target.title, '✹ Enroll multiple operations in webapp');
 });
 
 test('resolveTmuxTarget prefers a plain client when both kinds are attached', async () => {
   const exec = fakeExec({
-    '#{session_name}': 'firstmate',
-    'list-clients': '/dev/ttys002\t1\n/dev/ttys031\t0',
+    'list-panes': '%1\t$0\t@0\t1\tfirstmate',
+    'list-clients': '/dev/ttys002\t1\t$0\t@0\n/dev/ttys031\t0\t$0\t@0',
     '#{pane_title}': '✹ something',
   });
   const target = await resolveTmuxTarget(exec, { pane: '%1', tmuxEnv: null });
@@ -218,28 +228,157 @@ test('resolveTmuxTarget prefers a plain client when both kinds are attached', as
   assert.equal(target.controlMode, true, 'still worth trying the title path first');
 });
 
-test('parseClients reads the control mode flag, not just the tty', () => {
-  assert.deepEqual(parseClients('/dev/ttys002\t1\n/dev/ttys031\t0'), [
-    { tty: '/dev/ttys002', controlMode: true },
-    { tty: '/dev/ttys031', controlMode: false },
+test('parseClients reads the session and displayed window, not just the tty', () => {
+  assert.deepEqual(parseClients('/dev/ttys002\t1\t$0\t@0\n/dev/ttys031\t0\t$4\t@9'), [
+    { tty: '/dev/ttys002', controlMode: true, sessionId: '$0', windowId: '@0' },
+    { tty: '/dev/ttys031', controlMode: false, sessionId: '$4', windowId: '@9' },
   ]);
+  // A client with no session is nothing we can rank, so it is dropped rather
+  // than ranked against a session it does not name.
+  assert.deepEqual(parseClients('/dev/ttys002\t0'), []);
   assert.deepEqual(parseClients(''), []);
   assert.deepEqual(parseClients(null), []);
 });
 
+test('parsePaneSessions reports every session a linked window belongs to', () => {
+  assert.deepEqual(
+    parsePaneSessions(['%356\t$191\t@349\t5\thv-sls-75', '%356\t$204\t@349\t1\thv-sls-86'].join('\n')),
+    [
+      { paneId: '%356', sessionId: '$191', windowId: '@349', windowCount: 5, sessionName: 'hv-sls-75' },
+      { paneId: '%356', sessionId: '$204', windowId: '@349', windowCount: 1, sessionName: 'hv-sls-86' },
+    ],
+  );
+});
+
+test('parsePaneSessions keeps a session name containing a tab whole', () => {
+  // The name is emitted last precisely so it cannot eat a field boundary; a
+  // name is user data and nothing stops one holding a tab.
+  const [row] = parsePaneSessions('%1\t$0\t@0\t2\tan\tawkward\tname');
+  assert.equal(row.sessionName, 'an\tawkward\tname');
+  assert.equal(row.windowCount, 2);
+});
+
+test('parsePaneSessions drops a row that names no session', () => {
+  assert.deepEqual(parsePaneSessions('%1\t\t@0\t1\tname'), []);
+  assert.deepEqual(parsePaneSessions(''), []);
+  assert.deepEqual(parsePaneSessions(null), []);
+});
+
+test('chooseTmuxClient prefers the client already displaying the window', () => {
+  // Raising it moves nothing inside tmux, which is the whole point: the other
+  // client is looking at something else and must not be dragged off it.
+  const candidates = [
+    { paneId: '%356', sessionId: '$191', windowId: '@349', windowCount: 5, sessionName: 'parent' },
+    { paneId: '%356', sessionId: '$204', windowId: '@349', windowCount: 1, sessionName: 'viewer' },
+  ];
+  const clients = [
+    { tty: '/dev/ttys018', controlMode: false, sessionId: '$191', windowId: '@343' },
+    { tty: '/dev/ttys035', controlMode: false, sessionId: '$204', windowId: '@349' },
+  ];
+  const { chosen, plain } = chooseTmuxClient({ candidates, clients });
+  assert.equal(chosen.tty, '/dev/ttys035');
+  assert.equal(plain.tty, '/dev/ttys035');
+});
+
+test('chooseTmuxClient breaks a tie towards the session dedicated to the window', () => {
+  // Both clients show it - which is exactly the state the old bug left the
+  // machine in. A session holding only this window is a viewer; one holding
+  // five is somebody's working view that happens to be parked here.
+  const candidates = [
+    { paneId: '%356', sessionId: '$191', windowId: '@349', windowCount: 5, sessionName: 'parent' },
+    { paneId: '%356', sessionId: '$204', windowId: '@349', windowCount: 1, sessionName: 'viewer' },
+  ];
+  const clients = [
+    { tty: '/dev/ttys018', controlMode: false, sessionId: '$191', windowId: '@349' },
+    { tty: '/dev/ttys035', controlMode: false, sessionId: '$204', windowId: '@349' },
+  ];
+  assert.equal(chooseTmuxClient({ candidates, clients }).chosen.tty, '/dev/ttys035');
+});
+
+test('chooseTmuxClient ignores a client attached to some other session', () => {
+  const candidates = [
+    { paneId: '%1', sessionId: '$0', windowId: '@0', windowCount: 1, sessionName: 'mine' },
+  ];
+  const clients = [
+    { tty: '/dev/ttys009', controlMode: false, sessionId: '$7', windowId: '@0' },
+  ];
+  assert.deepEqual(chooseTmuxClient({ candidates, clients }), { chosen: null, plain: null });
+});
+
+test('chooseTmuxClient separates the best client from the best plain one', () => {
+  // They answer different questions - is this pane in a native tab tmux cannot
+  // see, and which tty do I raise - and collapsing them loses the fallback a
+  // control mode session with a second ordinary attach depends on.
+  const candidates = [
+    { paneId: '%1', sessionId: '$0', windowId: '@0', windowCount: 1, sessionName: 'firstmate' },
+  ];
+  const clients = [
+    { tty: '/dev/ttys002', controlMode: true, sessionId: '$0', windowId: '@0' },
+    { tty: '/dev/ttys031', controlMode: false, sessionId: '$0', windowId: '@0' },
+  ];
+  const { chosen, plain } = chooseTmuxClient({ candidates, clients });
+  assert.equal(chosen.tty, '/dev/ttys002');
+  assert.equal(plain.tty, '/dev/ttys031');
+});
+
 test('resolveTmuxTarget reports a detached session with an attach hint', async () => {
-  const exec = fakeExec({ 'display-message': 'background', 'list-clients': '' });
+  const exec = fakeExec({
+    'list-panes': '%1\t$3\t@2\t1\tbackground',
+    'list-clients': '',
+  });
   const result = await resolveTmuxTarget(exec, { pane: '%1', tmuxEnv: null });
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'detached');
   assert.equal(result.hint, 'tmux attach -t background');
 });
 
+test('the attach hint stays pasteable when the session name has a space in it', async () => {
+  // A bell plugin renames sessions to `hv-sls-86-fb9d 🔔` on this machine.
+  // Unquoted that is two arguments, and tmux answers it by prefix-matching
+  // some other session entirely.
+  const exec = fakeExec({
+    'list-panes': '%356\t$204\t@349\t1\thv-sls-86-fb9d 🔔',
+    'list-clients': '',
+  });
+  const result = await resolveTmuxTarget(exec, { pane: '%356', tmuxEnv: null });
+  assert.equal(result.hint, "tmux attach -t 'hv-sls-86-fb9d 🔔'");
+});
+
+test('a detached pane in two sessions names the one dedicated to it', async () => {
+  const exec = fakeExec({
+    'list-panes': ['%356\t$191\t@349\t5\tparent', '%356\t$204\t@349\t1\tviewer'].join('\n'),
+    'list-clients': '',
+  });
+  const result = await resolveTmuxTarget(exec, { pane: '%356', tmuxEnv: null });
+  assert.equal(result.session, 'viewer');
+  assert.equal(result.hint, 'tmux attach -t viewer');
+});
+
 test('resolveTmuxTarget reports a pane that no longer exists', async () => {
-  const exec = fakeExec({ 'display-message': new Error('no such pane') });
+  const exec = fakeExec({ 'list-panes': new Error('no server running') });
   const result = await resolveTmuxTarget(exec, { pane: '%99', tmuxEnv: null });
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'pane-gone');
+});
+
+test('resolveTmuxTarget reports a pane no session claims', async () => {
+  // The other half of pane-gone: the command worked, and named no session for
+  // this pane. Same answer, different cause.
+  const exec = fakeExec({ 'list-panes': '%1\t$0\t@0\t1\tsomething-else' });
+  const result = await resolveTmuxTarget(exec, { pane: '%99', tmuxEnv: null });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'pane-gone');
+});
+
+test('selectPane aims at one session, never at the bare pane', async () => {
+  const exec = fakeExec({ 'select-window': '', 'select-pane': '' });
+  await selectPane(exec, { pane: '%356', tmuxEnv: null, sessionId: '$204', windowId: '@349' });
+  assert.ok(exec.calls.some((c) => c.includes('select-window -t $204:@349')));
+  assert.ok(exec.calls.some((c) => c.includes('select-pane -t %356')));
+  assert.ok(
+    !exec.calls.some((c) => c.includes('select-window -t %356')),
+    'a bare pane target lets tmux pick which session to move',
+  );
 });
 
 test('focusSession focuses a plain tab through the matching terminal', async () => {
@@ -323,8 +462,8 @@ test('focusSession survives an adapter whose availability check rejects', async 
 
 test('focusSession selects the pane then focuses the tmux host window', async () => {
   const exec = fakeExec({
-    'display-message': 'firstmate',
-    'list-clients': '/dev/ttys002\t0',
+    'list-panes': '%7\t$1\t@7\t3\tfirstmate',
+    'list-clients': '/dev/ttys002\t0\t$1\t@2',
     'select-window': '',
     'select-pane': '',
   });
@@ -349,11 +488,65 @@ test('focusSession selects the pane then focuses the tmux host window', async ()
   assert.equal(result.ok, true);
   assert.equal(result.tmuxSession, 'firstmate');
   // The pane is raised inside tmux before the window comes forward, otherwise
-  // you get the right window showing the wrong pane.
-  assert.ok(exec.calls.some((c) => c.includes('select-window -t %7')));
+  // you get the right window showing the wrong pane - and aimed at the one
+  // session we mean, since a bare pane target lets tmux choose.
+  assert.ok(exec.calls.some((c) => c.includes('select-window -t $1:@7')));
   assert.ok(exec.calls.some((c) => c.includes('select-pane -t %7')));
   // The host terminal is matched on the live client tty, never on a stored one.
   assert.deepEqual(focused[0], { sessionUuid: null, tty: '/dev/ttys002' });
+});
+
+test('focusSession raises the viewer session, not the parent a linked window also lives in', async () => {
+  // The bug this exists for, with the ids it was reproduced under. A tmux window
+  // can belong to more than one session, and `handoff` builds exactly that: the
+  // worker runs in a window of a parent session, and that same window is linked
+  // into a per-worker viewer session whose tab is the one in front of you.
+  //
+  // `display-message -p -t %356 '#{session_name}'` returns an arbitrary one of
+  // the two - the parent, when this was reported - so nmmon raised the parent's
+  // tab, and `select-window -t %356` then dragged that client onto the worker's
+  // window and left it there. Which one tmux names varies with which session was
+  // last active, so the fixture below is the ranking, not tmux's mood.
+  const exec = fakeExec({
+    'list-panes': [
+      '%356\t$191\t@349\t5\thv-sls-75-4d7a 🔔',
+      '%356\t$204\t@349\t1\thv-sls-86-fb9d 🔔',
+      '%350\t$191\t@343\t5\thv-sls-75-4d7a 🔔',
+    ].join('\n'),
+    'list-clients': ['/dev/ttys018\t0\t$191\t@343', '/dev/ttys035\t0\t$204\t@349'].join('\n'),
+    'select-window': '',
+    'select-pane': '',
+  });
+  const focused = [];
+  const terminals = [
+    {
+      name: 'iterm2',
+      label: 'iTerm2',
+      termProgram: 'iTerm.app',
+      isAvailable: () => true,
+      focus: (_e, target) => {
+        focused.push(target);
+        return true;
+      },
+    },
+  ];
+  const result = await focusSession(
+    { host: { tmux_pane: '%356', tmux: '/tmp/tmux-502/default,1,0' } },
+    { exec, terminals },
+  );
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(focused, [{ sessionUuid: null, tty: '/dev/ttys035' }]);
+  assert.equal(result.tmuxSession, 'hv-sls-86-fb9d 🔔');
+  // Aimed at one session by id, so nothing else moves. Run even though ttys035
+  // already displays @349: tmux makes that a no-op, and a flag to skip it would
+  // be state to keep true.
+  assert.ok(exec.calls.some((c) => c.includes('select-window -t $204:@349')));
+  assert.ok(exec.calls.some((c) => c.includes('select-pane -t %356')));
+  assert.ok(
+    !exec.calls.some((c) => c.includes('$191')),
+    'the parent client must never be moved',
+  );
 });
 
 // ------------------------------------------- tmux control mode (`tmux -CC`)
@@ -389,8 +582,8 @@ test('focusSession finds a control mode pane by title, not by the client tty', a
   // The reported bug end to end: clicking a moroku-skills row focused the tab
   // running `tmux -CC new -s firstmate` instead.
   const exec = fakeExec({
-    '#{session_name}': 'firstmate',
-    'list-clients': '/dev/ttys002\t1',
+    'list-panes': '%289\t$0\t@0\t1\tfirstmate',
+    'list-clients': '/dev/ttys002\t1\t$0\t@0',
     '#{pane_title}': '⠂ Enroll multiple operations in webapp',
   });
   const byTitle = [];
@@ -430,8 +623,8 @@ test('focusSession finds a control mode pane by title, not by the client tty', a
 
 test('focusSession says so rather than raising one of two identical titles', async () => {
   const exec = fakeExec({
-    '#{session_name}': 'firstmate',
-    'list-clients': '/dev/ttys002\t1',
+    'list-panes': '%1\t$0\t@0\t1\tfirstmate',
+    'list-clients': '/dev/ttys002\t1\t$0\t@0',
     '#{pane_title}': '⠂ Claude Code',
   });
   const terminals = [
@@ -451,8 +644,8 @@ test('focusSession says so rather than raising one of two identical titles', asy
 
 test('focusSession admits there is no tty to fall back to in control mode', async () => {
   const exec = fakeExec({
-    '#{session_name}': 'firstmate',
-    'list-clients': '/dev/ttys002\t1',
+    'list-panes': '%1\t$0\t@0\t1\tfirstmate',
+    'list-clients': '/dev/ttys002\t1\t$0\t@0',
     '#{pane_title}': '⠂ a window that has since closed',
   });
   const terminals = [
@@ -474,8 +667,8 @@ test('focusSession still uses a plain client tty when one is also attached', asy
   // Control mode plus a second, ordinary `tmux attach` elsewhere. The title
   // path is tried first, but a real tty is a real fallback.
   const exec = fakeExec({
-    '#{session_name}': 'firstmate',
-    'list-clients': '/dev/ttys002\t1\n/dev/ttys031\t0',
+    'list-panes': '%1\t$0\t@0\t1\tfirstmate',
+    'list-clients': '/dev/ttys002\t1\t$0\t@0\n/dev/ttys031\t0\t$0\t@0',
     '#{pane_title}': '⠂ not shown in iTerm2',
     'select-window': '',
     'select-pane': '',
@@ -501,7 +694,10 @@ test('focusSession still uses a plain client tty when one is also attached', asy
 });
 
 test('focusSession explains a detached tmux session instead of failing silently', async () => {
-  const exec = fakeExec({ 'display-message': 'background', 'list-clients': '' });
+  const exec = fakeExec({
+    'list-panes': '%7\t$3\t@2\t1\tbackground',
+    'list-clients': '',
+  });
   const result = await focusSession({ host: { tmux_pane: '%7' } }, { exec, terminals: [] });
   assert.equal(result.ok, false);
   assert.match(result.reason, /not attached/);

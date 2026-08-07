@@ -306,8 +306,10 @@ front - which is why a machine mixing plain tabs and tmux needs no configuration
 - **Plain terminal tab.** The session's own identifiers are captured at session start.
   iTerm2 tabs are matched by their session UUID, which survives the tab being dragged to
   another window. Terminal.app is matched by tty.
-- **tmux pane.** The pane is raised inside tmux first, then the host window is found by asking
-  tmux which client is currently attached.
+- **tmux pane.** A window can belong to more than one tmux session at once, so nmmon asks for
+  every session this pane lives in, and raises the terminal that is already showing it. Only
+  when nothing is showing it does anything move inside tmux, and then only in that one
+  session - never in whichever tmux happened to name first.
 - **tmux control mode (`tmux -CC`)**, which is how iTerm2 hosts tmux, is a case of its own and
   is matched on the pane title instead. It works the same way from your side.
 
