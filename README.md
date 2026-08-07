@@ -306,6 +306,30 @@ breaks - a suspended laptop, a frozen server, a dropped NAT entry - and for a to
 job is telling you something needs you, quietly showing stale data is the worst thing it can
 do. So the page never infers that it is live; it waits to be told.
 
+## Telling a nudge it was not needed
+
+Claude Code turns a finished turn into a loud **Waiting for you** after sixty idle seconds, and
+that escalation is wanted - it is how a session asks for its next instruction. But nothing
+clears it. nmmon retires a stale block when the transcript runs past it, and an idle session
+writes nothing, so a row where nothing is actually gated can sit red for as long as you leave
+it. One was caught at over twelve minutes.
+
+So a row like that carries a **`Not for me`** button. Click it and the row drops to `Idle` and
+says `dismissed`, on the page and in `nmmon status` alike - never silently, because a signal
+quietly hidden is exactly as bad as one that is quietly wrong.
+
+**A dismissal answers one announcement, not the session.** The next time anything on that
+session asks for you - a permission prompt above all - the row is red again immediately, with
+nothing for you to undo. It cannot hide something that matters.
+
+**A permission-prompt row has no button at all.** That session genuinely cannot proceed without
+you, so there is nothing there to dismiss, and a control that must not be used is not offered.
+
+**The word `dismissed` explains a quiet row, so it appears on nothing else.** If the same session
+turns red again for its pipeline, or starts working because its transcript ran on, the row says
+that and only that - the marker is there to tell a quiet row apart from one with nothing to say,
+and a row that is neither has no use for it.
+
 ## How focusing works
 
 Every terminal style collapses to the same final step - bring the tab with a given tty to the

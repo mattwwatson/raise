@@ -1688,6 +1688,228 @@ test('with no pipeline running, the idle nudge still means you', () => {
   assert.equal(row.attention, 'blocked');
 });
 
+/**
+ * A session sitting on Claude Code's sixty-second nudge, which is the one block
+ * a human is allowed to say is not owed.
+ */
+const nudged = (over = {}) =>
+  session({
+    state: 'blocked',
+    stateSince: 5000,
+    blockAnnouncedAt: 5000,
+    message: 'Claude is waiting for your input',
+    notificationType: 'idle_prompt',
+    ...over,
+  });
+
+test('an idle nudge offers a dismiss control, and says who may use it', () => {
+  const [row] = build({ sessions: [nudged()], runs: [], now: 6000 });
+  assert.equal(row.attention, 'blocked');
+  assert.equal(row.dismissible, true);
+  assert.equal(row.dismissed, false);
+});
+
+test('a dismissed idle nudge drops out of the waiting-for-you group', () => {
+  const [row] = build({
+    sessions: [nudged({ dismissedBlockAt: 5000 })],
+    runs: [],
+    now: 6000,
+  });
+  assert.equal(row.attention, 'idle');
+  assert.equal(row.sessionState, 'idle');
+  // Nothing is waiting, so nothing is being timed and nothing is being asked.
+  assert.equal(row.waitingForMs, null);
+  assert.equal(row.message, null);
+});
+
+test('a dismissed row says so, because a hidden signal is the failure it replaces', () => {
+  const [row] = build({
+    sessions: [nudged({ dismissedBlockAt: 5000 })],
+    runs: [],
+    now: 6000,
+  });
+  assert.equal(row.dismissed, true, 'the page and the CLI both render this');
+  // And it offers no second dismissal: the row is not red, so there is nothing
+  // left to answer.
+  assert.equal(row.dismissible, false);
+});
+
+test('a new block announcement spends the dismissal with no further action', () => {
+  // The whole safety of the feature. `blockAnnouncedAt` moves on *every* event
+  // that says blocked, so a permission prompt arriving on a dismissed session
+  // announces a new block, the two timestamps stop agreeing, and the row is red
+  // again on the very next poll.
+  const [row] = build({
+    sessions: [
+      nudged({
+        dismissedBlockAt: 5000,
+        blockAnnouncedAt: 9000,
+        message: 'Claude needs your permission to use Bash',
+        notificationType: 'permission_prompt',
+      }),
+    ],
+    runs: [],
+    now: 10000,
+  });
+  assert.equal(row.attention, 'blocked');
+  assert.equal(row.message, 'Claude needs your permission to use Bash');
+  assert.equal(row.dismissed, false);
+  // And it is a permission prompt, so no control is offered on it at all.
+  assert.equal(row.dismissible, false);
+});
+
+test('a second idle nudge is a new announcement too, so it asks again', () => {
+  // A dismissal answers one announcement rather than a session. This is why the
+  // key may never be `stateSince`, which would not have moved here and would
+  // have made the dismissal permanent.
+  const [row] = build({
+    sessions: [nudged({ dismissedBlockAt: 5000, blockAnnouncedAt: 65000 })],
+    runs: [],
+    now: 66000,
+  });
+  assert.equal(row.attention, 'blocked');
+  assert.equal(row.dismissible, true);
+});
+
+test('a permission prompt is never dismissible', () => {
+  const [row] = build({
+    sessions: [
+      nudged({
+        message: 'Claude needs your permission to use Bash',
+        notificationType: 'permission_prompt',
+      }),
+    ],
+    runs: [],
+    now: 6000,
+  });
+  assert.equal(row.attention, 'blocked');
+  assert.equal(row.dismissible, false);
+});
+
+test('a notification type we do not recognise is not dismissible either', () => {
+  // `isIdleNudge` fails closed, and that polarity has to survive all the way to
+  // the control: a block we cannot classify is a hard block, and a hard block
+  // offers nothing to press.
+  const [row] = build({
+    sessions: [nudged({ notificationType: 'agent_needs_input' })],
+    runs: [],
+    now: 6000,
+  });
+  assert.equal(row.attention, 'blocked');
+  assert.equal(row.dismissible, false);
+});
+
+test('a stale dismissal cannot suppress a permission prompt even keyed correctly', () => {
+  // Defence in depth. Nothing should ever write a dismissal against a permission
+  // prompt - the server refuses it - but if a record ever carried one, the state
+  // rule holds it to `isIdleNudge` a second time and the block stands.
+  const [row] = build({
+    sessions: [
+      nudged({
+        dismissedBlockAt: 5000,
+        message: 'Claude needs your permission to use Bash',
+        notificationType: 'permission_prompt',
+      }),
+    ],
+    runs: [],
+    now: 6000,
+  });
+  assert.equal(row.attention, 'blocked');
+});
+
+test('a dismissal has nothing to say about a block held by the pipeline agent', () => {
+  // The row is red because no-mistakes' own agent is stuck, which this session
+  // cannot answer by looking at it. `dismissible` follows the session's own
+  // state, never the row's attention.
+  const runs = [run({ runId: 'r9', step: { name: 'review', findings: 0, lastActivity: null } })];
+  const rows = build({
+    sessions: [
+      session({ sessionId: 's1', state: 'idle', stateSince: 1000 }),
+      session({
+        sessionId: 'agent',
+        cwd: '/Users/x/.no-mistakes/worktrees/abc/r9',
+        state: 'blocked',
+        stateSince: 5000,
+        blockAnnouncedAt: 5000,
+        message: 'Claude is waiting for your input',
+        notificationType: 'idle_prompt',
+      }),
+    ],
+    runs,
+    now: 6000,
+  });
+  const row = rows.find((r) => r.sessionId === 's1');
+  assert.equal(row.attention, 'blocked', 'the folded agent still reddens the row');
+  assert.equal(row.dismissible, false);
+});
+
+test('a dismissed session whose pipeline agent then blocks does not say dismissed', () => {
+  // The word explains why a row is quiet, so beside a red "Waiting for you" it
+  // is the exact confusion this page cannot afford: the row is asking for a
+  // human on the agent's behalf while a marker says it was told not to, and the
+  // marker's own promise - that the row goes red again next time it asks - has
+  // already come true.
+  const runs = [run({ runId: 'r9', step: { name: 'review', findings: 0, lastActivity: null } })];
+  const rows = build({
+    sessions: [
+      nudged({ dismissedBlockAt: 5000 }),
+      session({
+        sessionId: 'agent',
+        cwd: '/Users/x/.no-mistakes/worktrees/abc/r9',
+        state: 'blocked',
+        stateSince: 5000,
+        blockAnnouncedAt: 5000,
+        message: 'Claude needs your permission to use Bash',
+        notificationType: 'permission_prompt',
+      }),
+    ],
+    runs,
+    now: 6000,
+  });
+  const row = rows.find((r) => r.sessionId === 's1');
+  assert.equal(row.attention, 'blocked');
+  assert.equal(row.dismissed, false);
+});
+
+test('a dismissed session the transcript disproves reads working, and only that', () => {
+  // The transcript is the stronger evidence and "Working" is the more accurate
+  // word, so the disproof deliberately wins the state. What must not ride along
+  // is the marker: the dismissal is not why this row is quiet, and a row that is
+  // not quiet has nothing to explain.
+  const [row] = build({
+    sessions: [nudged({ dismissedBlockAt: 5000 })],
+    runs: [],
+    summaries: new Map([['s1', { lastActivityAt: 60000 }]]),
+    now: 61000,
+  });
+  assert.equal(row.attention, 'working');
+  assert.equal(row.dismissed, false);
+});
+
+test('an unattributable run offers no dismissal - there is no session to answer', () => {
+  const [row] = build({
+    sessions: [],
+    runs: [run({ parked: true, parkedSince: 1000 })],
+    now: 6000,
+  });
+  assert.equal(row.kind, 'run');
+  assert.equal(row.dismissible, false);
+  assert.equal(row.dismissed, false);
+});
+
+test('a session with no announcement to answer cannot be dismissed', () => {
+  // A record from a Claude Code old enough not to have sent one, or one written
+  // before nmmon recorded it. There is nothing to key a dismissal on, so no
+  // control is offered rather than one keyed on a guess.
+  const [row] = build({
+    sessions: [nudged({ blockAnnouncedAt: null })],
+    runs: [],
+    now: 6000,
+  });
+  assert.equal(row.attention, 'blocked');
+  assert.equal(row.dismissible, false);
+});
+
 test('a row carries which agent is running it', () => {
   const rows = build({
     sessions: [session({ agent: 'pi' })],

@@ -122,6 +122,89 @@ test('stopping the server removes the file that tells hooks where to post', asyn
   }
 });
 
+test('/dismiss quiets an idle nudge, and a real prompt spends the dismissal', async () => {
+  // The whole feature end to end, against a live server: the page and the CLI
+  // share `buildRows`, so proving it on `/state` proves both.
+  const { dir, cleanup } = scratch();
+  const previousHome = process.env.NMMON_HOME;
+  process.env.NMMON_HOME = dir;
+  // Stopped in the finally, so a failed assertion reports itself rather than
+  // leaving a listening server to hang the whole run.
+  let monitor = null;
+  try {
+    const port = await freePort();
+    monitor = createMonitorServer({
+      port,
+      token: 'test-token',
+      dbPath: join(dir, 'no-such.sqlite'),
+      sessionsPath: join(dir, 'sessions'),
+      exec: () => assert.fail('no blocking commands from the server'),
+      execAsync: async () => '',
+    });
+    await monitor.start();
+
+    const post = (path, body) =>
+      fetch(`http://127.0.0.1:${port}${path}?t=test-token`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-nmmon-token': 'test-token' },
+        body: JSON.stringify(body),
+      });
+    const rowFor = async (sessionId) => {
+      const state = await (await fetch(`http://127.0.0.1:${port}/state?t=test-token`)).json();
+      return state.rows.find((r) => r.sessionId === sessionId);
+    };
+
+    const nudge = {
+      session_id: 'nudged',
+      hook_event_name: 'Notification',
+      cwd: dir,
+      message: 'Claude is waiting for your input',
+      notification_type: 'idle_prompt',
+      host: { tty: '/dev/ttys004', term_program: 'iTerm.app' },
+    };
+    assert.equal((await post('/event', nudge)).status, 204);
+    assert.equal((await rowFor('nudged')).attention, 'blocked');
+    assert.equal((await rowFor('nudged')).dismissible, true);
+
+    const dismissed = await post('/dismiss', { sessionId: 'nudged' });
+    assert.equal(dismissed.status, 200);
+    assert.deepEqual(await dismissed.json(), { ok: true });
+
+    const quiet = await rowFor('nudged');
+    assert.equal(quiet.attention, 'idle', 'out of the waiting-for-you group');
+    assert.equal(quiet.dismissed, true, 'and saying why, rather than silently hidden');
+
+    // A permission prompt is a new announcement, so the dismissal is spent with
+    // nothing further asked of anybody. `PermissionRequest` carries neither a
+    // message nor a type - it fires the instant Claude decides it needs a human,
+    // and the reason follows on the Notification - so this is what a real one
+    // looks like, and `isIdleNudge` fails closed on it.
+    assert.equal(
+      (await post('/event', { session_id: 'nudged', hook_event_name: 'PermissionRequest' })).status,
+      204,
+    );
+    const red = await rowFor('nudged');
+    assert.equal(red.attention, 'blocked');
+    assert.equal(red.dismissed, false);
+    assert.equal(red.dismissible, false, 'and no control is offered on a permission prompt');
+
+    // The server does not take the page's word for eligibility: a stale tab
+    // clicking through on that row is refused.
+    const refused = await post('/dismiss', { sessionId: 'nudged' });
+    assert.equal(refused.status, 409);
+    assert.equal((await refused.json()).ok, false);
+    assert.equal((await rowFor('nudged')).attention, 'blocked');
+
+    const missing = await post('/dismiss', { sessionId: 'never-seen' });
+    assert.equal(missing.status, 404);
+  } finally {
+    if (monitor) await monitor.stop();
+    if (previousHome === undefined) delete process.env.NMMON_HOME;
+    else process.env.NMMON_HOME = previousHome;
+    cleanup();
+  }
+});
+
 test('/focus never runs a synchronous child process', async () => {
   // The guard the other tests carry - exec: assert.fail - only means anything
   // if something actually exercises the route. Focusing shells out to osascript

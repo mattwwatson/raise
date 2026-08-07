@@ -1,8 +1,10 @@
 ---
 ticket: RAI-20
-status: backlog
+status: shipped
 size: S
 depends: -
+branch: RAI-20-dismiss-idle-nudge
+shipped: 2026-08-07
 ---
 # RAI-20 - Dismiss a "Waiting for you" that is really just an idle session
 
@@ -111,3 +113,52 @@ dismissed, so *nothing is waiting* and *I told it to stop saying so* are never c
   say. It was considered alongside this and dropped: one mechanism that works for every session,
   including handoff workers, beats a second one coupled to another tool's behaviour. See
   [[RAI-19]] for the identification that would have made it possible if it is ever wanted.
+
+---
+
+## Implementation notes
+
+**The key is one field and one equality.** `Session.dismissedBlockAt` stores the
+`blockAnnouncedAt` that was dismissed, and `blockDismissed` in `src/dashboard.js` is an equality
+against the current one - never a "since". It is carried across every hook event rather than
+cleared with the block it answers, because it is spent by *disagreeing*, which the next
+announcement guarantees; clearing it would have been a second way to say the same thing, and one
+a `Stop` between two nudges would exercise while a `PermissionRequest` did not.
+
+**Two independent refusals stop it reaching a permission prompt**, which is the failure the
+design exists to prevent:
+
+- `isDismissibleBlock` decides whether a control is offered, and `handleDismiss` in
+  `src/server.js` re-runs it on the request rather than trusting the page. A tab is seconds
+  behind, so the row it drew as a nudge may be a prompt by the time it is clicked - that request
+  is refused with a 409.
+- `effectiveSessionState` holds the dismissal to `isIdleNudge` a *second* time, so even a
+  dismissal that somehow reached a record could not suppress a prompt. Tested directly.
+
+The state lands on `idle` rather than `working`, unlike the transcript's disproof: an answered
+nudge means the turn ended and nobody typed, which is idle in the page's own words.
+
+**`Row.dismissible` follows the session's own effective state, not the row's attention.** A row
+red because its folded pipeline agent is stuck looks identical and is not this session's to
+answer, so checking the attention would have offered a control that could not work.
+
+**Both renderers say `dismissed`** - `public/index.html` beside the state word, `bin/nmmon.js`
+after the repo name. That is the load-bearing constraint from above, not decoration.
+
+**And `Row.dismissed` is true only while the dismissal is what quietened the row**, which is the
+same constraint read from the other end. A dismissed session whose folded pipeline agent then
+blocks is red, and `dismissed` beside "Waiting for you" is exactly the confusion the constraint
+forbids; a dismissed session the transcript then disproves reads `Working`, correctly, and the
+dismissal is not why. `blockDismissalInEffect` is the dismissal branch of `effectiveSessionState`
+lifted out whole, so one place decides both the state and the word, and the field requires it and
+an `idle` attention. Both cases are pinned in `test/dashboard.test.js`.
+
+Verified live as well as in tests, against a copy of the real session records served by a second
+monitor on its own port: a genuine `idle_prompt` on the captain's firstmate session was
+dismissed, dropped to `Idle · dismissed` in the page and in `nmmon status`, went red again on a
+`PermissionRequest` with no further action and offered no control while it was one, and survived
+a browser reload.
+
+One thing looked at and left alone: there is no undo. A dismissal is spent by the next
+announcement and the row says plainly that it was dismissed, so a mis-click costs a session that
+reads `Idle · dismissed` until it next asks for you - which is what it would have read anyway.
