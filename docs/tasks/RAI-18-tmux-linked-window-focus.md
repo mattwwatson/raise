@@ -89,8 +89,10 @@ lesson.
 Resolve the pane to **every** session it lives in, weigh every client against those, and
 choose one:
 
-1. **A client already displaying the pane's window.** Raising it moves nothing inside tmux,
-   which is the whole failure above.
+1. **A client whose session already displays the pane's window.** Raising it moves nothing
+   inside tmux, which is the whole failure above. tmux keeps no per-client current window, so
+   this rule tells candidate sessions apart and never two clients on one session - which is
+   exactly what it is needed for, since choosing between sessions is the bug being fixed.
 2. Failing that, the client on the candidate session holding the **fewest windows**. A
    session holding only this window is a viewer dedicated to it; a session holding five is
    somebody's working view that merely happens to be parked here.
@@ -98,12 +100,19 @@ choose one:
 Then aim everything after that at **that client's session, by id** - `select-window -t
 '$204:@349'`, never `-t %356`.
 
-**Two picks come out of that one ranking, not one.** The best client overall answers *is this
-pane living in a native terminal tab tmux cannot see* (`controlMode`); the best **plain**
-client answers *which tty do I raise, and in which session do I select*. They are the same
-client in every ordinary case, and collapsing them would lose the control-mode-plus-plain-client
-fallback that `src/focus/index.js` already depends on. `firstmate` on this machine is a live
-`tmux -CC` session, so that is not hypothetical.
+**Two picks come out of that one ranking, not one.** The best client overall is what the
+ranking is for; the best **plain** client answers *which tty do I raise, and in which session
+do I select*. They are the same client in every ordinary case, and collapsing them would lose
+the control-mode-plus-plain-client fallback that `src/focus/index.js` already depends on.
+`firstmate` on this machine is a live `tmux -CC` session, so that is not hypothetical.
+
+**`controlMode` is a property of the ranked set, not of either pick.** The question - *is this
+pane living in a native terminal tab tmux cannot see* - is about any client that could be
+showing it. Reading it off the top-ranked client was nondeterministic for the reason rule 1
+gives: two clients on one session tie on both keys, so the winner is attach order, and a plain
+`tmux attach` that got there first would suppress the pane-title path entirely. The set is
+already narrowed to the pane's candidate sessions, which is what keeps this from being the old
+`clients.some(...)` over one arbitrarily-chosen session's clients.
 
 ### Why no `needsSelect` flag
 
