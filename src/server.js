@@ -19,7 +19,7 @@ import { GitBranch, defaultGitAccess } from './git-branch.js';
 import { LavishState } from './lavish.js';
 import { PollWatch } from './poll-watch.js';
 import { FirstmateWatch } from './firstmate.js';
-import { buildRows, summarise } from './dashboard.js';
+import { buildRows, isDismissibleBlock, summarise } from './dashboard.js';
 import { RunOwners } from './run-owner.js';
 import { focusSession } from './focus/index.js';
 import { checkRequest } from './security.js';
@@ -301,6 +301,10 @@ export function createMonitorServer({
       handleHookEvent(req, res).catch(() => endQuietly(res));
       return;
     }
+    if (req.method === 'POST' && url.pathname === '/dismiss') {
+      handleDismiss(req, res).catch(() => endQuietly(res));
+      return;
+    }
     if (req.method === 'POST' && url.pathname === '/focus') {
       // /focus now waits on osascript and tmux, so the client has plenty of
       // time to walk away. A write to its dead socket must not surface as an
@@ -449,6 +453,46 @@ export function createMonitorServer({
     // rather than waiting up to a second for the next poll.
     broadcast(true);
     res.writeHead(204).end();
+  }
+
+  /**
+   * A human saying this "Waiting for you" is not owed.
+   *
+   * The eligibility check is repeated here rather than trusted from the page.
+   * The page decides whether to *offer* the control; a request arriving anyway -
+   * a stale tab whose row went from a nudge to a real permission prompt between
+   * the render and the click - must be refused, because the whole safety of the
+   * feature is that only an idle nudge can ever be dismissed.
+   */
+  async function handleDismiss(req, res) {
+    let payload;
+    try {
+      payload = JSON.parse(await readBody(req));
+    } catch {
+      res.writeHead(400).end('bad payload');
+      return;
+    }
+    const record = registry.get(payload.sessionId);
+    if (!record) {
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, reason: 'that session is no longer registered' }));
+      return;
+    }
+    if (!isDismissibleBlock(record)) {
+      res.writeHead(409, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          ok: false,
+          reason: 'that session is not waiting on an idle nudge any more',
+        }),
+      );
+      return;
+    }
+    registry.dismissBlock(record.sessionId);
+    // The row changes the instant it is clicked, exactly as a hook event does.
+    broadcast(true);
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: true }));
   }
 
   async function handleFocus(req, res) {

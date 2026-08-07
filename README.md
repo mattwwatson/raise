@@ -296,6 +296,25 @@ naming the session. Having firstmate's source open is not enough to earn it, a w
 other tool spawned gets nothing, and on a machine without firstmate nothing is looked for at
 all. `nmmon status` prints the same word.
 
+## Telling a nudge it was not needed
+
+Claude Code turns a finished turn into a loud **Waiting for you** after sixty idle seconds, and
+that escalation is wanted - it is how a session asks for its next instruction. But nothing
+clears it. nmmon retires a stale block when the transcript runs past it, and an idle session
+writes nothing, so a row where nothing is actually gated can sit red for as long as you leave
+it. One was caught at over twelve minutes.
+
+So a row like that carries a **`Not for me`** button. Click it and the row drops to `Idle` and
+says `dismissed`, on the page and in `nmmon status` alike - never silently, because a signal
+quietly hidden is exactly as bad as one that is quietly wrong.
+
+**A dismissal answers one announcement, not the session.** The next time anything on that
+session asks for you - a permission prompt above all - the row is red again immediately, with
+nothing for you to undo. It cannot hide something that matters.
+
+**A permission-prompt row has no button at all.** That session genuinely cannot proceed without
+you, so there is nothing there to dismiss, and a control that must not be used is not offered.
+
 The dot in the header is **positive evidence, not the absence of an error**. The server sends
 a `ping` event every 20 seconds; if nothing arrives for 50 the dot goes red, the header reads
 `no response for 2m`, and the whole page dims, because everything on it is now a snapshot of

@@ -296,6 +296,69 @@ test('a restated block moves the announcement anchor but not stateSince', () => 
   }
 });
 
+test('dismissing a block records the announcement it answers, not the session', () => {
+  const { dir, cleanup } = scratch();
+  try {
+    const registry = new SessionRegistry({ dir });
+    registry.record(
+      {
+        session_id: 's1',
+        hook_event_name: 'Notification',
+        message: 'Claude is waiting for your input',
+        notification_type: 'idle_prompt',
+      },
+      1000,
+    );
+    const dismissed = registry.dismissBlock('s1');
+    assert.equal(dismissed.dismissedBlockAt, 1000);
+    assert.equal(dismissed.blockAnnouncedAt, 1000, 'and the announcement itself is untouched');
+    assert.equal(registry.get('s1').dismissedBlockAt, 1000, 'and it is on disk');
+  } finally {
+    cleanup();
+  }
+});
+
+test('a dismissal outlives the events between two blocks, and only agrees with its own', () => {
+  // It is spent by disagreeing with `blockAnnouncedAt`, so it is carried across
+  // every event rather than cleared with the block. What matters is that the
+  // *next* announcement gets a new timestamp, which it always does.
+  const { dir, cleanup } = scratch();
+  try {
+    const registry = new SessionRegistry({ dir });
+    registry.record({ session_id: 's1', hook_event_name: 'Notification' }, 1000);
+    registry.dismissBlock('s1');
+
+    registry.record({ session_id: 's1', hook_event_name: 'Stop' }, 2000);
+    const quiet = registry.get('s1');
+    assert.equal(quiet.dismissedBlockAt, 1000, 'survives an ordinary event');
+    assert.equal(quiet.blockAnnouncedAt, null, 'with nothing left for it to agree with');
+
+    registry.record({ session_id: 's1', hook_event_name: 'PermissionRequest' }, 3000);
+    const asked = registry.get('s1');
+    assert.equal(asked.blockAnnouncedAt, 3000);
+    assert.notEqual(
+      asked.dismissedBlockAt,
+      asked.blockAnnouncedAt,
+      'so the new block is not dismissed by the old dismissal',
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('a session with no block announced has nothing to dismiss', () => {
+  const { dir, cleanup } = scratch();
+  try {
+    const registry = new SessionRegistry({ dir });
+    registry.record({ session_id: 's1', hook_event_name: 'Stop' }, 1000);
+    assert.equal(registry.dismissBlock('s1'), null);
+    assert.equal(registry.get('s1').dismissedBlockAt, null);
+    assert.equal(registry.dismissBlock('nobody'), null, 'nor does a session we have never seen');
+  } finally {
+    cleanup();
+  }
+});
+
 test('stateSince only moves when the state actually changes', () => {
   const { dir, cleanup } = scratch();
   try {

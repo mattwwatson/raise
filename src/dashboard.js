@@ -59,6 +59,13 @@ import { prStateIsCurrent, pullRequestNumber } from './nm-state.js';
  * @property {import('./registry.js').SessionState|null} sessionState
  * @property {number|null} sessionStateSince
  * @property {number|null} waitingForMs how long blocked, for the "2m" column
+ * @property {boolean} dismissible whether this row is announcing a block a human
+ *   may say is not owed. Only ever Claude Code's idle nudge - a permission
+ *   prompt offers no control at all rather than a control that must not be used
+ * @property {boolean} dismissed whether the announcement this row is showing was
+ *   already dismissed. It is *why* an idle row is idle, so both renderers say
+ *   so: a signal quietly hidden is the same quiet staleness this page exists to
+ *   avoid, wearing different clothes
  * @property {boolean} focusable whether clicking this row can do anything
  * @property {'tmux'|'tab'|'app'|'unknown'|null} hostKind where the session lives
  * @property {import('./registry.js').AgentKind|null} agentKind which agent is
@@ -492,6 +499,53 @@ function blockDisproved(session, summary) {
 }
 
 /**
+ * Whether a recorded block is one a human has already said is not owed.
+ *
+ * The comparison is against `blockAnnouncedAt` and it is an equality, not a
+ * "since". A dismissal answers **one announcement**: the moment a hook says
+ * blocked again - a permission prompt above all - the announced time moves, the
+ * two stop agreeing, and the row is red with nothing further to do. That is the
+ * property that makes this safe, and it is why the key may never become
+ * `stateSince`, which does not move while the state is unchanged and would make
+ * a dismissal permanent.
+ *
+ * @param {{blockAnnouncedAt?: number|null, dismissedBlockAt?: number|null}|null} session
+ * @returns {boolean}
+ */
+function blockDismissed(session) {
+  const announced = session?.blockAnnouncedAt;
+  return !!announced && session?.dismissedBlockAt === announced;
+}
+
+/**
+ * Whether this session's block is one the page may offer to dismiss.
+ *
+ * **Only the idle nudge.** A session stopped at a permission prompt genuinely
+ * cannot proceed without a human, so dismissing it would hide something that
+ * matters rather than something that does not - and `isIdleNudge` already tells
+ * them apart and fails closed, so a notification type we do not recognise is
+ * offered no control at all. That is the affordance rule doing its usual work
+ * from the other end: never render a control whose *working* is the wrong
+ * outcome.
+ *
+ * Deliberately false for a block already dismissed - the row is not red, so
+ * there is nothing to answer - and for a block held by a folded pipeline agent
+ * rather than by this session, which is why the caller passes the session's own
+ * effective state rather than the row's attention.
+ *
+ * @param {Session|{state?: string, message?: string|null,
+ *          notificationType?: string|null, blockAnnouncedAt?: number|null,
+ *          dismissedBlockAt?: number|null}|null} session
+ * @returns {boolean}
+ */
+export function isDismissibleBlock(session) {
+  if (!session || session.state !== 'blocked') return false;
+  if (!session.blockAnnouncedAt) return false;
+  if (blockDismissed(session)) return false;
+  return isIdleNudge(session.message, session.notificationType);
+}
+
+/**
  * The session's state once the transcript has had its say.
  *
  * A disproved block becomes `working` rather than falling through to `idle`:
@@ -502,9 +556,17 @@ function blockDisproved(session, summary) {
  * the transcript is silent evidence, whereas a live process is the work itself.
  * It only ever answers the idle nudge - see `isIdleNudge`.
  *
+ * A dismissal is the third and strongest source, and the only one that is not
+ * inference: a human looked at the row and said nothing is owed. It lands on
+ * `idle` rather than `working` because that is what an answered nudge leaves
+ * behind - the turn ended and nobody has typed since, which is idle in the
+ * page's own words. It answers the nudge and nothing else, held to `isIdleNudge`
+ * a second time here so that a dismissal recorded by any future caller still
+ * cannot reach a permission prompt.
+ *
  * @param {Session|{state: string, stateSince?: number,
- *          blockAnnouncedAt?: number|null, message?: string|null,
- *          notificationType?: string|null}|null} session
+ *          blockAnnouncedAt?: number|null, dismissedBlockAt?: number|null,
+ *          message?: string|null, notificationType?: string|null}|null} session
  * @param {import('./transcript.js').TranscriptSummary|null} summary
  * @param {boolean} [pipelineRunning]
  * @returns {import('./registry.js').SessionState|null}
@@ -513,7 +575,10 @@ function effectiveSessionState(session, summary, pipelineRunning = false) {
   if (!session) return null;
   if (session.state === 'blocked') {
     if (blockDisproved(session, summary)) return 'working';
-    if (pipelineRunning && isIdleNudge(session.message, session.notificationType)) return 'working';
+    if (isIdleNudge(session.message, session.notificationType)) {
+      if (pipelineRunning) return 'working';
+      if (blockDismissed(session)) return 'idle';
+    }
   }
   return /** @type {import('./registry.js').SessionState|null} */ (session.state ?? null);
 }
@@ -805,6 +870,15 @@ export function buildRows({
         attention === 'blocked' || attention === 'review'
           ? now - (session.stateSince || now)
           : null,
+      // Offered only while this session's *own* block is what makes the row red.
+      // A row blocked by its folded pipeline agent reads the same on the page
+      // and is not this session's to answer, so the effective state is checked
+      // rather than the attention.
+      dismissible: sessionState === 'blocked' && isDismissibleBlock(session),
+      // Said out loud on an idle row, because the difference between "nothing is
+      // waiting" and "I told it to stop saying so" is exactly the difference
+      // this page cannot afford to blur.
+      dismissed: blockDismissed(session),
       focusable: plan.kind !== 'unfocusable',
       hostKind: hostKindFor(plan),
       // A record written before pi was supported carries no agent, and only
@@ -917,6 +991,9 @@ export function buildRows({
       sessionState: null,
       sessionStateSince: null,
       waitingForMs: null,
+      // No session behind it, so no announcement anybody could answer.
+      dismissible: false,
+      dismissed: false,
       focusable: false,
       hostKind: null,
       agentKind: null,

@@ -390,8 +390,13 @@ async function cmdStatus() {
     // only when it is worth naming, exactly as on the page: a session nobody in
     // particular started says nothing rather than saying so.
     const spawner = row.spawnedBy ? ` ${dim(row.spawnedBy)}` : '';
+    // Why this row reads Idle rather than Waiting for you. Said here for the
+    // same reason the page says it: the two must never disagree about a session,
+    // and a signal suppressed without a word is the quiet staleness this tool is
+    // built against.
+    const dismissed = row.dismissed ? ` ${dim('dismissed')}` : '';
     console.log(
-      `${colour(row.attentionLabel.padEnd(26))} ${bold(row.title)}${named}${spawner}${unplaceable}`,
+      `${colour(row.attentionLabel.padEnd(26))} ${bold(row.title)}${named}${spawner}${dismissed}${unplaceable}`,
     );
     if (row.message) console.log(`  ${dim(row.message)}`);
     // Always, pipeline or no pipeline. This used to be dropped whenever a step

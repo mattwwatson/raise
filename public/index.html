@@ -271,6 +271,53 @@
         background: color-mix(in srgb, var(--working) 10%, transparent);
       }
       /*
+       * "Not for me" - the one control on this page that quiets a signal, so it
+       * is drawn to be found rather than to be pressed. It borrows the focus
+       * hint's shape because it lives beside it and answers the same row, and it
+       * stays at rest colour on hover: focusing takes you somewhere and this
+       * takes something away, so it must never be the more inviting of the two.
+       */
+      button.dismiss {
+        display: inline-flex;
+        align-items: center;
+        font-size: 11px;
+        font-weight: 600;
+        white-space: nowrap;
+        color: var(--faint);
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        padding: 1px 6px;
+        cursor: pointer;
+        transition:
+          color 0.12s ease,
+          border-color 0.12s ease;
+      }
+      button.dismiss:hover {
+        color: var(--muted);
+        border-color: color-mix(in srgb, var(--text) 30%, var(--border));
+      }
+      button.dismiss:focus-visible {
+        outline: 2px solid var(--working);
+        outline-offset: 2px;
+      }
+      /*
+       * Why this row is idle rather than red. Never a silent suppression: a
+       * signal hidden without saying so is the same quiet staleness as a green
+       * dot over frozen state, which is the failure this page is built against.
+       * Outlined and muted, because it is an explanation and not an alarm.
+       */
+      .dismissed {
+        font-size: 11px;
+        font-weight: 600;
+        white-space: nowrap;
+        flex: none;
+        color: var(--muted);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 0 4px;
+      }
+      /*
        * The expander. Only rendered for a row with a session behind it, since a
        * pipeline run with no Claude session has no transcript to show.
        */
@@ -895,6 +942,32 @@
         }
       }
 
+      /*
+       * Say that this "Waiting for you" was not owed.
+       *
+       * The server re-checks that the block is still a dismissible idle nudge,
+       * so a click on a row that has since turned into a real permission prompt
+       * is refused rather than honoured - a tab can be several seconds behind
+       * what the session is actually doing.
+       */
+      async function dismissRow(row) {
+        if (!row.dismissible || !row.sessionId) return;
+        try {
+          const res = await fetch('/dismiss?t=' + TOKEN, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', 'x-nmmon-token': TOKEN },
+            body: JSON.stringify({ sessionId: row.sessionId }),
+          });
+          const data = await res.json();
+          // Silent on success: the row dropping out of "Waiting for you" and
+          // saying "dismissed" is the feedback, and it arrives on the push this
+          // request triggers.
+          if (!data.ok) toast(data.reason, true);
+        } catch (err) {
+          toast('Could not reach nmmon: ' + err.message, true);
+        }
+      }
+
       // The PR link comes from the no-mistakes database, which nmmon only ever
       // reads. The page allows inline script, so a "javascript:" value in that
       // column would run in the origin holding the monitor token. Only ever
@@ -1089,6 +1162,20 @@
         state.textContent = row.attentionLabel;
         line2.appendChild(state);
 
+        // Why this row says Idle rather than Waiting for you. It sits directly
+        // beside the state it qualifies, because the two are one sentence: the
+        // page must never let "nothing is waiting" and "I told it to stop saying
+        // so" look the same.
+        if (row.dismissed) {
+          const dismissed = document.createElement('span');
+          dismissed.className = 'dismissed';
+          dismissed.textContent = 'dismissed';
+          dismissed.title =
+            'You said this "Waiting for you" was not owed. The next time anything ' +
+            'here asks for you - a permission prompt above all - this row goes red again.';
+          line2.appendChild(dismissed);
+        }
+
         // Why *this session* wants you. The pipeline step used to share this
         // line, which put no-mistakes' business in the middle of the session's
         // own status - they are two different things happening at once, so the
@@ -1264,6 +1351,24 @@
           chip.className = 'agent-chip';
           chip.textContent = 'unattributed';
           meta.appendChild(chip);
+        }
+        // Offered only on Claude Code's sixty-second nudge, and never on a
+        // permission prompt: that session genuinely cannot proceed without you,
+        // so there is nothing here to dismiss. Following the affordance rule,
+        // such a row gets no control at all rather than a disabled one.
+        if (row.dismissible) {
+          const dismiss = document.createElement('button');
+          dismiss.className = 'dismiss';
+          dismiss.textContent = 'Not for me';
+          dismiss.title =
+            'Nothing is actually waiting on you here. The row drops to Idle and says it ' +
+            'was dismissed, until this session asks for you again.';
+          dismiss.setAttribute('aria-label', 'Dismiss the idle nudge on ' + row.title);
+          dismiss.addEventListener('click', (e) => {
+            e.stopPropagation();
+            dismissRow(row);
+          });
+          meta.appendChild(dismiss);
         }
         if (row.focusable) {
           const hint = document.createElement('button');

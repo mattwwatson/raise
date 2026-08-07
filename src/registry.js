@@ -109,6 +109,10 @@ import { join } from 'node:path';
  * @property {number|null} blockAnnouncedAt when a hook last said this session
  *   is blocked, as opposed to when it first became so. Held on the same terms
  *   as `message`, and null whenever the session is not blocked
+ * @property {number|null} dismissedBlockAt the `blockAnnouncedAt` a human said
+ *   was not worth their attention. A dismissal answers *one announcement*, so
+ *   this is compared for equality against the current `blockAnnouncedAt` and is
+ *   spent the moment they differ - see `dismissBlock`
  */
 
 /**
@@ -251,9 +255,43 @@ export class SessionRegistry {
       // transcript's disproof needs the second, or a restated block arrives with
       // those seconds of its tolerance already spent.
       blockAnnouncedAt: state === 'blocked' ? now : null,
+      // Carried across every event rather than cleared with the block it
+      // answers. It is spent by *disagreeing* with `blockAnnouncedAt`, which a
+      // new announcement guarantees, so clearing it here would only add a
+      // second way to say the same thing - and one that a `Stop` between two
+      // nudges would exercise while a `PermissionRequest` did not.
+      dismissedBlockAt: previous.dismissedBlockAt ?? null,
     };
     this.#write(sessionId, record);
     return record;
+  }
+
+  /**
+   * Record that a human looked at this session's block and found nothing owed.
+   *
+   * The page claims a human is needed; the human is the one clicking, so their
+   * reading beats the sixty-second timer's. What is stored is the *announcement*
+   * - `blockAnnouncedAt`, which AGENTS.md records moves on every event that says
+   * blocked - and never the session. `stateSince` would have been the obvious
+   * key and is the wrong one: it deliberately does not move while the state is
+   * unchanged, so a dismissal keyed on it would outlive every future block on
+   * that session and could hide a permission prompt for good.
+   *
+   * A session with no announcement to answer cannot be dismissed. Whether *this*
+   * announcement may be - only Claude Code's idle nudge may - is decided by the
+   * caller through `isDismissibleBlock`, which is where the transcript's own
+   * disproof is already known.
+   *
+   * @param {string} sessionId
+   * @returns {Session|null} the stored record, or null if there was nothing to
+   *   dismiss
+   */
+  dismissBlock(sessionId) {
+    const record = this.get(sessionId);
+    if (!record?.blockAnnouncedAt) return null;
+    const dismissed = { ...record, dismissedBlockAt: record.blockAnnouncedAt };
+    this.#write(sessionId, dismissed);
+    return dismissed;
   }
 
   /**

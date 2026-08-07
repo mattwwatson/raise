@@ -1,8 +1,9 @@
 ---
 ticket: RAI-20
-status: backlog
+status: in-progress
 size: S
 depends: -
+branch: RAI-20-dismiss-idle-nudge
 ---
 # RAI-20 - Dismiss a "Waiting for you" that is really just an idle session
 

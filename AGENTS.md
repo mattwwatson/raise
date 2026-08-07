@@ -327,6 +327,47 @@ read leaves the hooks' answer standing.
 > the end of one is still inferred, because there is nothing to report it. Revisit only if
 > the transcript stops being readable or the 3s margin proves wrong in practice.
 
+**A human looking at the row is evidence too, and it is the only evidence an idle session can
+produce.** Everything above clears a stale block from something the session *did* - records in
+the transcript, a pipeline still running. An idle nudge is fired precisely because the session
+is doing nothing, so the one mechanism that retires a block has nothing to work with in the
+case where the block means least. Seen live at 749s red on a session with nothing gated.
+
+The escalation itself is right and is not touched - a quiet `Stop` becoming a loud "waiting for
+you" a minute later is how a finished session asks for its next instruction. What is added is
+that you may answer it. The page claims a human is needed; you are that human, and if you have
+looked and nothing is needed, that reading beats the sixty-second timer's.
+
+**A dismissal answers one announcement, never a session, and the key is what makes that true.**
+`Session.dismissedBlockAt` stores the `blockAnnouncedAt` that was dismissed, and the row is
+quiet only while the two are *equal*. `blockAnnouncedAt` moves on every event that says blocked,
+so the next announcement - a permission prompt above all - makes them disagree and the row is
+red again on the next poll, unaided. `stateSince` is the obvious key and the wrong one: it does
+not move while the state is unchanged, so keying on it would make one dismissal permanent and
+let it swallow every future prompt on that session. That is the failure this design exists to
+prevent, so if the field is ever changed, change it to something that moves.
+
+**Only the idle nudge may be dismissed, and a permission prompt gets no control at all.** A
+session stopped at a prompt genuinely cannot proceed without you, so a control there would be
+one whose *working* is the wrong outcome - the affordance rule from the other end. `isIdleNudge`
+already separates them and fails closed, so an unrecognised type is a hard block and offers
+nothing. The eligibility test is `isDismissibleBlock`, and the server re-runs it on the request
+rather than trusting the page: a tab is seconds behind, and the row it drew as a nudge may be a
+prompt by the time it is clicked. The state rule holds the block to `isIdleNudge` a second time,
+so even a dismissal that somehow reached the record could not suppress a prompt.
+
+**It is server-side, and it says so on the row.** The page and `nmmon status` are one protocol,
+so a dismissal only the browser knew would have them disagreeing about the same session; it
+lives with the session record, and both renderers show `Row.dismissed`. That visibility is the
+load-bearing half. The failure this product cares about most is quiet staleness - a confident
+indicator over state that stopped updating, because you stop checking - and a signal silently
+hidden is that same failure wearing different clothes. A dismissed row reads `Idle` *and*
+`dismissed`, so "nothing is waiting" and "I told it to stop saying so" can never be confused.
+
+Deliberately not built: dismissing a permission prompt, and any timeout that clears a nudge by
+itself. The second would be inventing evidence - the whole premise is that a human looked, and
+nothing else knows that.
+
 **A `lavish-axi poll` is a human gate wearing work clothes.** It blocks until someone opens
 the artifact and responds, so the hooks see a busy session while the actual blocker is a
 person who has lost the browser tab. That is why `review` outranks `parked`, and why the row
@@ -1128,6 +1169,17 @@ Keep it that way - it has no build step and must open as a file.
 - **The `unattributed` chip goes where `Focus ↗` would be**, because it answers the same
   question - *where is this?* - with the honest answer that we do not know. That is the
   affordance rule again: a row you cannot act on must not offer a control, and must say why.
+- **`Not for me` is the one control here that quiets a signal, so it is drawn to be found and
+  not to be pressed.** It shares the focus hint's shape because it sits beside it and answers
+  the same row, and it stays at rest colour on hover: focusing takes you somewhere, this takes
+  something away, and it must never be the more inviting of the two. It appears only on
+  `Row.dismissible` - Claude Code's idle nudge - and a permission-prompt row gets *no* control
+  rather than a disabled one.
+- **The `dismissed` marker sits beside the state word, because the two are one sentence.** It
+  is the only thing separating "nothing is waiting" from "I told it to stop saying so", and the
+  page may never let those look alike - a signal hidden without a word is exactly the quiet
+  staleness this page is built against. Outlined and `--muted`: it is an explanation, not an
+  alarm.
 - **The agent chip names pi and stays silent about Claude Code**, and `AGENT_LABELS` has no
   entry for it. Claude Code is most of the rows, and a chip on every card saying so is noise
   on a page whose whole job is to be scannable - the same reason `mode` hides `normal`. pi is
@@ -1155,7 +1207,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 633 tests, no network, no dependencies, ~2s
+npm test          # 648 tests, no network, no dependencies, ~2s
 npm run lint      # oxlint over src, bin, hooks, public, test, scripts
 npm run typecheck # tsc --noEmit over src, bin, hooks, public, scripts
 ```
@@ -1284,7 +1336,7 @@ before creating a ticket or touching anything under `docs/tasks/`.**
 ## Commands
 
 ```sh
-npm test                       # 633 tests, ~2s
+npm test                       # 648 tests, ~2s
 npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
