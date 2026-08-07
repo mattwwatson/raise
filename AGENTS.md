@@ -974,6 +974,53 @@ nmmon says so rather than raising an arbitrary window, and nothing is selected i
 iTerm2 does not follow tmux's selection in control mode, so doing it anyway would just move
 the user's active window for no visible reason.
 
+**A tmux window can belong to more than one session, so "the session owning this pane" is not
+a question with one answer.** `link-window` puts one window in several sessions and a grouped
+session does the same; `display-message -p -t %356 '#{session_name}'` then returns an arbitrary
+one of them, and `select-window -t %356` acts on an arbitrary one of them. The `handoff` skill
+builds exactly that shape - a worker runs in a window of a parent session and is then linked
+into a per-worker viewer session whose tab is the one you are looking at - so focusing a worker
+raised the *parent's* tab and switched that client's current window to the worker's,
+permanently. Two clients then displayed one window at different sizes, and tmux sizes a window
+to its smallest client, so the real tab drew half width filled with dots until the mouse made
+it "latest" again. Seen on all four of four workers.
+
+**Which session tmux names varies with time, which is why the symptom is intermittent.** An
+hour after the four readings above, the same panes on the same server resolved to the *viewer*
+instead - nothing had changed but which session was most recently active. So the failure comes
+and goes with nothing the user did to explain it, and a bug report saying "sometimes" is the
+expected shape of this one rather than a sign of something else.
+
+So the pane is resolved to *every* session it lives in (`list-panes -a`), every client is
+weighed against those (`list-clients`, deliberately without `-t`, which prefix-matches on
+names), and one client is chosen: **the one whose session already displays the window**, because
+raising it moves nothing - tmux keeps no per-client current window, so that rule tells candidate
+sessions apart and never two clients on one session, which is exactly what it is needed for;
+failing that, the one on the session holding **fewest windows**, because a
+session holding only this window is a viewer dedicated to it while a session holding five is
+somebody's working view that happens to be parked here. Everything after that is aimed at that
+client's session by id - `select-window -t '$204:@349'`, never `-t %356`. There is no
+"already there, skip it" flag: tmux's `session_set_current` is a no-op when the window is
+already current, so the guard would be state to keep true for nothing.
+
+**Two picks come out of that one ranking, not one.** The best client overall is what the ranking
+is for; the best **plain** client answers *which tty do I raise, and in which session do I
+select*. They are the same client in every ordinary case, and collapsing them loses the
+plain-tty fallback that a control mode session with a second, ordinary `tmux attach` depends on.
+
+**`controlMode` is a property of the ranked set, not of either pick**, because the question -
+*is this pane living in a native terminal tab tmux cannot see* - is about any client that could
+be showing it. Reading it off the top-ranked client was nondeterministic for the reason above:
+two clients on one session tie on both keys, so the winner is attach order, and a plain
+`tmux attach` that got there first would suppress the pane-title path entirely. The set is
+already narrowed to the pane's candidate sessions, which is what keeps this from being the old
+`clients.some(...)` over one arbitrarily-chosen session's clients.
+
+**No `-t` target is ever a session name**, and the one name that still reaches a human - the
+`tmux attach` hint - is shell-quoted. Names are user data: a bell plugin renames sessions to
+`hv-sls-86-fb9d 🔔` here, `-t hv-sls-7` really does match it, and the unquoted hint was two
+shell arguments. tmux forbids `:` and `.` in a session name, so `$204:@349` cannot mis-split.
+
 ## Coding Conventions
 
 - **Every module opens with a comment explaining why it exists**, not what it does - the
@@ -1051,7 +1098,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 599 tests, no network, no dependencies, ~2s
+npm test          # 612 tests, no network, no dependencies, ~2s
 npm run lint      # oxlint over src, bin, hooks, public, test, scripts
 npm run typecheck # tsc --noEmit over src, bin, hooks, public, scripts
 ```
@@ -1180,7 +1227,7 @@ before creating a ticket or touching anything under `docs/tasks/`.**
 ## Commands
 
 ```sh
-npm test                       # 599 tests, ~2s
+npm test                       # 612 tests, ~2s
 npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above

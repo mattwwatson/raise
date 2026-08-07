@@ -5,7 +5,12 @@
  * with a given tty (or iTerm2 session UUID) to the front:
  *
  *   plain tab  ->  the session's own identifiers, captured at session start
- *   tmux pane  ->  select the pane, then resolve the attached client's tty
+ *   tmux pane  ->  choose which attached client to raise, then select the pane
+ *                  inside that client's session and raise its tty
+ *
+ * The tmux order is that way round because a pane's window can belong to more
+ * than one session, so which client to raise is the question, and everything
+ * after it has to be aimed at the session that client is in. See ./tmux.js.
  *
  * Everything terminal-specific lives in ./terminals.js, so supporting another
  * terminal never touches this file.
@@ -257,7 +262,12 @@ export async function focusSession(record, { exec, terminals = ALL_TERMINALS }) 
     // A plain client is attached as well; that tty is worth a try.
   }
 
-  await selectPane(exec, { pane: plan.pane, tmuxEnv: plan.tmuxEnv });
+  await selectPane(exec, {
+    pane: plan.pane,
+    tmuxEnv: plan.tmuxEnv,
+    sessionId: target.sessionId,
+    windowId: target.windowId,
+  });
   const result = await focusTerminal(exec, {
     sessionUuid: null,
     tty: target.tty,
