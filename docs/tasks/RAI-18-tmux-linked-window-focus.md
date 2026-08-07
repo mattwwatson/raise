@@ -1,9 +1,10 @@
 ---
 ticket: RAI-18
-status: in-progress
+status: shipped
 size: S
 depends: -
 branch: RAI-18-tmux-linked-window-focus
+shipped: 2026-08-07
 ---
 # RAI-18 - Focus raises the wrong tab when a tmux window belongs to two sessions
 
@@ -159,3 +160,27 @@ cannot mis-split.
   asking a question with one answer where there are two.
 - **A most-recently-used tie-break** (`#{client_activity}`). The two rules above resolve every
   case observed, and a third would be one more field and one more test for none of them.
+
+---
+
+## Implementation notes
+
+Shipped as written, in `src/focus/tmux.js` with a two-line change in `src/focus/index.js`.
+`sessionForPane` and the session-scoped `clientsForSession` are gone; `listPaneSessions`
+(`list-panes -a`) and `listClients` (no `-t`) replace them, `parsePaneSessions` and
+`parseClients` are pure and unit-tested, and `chooseTmuxClient` holds the ranking and returns
+`{chosen, plain, controlMode}`. `resolveTmuxTarget` now carries `sessionId` and `windowId`,
+and `selectPane` **requires** both rather than defaulting to the old bare-pane target - a
+fallback to the ambiguous form would be a compatibility shim for a version that never shipped.
+
+**One thing moved after the brief was written.** `controlMode` was first read off `chosen` and
+is now a property of the whole ranked set, because two clients on one session tie on both keys
+and the winner is then attach order - a plain `tmux attach` that got there first would have
+suppressed the pane-title path for a `tmux -CC` pane. The rule section above records the
+reasoning; this is only a note that it was found in review rather than at design time.
+
+`pane-gone` now covers two causes - the command failed, and it succeeded and named no session
+for this pane - deliberately under one reason string, since the user-facing answer is the same.
+
+**599 tests to 612.** The regression test is built from the real pane, session and window ids
+in this file and fails against the old resolution.
