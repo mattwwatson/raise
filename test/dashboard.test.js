@@ -1843,6 +1843,49 @@ test('a dismissal has nothing to say about a block held by the pipeline agent', 
   assert.equal(row.dismissible, false);
 });
 
+test('a dismissed session whose pipeline agent then blocks does not say dismissed', () => {
+  // The word explains why a row is quiet, so beside a red "Waiting for you" it
+  // is the exact confusion this page cannot afford: the row is asking for a
+  // human on the agent's behalf while a marker says it was told not to, and the
+  // marker's own promise - that the row goes red again next time it asks - has
+  // already come true.
+  const runs = [run({ runId: 'r9', step: { name: 'review', findings: 0, lastActivity: null } })];
+  const rows = build({
+    sessions: [
+      nudged({ dismissedBlockAt: 5000 }),
+      session({
+        sessionId: 'agent',
+        cwd: '/Users/x/.no-mistakes/worktrees/abc/r9',
+        state: 'blocked',
+        stateSince: 5000,
+        blockAnnouncedAt: 5000,
+        message: 'Claude needs your permission to use Bash',
+        notificationType: 'permission_prompt',
+      }),
+    ],
+    runs,
+    now: 6000,
+  });
+  const row = rows.find((r) => r.sessionId === 's1');
+  assert.equal(row.attention, 'blocked');
+  assert.equal(row.dismissed, false);
+});
+
+test('a dismissed session the transcript disproves reads working, and only that', () => {
+  // The transcript is the stronger evidence and "Working" is the more accurate
+  // word, so the disproof deliberately wins the state. What must not ride along
+  // is the marker: the dismissal is not why this row is quiet, and a row that is
+  // not quiet has nothing to explain.
+  const [row] = build({
+    sessions: [nudged({ dismissedBlockAt: 5000 })],
+    runs: [],
+    summaries: new Map([['s1', { lastActivityAt: 60000 }]]),
+    now: 61000,
+  });
+  assert.equal(row.attention, 'working');
+  assert.equal(row.dismissed, false);
+});
+
 test('an unattributable run offers no dismissal - there is no session to answer', () => {
   const [row] = build({
     sessions: [],

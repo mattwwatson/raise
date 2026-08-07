@@ -364,6 +364,17 @@ indicator over state that stopped updating, because you stop checking - and a si
 hidden is that same failure wearing different clothes. A dismissed row reads `Idle` *and*
 `dismissed`, so "nothing is waiting" and "I told it to stop saying so" can never be confused.
 
+**The word is on the row only while the dismissal is what quietened it**, which is narrower than
+a dismissal being on the record and is the same sentence read the other way round. A dismissed
+session whose folded pipeline agent then blocks is red - that block is the agent's and not this
+session's to answer - and `dismissed` beside "Waiting for you" would be the exact confusion the
+paragraph above forbids, with the marker's own promise that the row goes red again next time it
+asks already come true. A dismissed session the transcript then disproves reads `Working`, which
+is the stronger evidence winning and is right, but the dismissal is not why that row is quiet
+either. So `blockDismissalInEffect` is the dismissal branch of `effectiveSessionState` lifted out
+whole - one place deciding both the state and the word - and `Row.dismissed` requires it *and* an
+`idle` attention.
+
 Deliberately not built: dismissing a permission prompt, and any timeout that clears a nudge by
 itself. The second would be inventing evidence - the whole premise is that a human looked, and
 nothing else knows that.
@@ -1179,7 +1190,9 @@ Keep it that way - it has no build step and must open as a file.
   is the only thing separating "nothing is waiting" from "I told it to stop saying so", and the
   page may never let those look alike - a signal hidden without a word is exactly the quiet
   staleness this page is built against. Outlined and `--muted`: it is an explanation, not an
-  alarm.
+  alarm. It explains a *quiet* row and appears on no other kind: a row red for its pipeline
+  agent, or working because the transcript ran past the block, is not quiet and has nothing for
+  it to explain.
 - **The agent chip names pi and stays silent about Claude Code**, and `AGENT_LABELS` has no
   entry for it. Claude Code is most of the rows, and a chip on every card saying so is noise
   on a page whose whole job is to be scannable - the same reason `mode` hides `normal`. pi is
@@ -1207,7 +1220,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 648 tests, no network, no dependencies, ~2s
+npm test          # 650 tests, no network, no dependencies, ~2s
 npm run lint      # oxlint over src, bin, hooks, public, test, scripts
 npm run typecheck # tsc --noEmit over src, bin, hooks, public, scripts
 ```
@@ -1336,7 +1349,7 @@ before creating a ticket or touching anything under `docs/tasks/`.**
 ## Commands
 
 ```sh
-npm test                       # 648 tests, ~2s
+npm test                       # 650 tests, ~2s
 npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above

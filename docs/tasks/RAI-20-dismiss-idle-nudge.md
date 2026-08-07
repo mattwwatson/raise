@@ -145,6 +145,14 @@ answer, so checking the attention would have offered a control that could not wo
 **Both renderers say `dismissed`** - `public/index.html` beside the state word, `bin/nmmon.js`
 after the repo name. That is the load-bearing constraint from above, not decoration.
 
+**And `Row.dismissed` is true only while the dismissal is what quietened the row**, which is the
+same constraint read from the other end. A dismissed session whose folded pipeline agent then
+blocks is red, and `dismissed` beside "Waiting for you" is exactly the confusion the constraint
+forbids; a dismissed session the transcript then disproves reads `Working`, correctly, and the
+dismissal is not why. `blockDismissalInEffect` is the dismissal branch of `effectiveSessionState`
+lifted out whole, so one place decides both the state and the word, and the field requires it and
+an `idle` attention. Both cases are pinned in `test/dashboard.test.js`.
+
 Verified live as well as in tests, against a copy of the real session records served by a second
 monitor on its own port: a genuine `idle_prompt` on the captain's firstmate session was
 dismissed, dropped to `Idle · dismissed` in the page and in `nmmon status`, went red again on a

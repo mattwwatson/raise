@@ -315,6 +315,11 @@ nothing for you to undo. It cannot hide something that matters.
 **A permission-prompt row has no button at all.** That session genuinely cannot proceed without
 you, so there is nothing there to dismiss, and a control that must not be used is not offered.
 
+**The word `dismissed` explains a quiet row, so it appears on nothing else.** If the same session
+turns red again for its pipeline, or starts working because its transcript ran on, the row says
+that and only that - the marker is there to tell a quiet row apart from one with nothing to say,
+and a row that is neither has no use for it.
+
 The dot in the header is **positive evidence, not the absence of an error**. The server sends
 a `ping` event every 20 seconds; if nothing arrives for 50 the dot goes red, the header reads
 `no response for 2m`, and the whole page dims, because everything on it is now a snapshot of

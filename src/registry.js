@@ -279,8 +279,14 @@ export class SessionRegistry {
    *
    * A session with no announcement to answer cannot be dismissed. Whether *this*
    * announcement may be - only Claude Code's idle nudge may - is decided by the
-   * caller through `isDismissibleBlock`, which is where the transcript's own
-   * disproof is already known.
+   * caller through `isDismissibleBlock`, which reads the state, the announcement,
+   * any dismissal already recorded and the notification type, and nothing else.
+   * The transcript's own disproof is not among them: it lives in
+   * `effectiveSessionState`, on the far side of a transcript read neither this
+   * nor its caller has. So `Row.dismissible` and the server's re-check can
+   * legitimately disagree for a session whose transcript has moved on, and the
+   * dismissal that lands is harmless - a block the transcript has already
+   * retired.
    *
    * @param {string} sessionId
    * @returns {Session|null} the stored record, or null if there was nothing to

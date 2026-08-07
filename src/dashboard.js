@@ -62,10 +62,12 @@ import { prStateIsCurrent, pullRequestNumber } from './nm-state.js';
  * @property {boolean} dismissible whether this row is announcing a block a human
  *   may say is not owed. Only ever Claude Code's idle nudge - a permission
  *   prompt offers no control at all rather than a control that must not be used
- * @property {boolean} dismissed whether the announcement this row is showing was
- *   already dismissed. It is *why* an idle row is idle, so both renderers say
- *   so: a signal quietly hidden is the same quiet staleness this page exists to
- *   avoid, wearing different clothes
+ * @property {boolean} dismissed whether a human's dismissal is *why* this row is
+ *   idle, which is narrower than a dismissal being on the record: a row red for
+ *   its pipeline agent, or working because the transcript disproved the block,
+ *   is quiet for a reason of its own and says nothing. Where it is true both
+ *   renderers say so, since a signal quietly hidden is the same quiet staleness
+ *   this page exists to avoid, wearing different clothes
  * @property {boolean} focusable whether clicking this row can do anything
  * @property {'tmux'|'tab'|'app'|'unknown'|null} hostKind where the session lives
  * @property {import('./registry.js').AgentKind|null} agentKind which agent is
@@ -546,6 +548,31 @@ export function isDismissibleBlock(session) {
 }
 
 /**
+ * Whether a dismissal is the thing keeping this session quiet.
+ *
+ * This is the dismissal branch of `effectiveSessionState` on its own, because
+ * two questions hang off it and only one of them is the state. The other is
+ * whether the row may *say* it was dismissed, and that word is only true while
+ * the dismissal is what the row is showing: a stronger answer above it - the
+ * transcript's disproof, a live pipeline - means the row is quiet for a reason
+ * of its own and the dismissal is not what a reader is looking at.
+ *
+ * @param {Session|{state?: string, stateSince?: number,
+ *          blockAnnouncedAt?: number|null, dismissedBlockAt?: number|null,
+ *          message?: string|null, notificationType?: string|null}|null} session
+ * @param {import('./transcript.js').TranscriptSummary|null} summary
+ * @param {boolean} [pipelineRunning]
+ * @returns {boolean}
+ */
+function blockDismissalInEffect(session, summary, pipelineRunning = false) {
+  if (!session || session.state !== 'blocked') return false;
+  if (blockDisproved(session, summary)) return false;
+  if (pipelineRunning) return false;
+  if (!isIdleNudge(session.message, session.notificationType)) return false;
+  return blockDismissed(session);
+}
+
+/**
  * The session's state once the transcript has had its say.
  *
  * A disproved block becomes `working` rather than falling through to `idle`:
@@ -575,10 +602,10 @@ function effectiveSessionState(session, summary, pipelineRunning = false) {
   if (!session) return null;
   if (session.state === 'blocked') {
     if (blockDisproved(session, summary)) return 'working';
-    if (isIdleNudge(session.message, session.notificationType)) {
-      if (pipelineRunning) return 'working';
-      if (blockDismissed(session)) return 'idle';
+    if (pipelineRunning && isIdleNudge(session.message, session.notificationType)) {
+      return 'working';
     }
+    if (blockDismissalInEffect(session, summary, pipelineRunning)) return 'idle';
   }
   return /** @type {import('./registry.js').SessionState|null} */ (session.state ?? null);
 }
@@ -877,8 +904,13 @@ export function buildRows({
       dismissible: sessionState === 'blocked' && isDismissibleBlock(session),
       // Said out loud on an idle row, because the difference between "nothing is
       // waiting" and "I told it to stop saying so" is exactly the difference
-      // this page cannot afford to blur.
-      dismissed: blockDismissed(session),
+      // this page cannot afford to blur. It is that sentence and nothing else,
+      // so it is the row's answer only while the dismissal is what quietened it:
+      // beside a red "Waiting for you" - a folded pipeline agent's block, which
+      // is not this session's to answer - or beside "Working", where the
+      // transcript disproved the block and the dismissal never came into it, the
+      // word would blur the same difference from the other side.
+      dismissed: attention === 'idle' && blockDismissalInEffect(session, summary, pipelineRunning),
       focusable: plan.kind !== 'unfocusable',
       hostKind: hostKindFor(plan),
       // A record written before pi was supported carries no agent, and only
