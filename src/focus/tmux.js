@@ -142,15 +142,25 @@ export function parseClients(out) {
  *      here.
  *
  * Two picks come out of that one ranking, not one, because they answer
- * different questions. `chosen` is the best client overall and says whether
- * this pane might be living in a native terminal tab tmux cannot see; `plain`
- * is the best non-control client and says which tty to raise and which session
- * to select in. They are the same client in every ordinary case, and collapsing
- * them would lose the fallback a control mode session with a second, ordinary
+ * different questions. `chosen` is the best client overall; `plain` is the best
+ * non-control client and says which tty to raise and which session to select
+ * in. They are the same client in every ordinary case, and collapsing them
+ * would lose the fallback a control mode session with a second, ordinary
  * `tmux attach` depends on.
  *
+ * `controlMode` - whether this pane might be living in a native terminal tab
+ * tmux cannot see - is a property of the whole ranked set and not of `chosen`,
+ * because rule 1 discriminates only *between* candidate sessions and never
+ * within one. tmux has no per-client current window: `#{window_id}` in a
+ * client's format context resolves to the client's *session's* current window,
+ * so two clients on the same session tie on both keys and `chosen` falls out of
+ * `list-clients` ordering, which is attach order. Read off `chosen`, a plain
+ * `tmux attach` that attached before the iTerm2 `tmux -CC` client would suppress
+ * the pane-title path altogether. Discriminating between sessions is all rule 1
+ * is needed for, since choosing between sessions is the bug being fixed.
+ *
  * @param {{candidates: PaneSession[], clients: TmuxClient[]}} input
- * @returns {{chosen: TmuxClient|null, plain: TmuxClient|null}}
+ * @returns {{chosen: TmuxClient|null, plain: TmuxClient|null, controlMode: boolean}}
  */
 export function chooseTmuxClient({ candidates, clients }) {
   const windowId = candidates[0]?.windowId ?? null;
@@ -169,6 +179,7 @@ export function chooseTmuxClient({ candidates, clients }) {
   return {
     chosen: ranked[0] ?? null,
     plain: ranked.find((client) => !client.controlMode) ?? null,
+    controlMode: ranked.some((client) => client.controlMode),
   };
 }
 
@@ -315,7 +326,7 @@ export async function resolveTmuxTarget(exec, { pane, tmuxEnv }) {
   }
 
   const clients = await listClients(exec, { tmuxEnv });
-  const { chosen, plain } = chooseTmuxClient({ candidates, clients });
+  const { chosen, plain, controlMode } = chooseTmuxClient({ candidates, clients });
   if (!chosen) {
     return {
       ok: false,
@@ -331,7 +342,6 @@ export async function resolveTmuxTarget(exec, { pane, tmuxEnv }) {
   }
 
   const acting = plain ?? chosen;
-  const controlMode = chosen.controlMode;
   return {
     ok: true,
     session: candidates.find((row) => row.sessionId === acting.sessionId)?.sessionName ?? null,

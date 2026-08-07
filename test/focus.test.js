@@ -302,7 +302,11 @@ test('chooseTmuxClient ignores a client attached to some other session', () => {
   const clients = [
     { tty: '/dev/ttys009', controlMode: false, sessionId: '$7', windowId: '@0' },
   ];
-  assert.deepEqual(chooseTmuxClient({ candidates, clients }), { chosen: null, plain: null });
+  assert.deepEqual(chooseTmuxClient({ candidates, clients }), {
+    chosen: null,
+    plain: null,
+    controlMode: false,
+  });
 });
 
 test('chooseTmuxClient separates the best client from the best plain one', () => {
@@ -319,6 +323,25 @@ test('chooseTmuxClient separates the best client from the best plain one', () =>
   const { chosen, plain } = chooseTmuxClient({ candidates, clients });
   assert.equal(chosen.tty, '/dev/ttys002');
   assert.equal(plain.tty, '/dev/ttys031');
+});
+
+test('chooseTmuxClient reports control mode whatever order the clients arrive in', () => {
+  // Two clients on ONE candidate session tie on both ranking keys - tmux has no
+  // per-client current window, so `#{window_id}` is the session's - and `chosen`
+  // then falls out of `list-clients` ordering, which is attach order. Read off
+  // `chosen`, a plain attach that got there first would hide the control client
+  // and skip the pane-title path that pane actually needs.
+  const candidates = [
+    { paneId: '%1', sessionId: '$0', windowId: '@0', windowCount: 1, sessionName: 'firstmate' },
+  ];
+  const control = { tty: '/dev/ttys002', controlMode: true, sessionId: '$0', windowId: '@0' };
+  const attach = { tty: '/dev/ttys031', controlMode: false, sessionId: '$0', windowId: '@0' };
+  for (const clients of [
+    [control, attach],
+    [attach, control],
+  ]) {
+    assert.equal(chooseTmuxClient({ candidates, clients }).controlMode, true);
+  }
 });
 
 test('resolveTmuxTarget reports a detached session with an attach hint', async () => {

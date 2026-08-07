@@ -120,7 +120,7 @@ Every one of these was run against the live tmux server, not inferred.
 | Primitive | Result |
 | --- | --- |
 | `list-panes -a -F '#{pane_id}…#{session_name}'` | one row **per session** a linked window belongs to |
-| `list-clients -F '…#{session_id}\t#{window_id}'` | `#{window_id}` in client context is the client's **currently displayed** window |
+| `list-clients -F '…#{session_id}\t#{window_id}'` | `#{window_id}` in client context is the client's **session's** current window - tmux keeps no per-client one, so rule 1 discriminates only *between* candidate sessions, never within one |
 | `select-window -t '$204:@349'` vs `'$191:@349'` | the same window, with the correct per-session context (index 1 vs index 3) |
 | `list-clients -t 'hv-sls-7'` | matches `hv-sls-75-4d7a 🔔` - **a name target prefix-matches**, so `-t` on a name is dropped entirely |
 | `list-panes -a` size | 514 bytes / 14 rows here; `MAX_OUTPUT_BYTES` is 1MB, so it would take ~25,000 panes to matter |
