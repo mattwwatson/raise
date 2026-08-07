@@ -63,6 +63,9 @@ import { prStateIsCurrent, pullRequestNumber } from './nm-state.js';
  * @property {'tmux'|'tab'|'app'|'unknown'|null} hostKind where the session lives
  * @property {import('./registry.js').AgentKind|null} agentKind which agent is
  *   running it; null for a run with no session behind it
+ * @property {import('./firstmate.js').SpawnedBy|null} spawnedBy which tool
+ *   started this session's window, when that tool declared itself. Null for a
+ *   session nobody in particular started, which is most of them
  * @property {Run|null} run
  * @property {number|null} updatedAt
  * @property {string|null} summary what the session is working on, in Claude's
@@ -589,6 +592,11 @@ export function attentionFor({
  * session launched a pipeline means walking live processes, which this file may
  * not do.
  *
+ * `spawnedBy` arrives the same way for the same reason: knowing that firstmate
+ * started a session means reading a tmux pane table and a pid file, neither of
+ * which this file may touch. Empty for every session nobody in particular
+ * started, which is most of them.
+ *
  * `mainCheckouts` is the same arrangement again: reading a worktree's `.git` to
  * find the checkout it is linked to is filesystem work, and the answer is what
  * places a run started from a worktree. Empty for every session that is not in
@@ -603,7 +611,8 @@ export function attentionFor({
  *          mainCheckouts?: Map<string, string|null>,
  *          pullRequests?: PullRequest[],
  *          pipelines?: Set<string>,
- *          runOwners?: Map<string, string>}} input
+ *          runOwners?: Map<string, string>,
+ *          spawnedBy?: Map<string, import('./firstmate.js').SpawnedBy|null>}} input
  * @returns {Row[]}
  */
 export function buildRows({
@@ -617,6 +626,7 @@ export function buildRows({
   pullRequests = [],
   pipelines = new Set(),
   runOwners = new Map(),
+  spawnedBy = new Map(),
 }) {
   /** @type {Row[]} */
   const rows = [];
@@ -800,6 +810,10 @@ export function buildRows({
       // A record written before pi was supported carries no agent, and only
       // Claude Code sessions existed then.
       agentKind: session.agent || 'claude',
+      // Positive evidence or nothing. A session we were not told about is one
+      // nobody in particular started, which is the ordinary case and gets no
+      // claim made about it either way.
+      spawnedBy: spawnedBy.get(session.sessionId) || null,
       run: run || null,
       updatedAt: session.updatedAt || null,
       // What the *session* is about, always - never the pipeline step. The step
@@ -906,6 +920,8 @@ export function buildRows({
       focusable: false,
       hostKind: null,
       agentKind: null,
+      // No session, so no window for anybody to have spawned.
+      spawnedBy: null,
       run,
       updatedAt: run.updatedAt || null,
       // No session, so nothing to say about one. What the pipeline is doing goes

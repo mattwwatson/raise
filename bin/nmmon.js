@@ -28,6 +28,7 @@ import { TranscriptReader } from '../src/transcript-reader.js';
 import { GitBranch } from '../src/git-branch.js';
 import { LavishState } from '../src/lavish.js';
 import { PollWatch } from '../src/poll-watch.js';
+import { FirstmateWatch } from '../src/firstmate.js';
 import { focusSession } from '../src/focus/index.js';
 import { ALL_TERMINALS } from '../src/focus/terminals.js';
 import { exec, execAsync, tryExec, tryExecAsync } from '../src/exec.js';
@@ -306,6 +307,11 @@ async function cmdStatus() {
   const agentPids = new Set(sessions.map((s) => s.host?.pid).filter(Boolean));
   const polls = new PollWatch({ execAsync });
   await polls.load(agentPids);
+  // One shot, so the pane table is read up front and waited for rather than
+  // answered from a cache that is empty on the only tick there is.
+  const firstmate = new FirstmateWatch({ execAsync });
+  await firstmate.load(sessions);
+  const spawnedBy = new Map(sessions.map((s) => [s.sessionId, firstmate.spawnedBy(s)]));
   const summaries = new Map(
     sessions.map((s) => {
       const read = transcripts.read(s.transcriptPath, branches.get(s.sessionId));
@@ -352,6 +358,7 @@ async function cmdStatus() {
     pullRequests,
     pipelines,
     runOwners: runOwners.owners,
+    spawnedBy,
   });
 
   if (warning) console.log(`${yellow('Note')} ${warning}\n`);
@@ -379,8 +386,12 @@ async function cmdStatus() {
     // looking for what this row is. The page can afford to say it twice, in the
     // chip and in a section heading; here it is said once and then explained.
     const unplaceable = row.attributable === false ? ` ${dim('unattributed')}` : '';
+    // Who started this window, on the rows where something declared it. Named
+    // only when it is worth naming, exactly as on the page: a session nobody in
+    // particular started says nothing rather than saying so.
+    const spawner = row.spawnedBy ? ` ${dim(row.spawnedBy)}` : '';
     console.log(
-      `${colour(row.attentionLabel.padEnd(26))} ${bold(row.title)}${named}${unplaceable}`,
+      `${colour(row.attentionLabel.padEnd(26))} ${bold(row.title)}${named}${spawner}${unplaceable}`,
     );
     if (row.message) console.log(`  ${dim(row.message)}`);
     // Always, pipeline or no pipeline. This used to be dropped whenever a step

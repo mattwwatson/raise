@@ -18,6 +18,7 @@ import { TranscriptReader, defaultFileAccess } from './transcript-reader.js';
 import { GitBranch, defaultGitAccess } from './git-branch.js';
 import { LavishState } from './lavish.js';
 import { PollWatch } from './poll-watch.js';
+import { FirstmateWatch } from './firstmate.js';
 import { buildRows, summarise } from './dashboard.js';
 import { RunOwners } from './run-owner.js';
 import { focusSession } from './focus/index.js';
@@ -97,6 +98,9 @@ export function createMonitorServer({
   const branches = new GitBranch({ files: gitFiles });
   const lavish = new LavishState({ execAsync });
   const polls = new PollWatch({ execAsync });
+  // Reads a tmux pane name once per pane and a pid file once per lock change,
+  // so it costs a `list-panes` only when a window we have never seen turns up.
+  const firstmate = new FirstmateWatch({ execAsync, files: gitFiles });
   // Outlives a poll on purpose: `axi run` returns at every gate, so the process
   // that proves ownership is absent for exactly as long as the run is parked.
   const runOwners = new RunOwners();
@@ -156,6 +160,8 @@ export function createMonitorServer({
 
     const summaries = new Map();
     const reviewUrls = new Map();
+    /** Which tool started each session's window, when the tool said so. */
+    const spawnedBy = new Map();
     /** Sessions with a no-mistakes run still going underneath them. */
     const pipelines = new Set();
     for (const session of sessions) {
@@ -164,6 +170,9 @@ export function createMonitorServer({
       // belongs to this session.
       const branch = sessionBranches.get(session.sessionId) || null;
       const read = transcripts.read(session.transcriptPath, branch, session.agent);
+      // Cached per pane and per lock, so this is a map lookup on all but the
+      // first tick a session is seen.
+      spawnedBy.set(session.sessionId, firstmate.spawnedBy(session));
       // The process table is the authority on whether a poll is still running.
       // A transcript can say the poll returned when only the tool call did -
       // Claude Code backgrounds anything past its own timeout, and a review
@@ -183,6 +192,7 @@ export function createMonitorServer({
     }
     transcripts.prune(new Set(sessions.map((s) => s.transcriptPath).filter(Boolean)));
     branches.prune(new Set(candidateDirs));
+    firstmate.prune(new Set(candidateDirs));
     // An empty reading is not evidence that every run ended - it is what the
     // degraded `axi status` path returns from its cache before the first
     // non-blocking call has warmed it. Pruning on that would forget every
@@ -203,6 +213,7 @@ export function createMonitorServer({
       pullRequests,
       pipelines,
       runOwners: runOwners.owners,
+      spawnedBy,
     });
     return {
       rows,

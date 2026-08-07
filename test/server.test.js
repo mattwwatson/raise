@@ -981,12 +981,91 @@ test('a machine with neither no-mistakes nor lavish-axi runs quietly', async () 
     assert.equal(state.source, 'absent');
     assert.equal(state.rows.length, 1, 'the session itself still shows');
 
-    // Whatever the process scan runs is fair game; these two are not.
+    // Whatever the process scan runs is fair game; these are not. `tmux` is
+    // here for the same reason as the other two: a session with no pane has no
+    // window name to read, so nothing may go looking for one.
     assert.equal(ran.includes('no-mistakes'), false);
     assert.equal(ran.includes('lavish-axi'), false);
+    assert.equal(ran.includes('tmux'), false);
 
     await monitor.stop();
   } finally {
+    if (previousHome === undefined) delete process.env.NMMON_HOME;
+    else process.env.NMMON_HOME = previousHome;
+    cleanup();
+  }
+});
+
+test('a firstmate crewmate is marked on the page, and its neighbours are not', async () => {
+  // The whole point of the item, end to end and against the real shapes: the
+  // crew window firstmate pinned, the handoff window that uses the very same
+  // mechanism with a different prefix, and the first mate itself - which is
+  // identified by its lock rather than by its window, because the captain's
+  // window is the one firstmate leaves free to be renamed.
+  const { dir, cleanup } = scratch();
+  const previousHome = process.env.NMMON_HOME;
+  process.env.NMMON_HOME = dir;
+  let monitor;
+  try {
+    const fmHome = join(dir, 'firstmate');
+    mkdirSync(join(fmHome, 'state'), { recursive: true });
+    // The captain is the session whose *own* pid is in the lock.
+    writeFileSync(join(fmHome, 'state', '.lock'), `${process.pid}\n`);
+
+    const panes = [
+      '%0\tFirst Mate',
+      '%358\tfm-sls-87-push-subscription-ownership',
+      '%330\thandoff-sls-75-4d7a',
+    ].join('\n');
+
+    const port = await freePort();
+    monitor = createMonitorServer({
+      port,
+      token: 'test-token',
+      dbPath: join(dir, 'no-such.sqlite'),
+      sessionsPath: join(dir, 'sessions'),
+      exec: () => assert.fail('no blocking commands from the server'),
+      execAsync: async (command) => (command === 'tmux' ? panes : ''),
+    });
+    await monitor.start();
+
+    // Real pids, or the registry prunes the record before a row is ever built.
+    const sessions = [
+      ['captain', fmHome, '%0', process.pid],
+      ['crew', join(dir, 'crew'), '%358', process.pid],
+      ['handoff', join(dir, 'handoff'), '%330', process.ppid],
+      ['editing-firstmate', fmHome, null, process.ppid],
+    ];
+    for (const [sessionId, cwd, pane, pid] of sessions) {
+      const registered = await fetch(`http://127.0.0.1:${port}/event`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-nmmon-token': 'test-token' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          hook_event_name: 'SessionStart',
+          cwd,
+          host: { tmux: '', tmux_pane: pane, pid },
+        }),
+      });
+      assert.equal(registered.status, 204);
+    }
+
+    // Asking is what schedules the pane read, so the first reading predates it.
+    await (await fetch(`http://127.0.0.1:${port}/state?t=test-token`)).json();
+    for (let i = 0; i < 10; i += 1) await nextTick();
+
+    const body = await (await fetch(`http://127.0.0.1:${port}/state?t=test-token`)).json();
+    const byId = new Map(body.rows.map((r) => [r.sessionId, r]));
+    assert.equal(byId.get('crew')?.spawnedBy, 'firstmate');
+    assert.equal(byId.get('captain')?.spawnedBy, 'firstmate');
+    // A handoff worker is every bit as headless, worktree-bound and permissive
+    // as a crewmate. Only the name firstmate pinned tells them apart.
+    assert.equal(byId.get('handoff')?.spawnedBy, null);
+    // And someone with firstmate's source open is not the first mate: the cwd
+    // matches, the lock is right there, and the pid in it is somebody else's.
+    assert.equal(byId.get('editing-firstmate')?.spawnedBy, null);
+  } finally {
+    await monitor?.stop();
     if (previousHome === undefined) delete process.env.NMMON_HOME;
     else process.env.NMMON_HOME = previousHome;
     cleanup();

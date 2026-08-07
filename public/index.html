@@ -784,6 +784,17 @@
       const AGENT_LABELS = { pi: 'pi' };
 
       /*
+       * Which tool started this window, named on the same terms as the agent:
+       * only when it is worth naming, and never inferred. A firstmate crewmate
+       * is otherwise indistinguishable from work you started yourself, which on
+       * a page about who needs you is the distinction worth one quiet chip.
+       *
+       * No fallback again. A tool we do not recognise gets no chip, and a
+       * session nobody in particular started - most of them - says nothing.
+       */
+      const SPAWNER_LABELS = { firstmate: 'firstmate' };
+
+      /*
        * The same agents, for the one place that has to name somebody rather
        * than stay silent: an expanded panel labels every line with who wrote
        * it. Claude Code appears here and not in AGENT_LABELS because a label
@@ -1217,6 +1228,18 @@
           t.title =
             (since ? 'Waiting since ' : 'Last activity ') + new Date(stamp).toLocaleString();
           meta.appendChild(t);
+        }
+        // Provenance, so it sits with the agent chip and wears the same
+        // outlined, faint style - it must not compete with where your window
+        // actually is, let alone with the states that mean somebody is waiting.
+        // Before the agent chip because it answers the earlier question: who
+        // started this, then what is running in it.
+        if (SPAWNER_LABELS[row.spawnedBy]) {
+          const spawner = document.createElement('span');
+          spawner.className = 'agent-chip';
+          spawner.textContent = SPAWNER_LABELS[row.spawnedBy];
+          spawner.title = 'Started by ' + SPAWNER_LABELS[row.spawnedBy] + ', not by you';
+          meta.appendChild(spawner);
         }
         if (AGENT_LABELS[row.agentKind]) {
           const agent = document.createElement('span');
