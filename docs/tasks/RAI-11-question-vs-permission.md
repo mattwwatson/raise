@@ -118,6 +118,44 @@ for a question carried the entire question text - every prompt, header, option l
 description - in `tool_input`. `src/hook-payload.js` already refuses that field, and this is
 what it is refusing.
 
+### The transcript cannot stand in for the payload, and the reason is a flush
+
+The obvious way to avoid widening the payload is to read the tool name off the transcript,
+which Raise already tails and already has the path to. **It does not work, and the measurement
+that kills it is worth keeping** - because the failure is invisible to any test written after
+the fact.
+
+**A pending tool's `tool_use` record is not on disk while the tool is pending.** Claude Code
+writes it with the timestamp at which the model emitted it, but does not flush it until the
+tool resolves - so during the block, which is the entire window Raise needs, the transcript
+says nothing about the tool at all. Measured twice in one session:
+
+| Tool | emitted (record timestamp) | still absent from the file at | appeared on disk |
+| --- | --- | --- | --- |
+| `Bash` (curl, real approval) | 08:36:19 | 08:36:49 (+30s) | after the human declined at 08:37:03 |
+| `AskUserQuestion` | 08:37:11 | 08:37:57 (+46s) | after the human answered at 08:38:13 |
+
+In both cases the dialog was confirmed open on screen, and the `PermissionRequest` and
+`Notification` hooks had already fired, while the file held no trace of the tool. The record
+then appeared within about six seconds of the human answering, carrying its original emission
+timestamp.
+
+**This is the trap that makes the avenue look viable.** Read the transcript *after* the fact -
+which is what an investigation naturally does - and both tools are plainly there, in flight,
+distinguishable, with timestamps that appear to span the block. The first pass here concluded
+exactly that. The timestamps are emission times, not write times, so they cannot be used to
+infer what was readable when.
+
+Two consequences beyond this ticket, neither chased here:
+
+- **`transcript.js`'s "the tool with no result yet" rule cannot see a tool awaiting approval.**
+  It describes tools that are *running*, and a tool blocked on a dialog has not started.
+- **`blockDisproved` is unaffected and is if anything reinforced.** It works off conversation
+  records continuing to arrive, and a session stopped at a dialog genuinely writes none.
+
+**What would disprove this:** a Claude Code that flushes the `tool_use` eagerly. The avenue
+reopens the moment it does, so re-measure rather than re-reason.
+
 ---
 
 ## Question 2 - only if Question 1 comes back unhelpful
