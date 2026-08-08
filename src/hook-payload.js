@@ -1,5 +1,5 @@
 /**
- * What is allowed to leave an agent and reach nmmon.
+ * What is allowed to leave an agent and reach Raise.
  *
  * The reporter runs inside somebody's live session and is handed everything the
  * agent knows about the event, which is far more than a monitor needs. Claude
@@ -20,7 +20,7 @@
  */
 
 /**
- * The fields nmmon reads, and therefore the only ones worth sending.
+ * The fields Raise reads, and therefore the only ones worth sending.
  *
  * `host` is not among them because it is ours - the reporter works out the
  * window identity itself and adds it to the body afterwards.

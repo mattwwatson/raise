@@ -9,7 +9,7 @@
  * so unlike the transcript - which may only ever clear a block, never assert one
  * - a forge reading is allowed to assert, and it outranks all three sources.
  *
- * It is the only outbound network request nmmon makes, so it is off until the
+ * It is the only outbound network request Raise makes, so it is off until the
  * user turns it on, and every failure is indistinguishable from it being off. No
  * credential, no `gh`, no network, a private repo, a rate limit: each of them
  * leaves the row exactly as it was before this module existed. Failures are
@@ -23,7 +23,7 @@
  * time is therefore answered a tick later, which is the right trade against
  * stalling a loop that has one second to do everything.
  *
- * **GitHub goes through `gh` and only `gh`.** It authenticates itself, so nmmon
+ * **GitHub goes through `gh` and only `gh`.** It authenticates itself, so Raise
  * never holds a GitHub credential - and `gh` already reads `GH_TOKEN` and
  * `GITHUB_TOKEN` out of the environment it is handed, so a token path of our own
  * would be a second way to compute an answer `gh` was going to give anyway. It
@@ -65,7 +65,7 @@ const DISABLED = { enabled: false, bitbucket: null, problem: null };
  * source goes through, because a forge answer ages exactly like anybody else's.
  *
  * @typedef {object} ForgeReading
- * @property {'open'|'merged'|'closed'} state in nmmon's vocabulary, not the forge's
+ * @property {'open'|'merged'|'closed'} state in Raise's vocabulary, not the forge's
  * @property {number} observedAt epoch ms
  */
 
@@ -148,7 +148,7 @@ export function parseForgeUrl(url) {
 /**
  * A forge's word for a state, in ours.
  *
- * Neither forge speaks nmmon's vocabulary: GitHub says OPEN, CLOSED or MERGED,
+ * Neither forge speaks Raise's vocabulary: GitHub says OPEN, CLOSED or MERGED,
  * and Bitbucket says OPEN, MERGED, DECLINED or SUPERSEDED. Both fold onto the
  * three words the page already renders. A word neither of them is documented to
  * produce returns null and the reading is discarded, rather than being passed
@@ -222,7 +222,7 @@ export class ForgeState {
    *
    *   `config` may be a **reader** rather than a config, and the server passes
    *   one: the file is the user's to edit while the monitor runs, so a captured
-   *   answer would leave `nmmon doctor` reporting an opt-in the running server
+   *   answer would leave `raise doctor` reporting an opt-in the running server
    *   never saw. The one-shot CLI has nothing to re-read and passes the config
    *   it already has.
    */
@@ -305,7 +305,7 @@ export class ForgeState {
   /**
    * Ask about everything due, and wait for the answers.
    *
-   * For `nmmon status` and nothing else - it is one shot, so there is no next
+   * For `raise status` and nothing else - it is one shot, so there is no next
    * tick for an answer to arrive on, and no poll loop to protect. The server
    * must never call this.
    *
@@ -428,7 +428,7 @@ export class ForgeState {
    *
    * The scope this needs is `read:pullrequest:bitbucket` and nothing else, which
    * Atlassian documents as *not* implying `read:repository:bitbucket` - so a
-   * token minted for nmmon cannot read the user's source code.
+   * token minted for Raise cannot read the user's source code.
    *
    * @param {ForgeTarget} target
    * @param {ForgeConfig} config

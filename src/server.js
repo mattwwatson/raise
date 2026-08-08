@@ -41,7 +41,7 @@ const MAX_BODY_BYTES = 256 * 1024;
  * A client socket can be gone before we notice - laptop sleep, a dropped
  * network, an abort racing the close handler. Writing to it emits `error` on a
  * response with no listener, which is an uncaught exception and takes the whole
- * monitor down. Since nmmon is the thing that tells you a session is blocked,
+ * monitor down. Since Raise is the thing that tells you a session is blocked,
  * it dying is silent: you just stop being told anything.
  *
  * @param {import('node:http').ServerResponse} client
@@ -90,11 +90,11 @@ export function createMonitorServer({
   execAsync = defaultExecAsync,
   // Injected for the same reason `exec` is, and guarded the same way: the suite
   // passes one that fails the test if it is ever called, which is what proves an
-  // unconfigured nmmon makes no outbound request at all.
+  // unconfigured Raise makes no outbound request at all.
   fetch = globalThis.fetch,
-  // A reader rather than a reading: `~/.nmmon/config.json` is the one file the
+  // A reader rather than a reading: `~/.raise/config.json` is the one file the
   // user writes, and the README tells them to write it, so an answer captured
-  // here would leave `nmmon doctor` reporting an opt-in this server never saw
+  // here would leave `raise doctor` reporting an opt-in this server never saw
   // until somebody restarted it. Costs a `stat` a second - see
   // `watchForgeConfig`. Tests pass a fixed config, which is accepted too.
   forgeConfig = watchForgeConfig(),
@@ -109,7 +109,7 @@ export function createMonitorServer({
   const transcripts = new TranscriptReader({ files: transcriptFiles });
   const branches = new GitBranch({ files: gitFiles });
   const lavish = new LavishState({ execAsync });
-  // Off unless `~/.nmmon/config.json` turns it on, and inert rather than absent
+  // Off unless `~/.raise/config.json` turns it on, and inert rather than absent
   // when it is off: every method returns immediately and the readings map stays
   // empty, so `buildRows` behaves exactly as it did before this existed.
   const forge = new ForgeState({ execAsync, fetch, config: forgeConfig });
@@ -294,7 +294,7 @@ export function createMonitorServer({
       return;
     }
 
-    // Unauthenticated liveness probe, so `nmmon doctor` can tell "not running"
+    // Unauthenticated liveness probe, so `raise doctor` can tell "not running"
     // from "running but I have the wrong token". Reveals nothing.
     if (url.pathname === '/health') {
       res.writeHead(200, { 'content-type': 'application/json' });
@@ -358,7 +358,7 @@ export function createMonitorServer({
       return;
     }
     // The page needs the token to open the event stream and to focus.
-    html = html.replace('__NMMON_TOKEN__', pageToken);
+    html = html.replace('__RAISE_TOKEN__', pageToken);
     res.writeHead(200, {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': 'no-store',
@@ -581,7 +581,7 @@ export function createMonitorServer({
     for (const client of [...clients]) dropClient(client);
     clients.clear();
     nmState.close();
-    // Leaving server.json behind is not just a stale URL in `nmmon open`: every
+    // Leaving server.json behind is not just a stale URL in `raise open`: every
     // hook keeps posting the session id, cwd, transcript path and the token to
     // whatever binds this port next.
     if (writtenInfoPath) {

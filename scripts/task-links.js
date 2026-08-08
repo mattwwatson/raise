@@ -64,7 +64,7 @@ export const SKIP_DIRS = Object.freeze(
     '.git',
     'coverage',
     'dist',
-    '.nmmon',
+    '.raise',
     '.lavish',
     'test',
     'tests',

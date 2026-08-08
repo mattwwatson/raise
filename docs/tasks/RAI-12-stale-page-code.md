@@ -92,7 +92,7 @@ Decisions for whoever picks this up - **bring these back rather than choosing al
 
 ## Secondary finding, unrelated but noticed
 
-Two `nmmon serve` processes were running:
+Two `raise serve` processes were running:
 
 | pid | started | cwd | port |
 | --- | --- | --- | --- |
@@ -101,7 +101,7 @@ Two `nmmon serve` processes were running:
 
 The second is a stray started inside a **no-mistakes pipeline worktree** - presumably by a test
 or an agent during a run - and it was still alive holding no port. This is the case `README.md`
-already documents (*"a leftover started under a different `NMMON_HOME`"*), so the diagnosis
+already documents (*"a leftover started under a different `RAISE_HOME`"*), so the diagnosis
 works, but it is worth asking why a pipeline run leaves a server behind at all. A monitor that
 accumulates orphan copies of itself on a machine it is meant to be watching is its own small
 problem. **Investigate separately; do not fold it into this fix.**

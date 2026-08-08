@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * The Claude Code hook that tells nmmon about this session.
+ * The Claude Code hook that tells Raise about this session.
  *
  * Two hard rules, because this runs inside somebody's editing loop:
  *
@@ -30,7 +30,7 @@ function quietExit() {
 }
 
 function readServerInfo() {
-  const home = process.env.NMMON_HOME || join(homedir(), '.nmmon');
+  const home = process.env.RAISE_HOME || join(homedir(), '.raise');
   try {
     return JSON.parse(readFileSync(join(home, 'server.json'), 'utf8'));
   } catch {
@@ -109,7 +109,7 @@ async function main() {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-nmmon-token': info.token,
+        'x-raise-token': info.token,
       },
       body: JSON.stringify(body),
       signal: controller.signal,

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readForgeConfig, watchForgeConfig } from '../src/forge-config.js';
 
 /**
- * A fake `~/.nmmon/config.json`.
+ * A fake `~/.raise/config.json`.
  *
  * `mode` is the full stat mode, so the tests say `0o100600` the way the
  * filesystem does rather than the permission bits alone - the guard masks it
@@ -34,7 +34,7 @@ test('no config file at all is the default, and says nothing about itself', () =
 
 test('a file anyone else on the machine can read is refused whole', () => {
   const config = readForgeConfig({
-    path: '/home/x/.nmmon/config.json',
+    path: '/home/x/.raise/config.json',
     files: files(JSON.stringify({ forge: { enabled: true } }), 0o100644),
   });
   assert.equal(config.enabled, false);
@@ -44,7 +44,7 @@ test('a file anyone else on the machine can read is refused whole', () => {
 
 test('the mode guard is about other users, so group-readable is refused too', () => {
   const config = readForgeConfig({
-    path: '/home/x/.nmmon/config.json',
+    path: '/home/x/.raise/config.json',
     files: files(JSON.stringify({ forge: { enabled: true } }), 0o100640),
   });
   assert.equal(config.enabled, false);
@@ -56,7 +56,7 @@ test('an unsafe mode takes the opt-in with it, not just the credential', () => {
   // file unsafe, teaches nobody to fix it - and the credential that is already
   // exposed is exposed either way.
   const config = readForgeConfig({
-    path: '/home/x/.nmmon/config.json',
+    path: '/home/x/.raise/config.json',
     files: files(
       JSON.stringify({ forge: { enabled: true, bitbucket: { email: 'a@b.c', token: 't' } } }),
       0o100644,
@@ -136,7 +136,7 @@ test('a malformed file is named rather than silently ignored', () => {
 // ------------------------------------------------- the file, while it changes
 //
 // The user writes this file, and the README tells them to. An answer captured
-// when the server started is one `nmmon doctor` and the running server disagree
+// when the server started is one `raise doctor` and the running server disagree
 // about until somebody restarts it, which is the confident-wrong shape this
 // codebase is built against.
 

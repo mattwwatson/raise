@@ -185,23 +185,23 @@ pull requests"*, and explicitly *"does not imply the `read:repository:bitbucket`
 non-implication is the good news - reading a pull request needs **no** repository read, no
 source access and no workspace access. `GET /2.0/repositories/{workspace}/{repo}/pullrequests/{id}`
 lists `pullrequest` (the classic name for the same thing) as its required scope. There is no
-narrower option: Atlassian bundles commenting into the read scope, and nmmon simply never writes.
+narrower option: Atlassian bundles commenting into the read scope, and Raise simply never writes.
 
 **7. The Bitbucket credential is a *pair*, not an opaque string.** Basic auth needs the
 Atlassian account email as well as the token. That is a design input for decision 2 rather than
-a detail - it rules out "one line in a file", the shape `~/.nmmon/token` uses.
+a detail - it rules out "one line in a file", the shape `~/.raise/token` uses.
 
 **8. Rate limits.** GitHub: 5000/hour authenticated. Bitbucket: **1000/hour** baseline for
 repository data, measured against the user id on a one-hour rolling window. Bitbucket is the
 binding constraint, and the volumes under decision 4 are nowhere near it.
 
-**9. `src/exec.js` spawns with no `env` option, so every child inherits nmmon's entire
+**9. `src/exec.js` spawns with no `env` option, so every child inherits Raise's entire
 environment.** That is `ps`, `tmux`, `osascript`, `gh`, `lavish-axi` and `no-mistakes axi
-status` - several of them on the poll loop, every second. Anything in nmmon's environment is
+status` - several of them on the poll loop, every second. Anything in raise's environment is
 handed to all of them. This is the fact decision 2 turns on, and it inverts the intuitive answer.
 
-**10. No forge speaks nmmon's vocabulary.** Bitbucket says `OPEN` / `MERGED` / `DECLINED` /
-`SUPERSEDED`; GitHub says `OPEN` / `CLOSED` / `MERGED`; nmmon and no-mistakes say `open` /
+**10. No forge speaks Raise's vocabulary.** Bitbucket says `OPEN` / `MERGED` / `DECLINED` /
+`SUPERSEDED`; GitHub says `OPEN` / `CLOSED` / `MERGED`; Raise and no-mistakes say `open` /
 `merged` / `closed` / `none`. Two normalising boundaries, so two typedefs for data arriving from
 outside, per the convention in `AGENTS.md`.
 
@@ -219,7 +219,7 @@ token path was built.** What is recorded below is the reasoning as it was put; t
 *Reading A:* `gh` is the whole GitHub path. One route, and no credential ever enters our process.
 *Reading B:* `gh` first, with a REST call on `GH_TOKEN` / `GITHUB_TOKEN` when `gh` is absent.
 
-**The rule is not "how many paths" - it is whether nmmon ever holds a GitHub credential it was
+**The rule is not "how many paths" - it is whether Raise ever holds a GitHub credential it was
 not already handed.** Paths are cheap here: the Bitbucket half needs a `fetch` client regardless,
 so GitHub over REST is one URL and two fields on top of something already built. Custody is what
 is expensive, and it is what the spec's preference for `gh` is actually about.
@@ -243,14 +243,14 @@ to reopen rather than a gap to fill.
 
 The pieces are an opt-in switch and, from **fact 7**, a Bitbucket credential that is a pair.
 
-*Reading A:* one file, `~/.nmmon/config.json`, `0600`, holding switch and credential.
-*Reading B:* no file at all - switch and credential are both environment variables nmmon
+*Reading A:* one file, `~/.raise/config.json`, `0600`, holding switch and credential.
+*Reading B:* no file at all - switch and credential are both environment variables Raise
 documents by name.
 *Reading C:* split - the file holds the switch and the email, the environment holds the secret.
 
-**The rule is fact 9.** nmmon's own `exec.js` spawns children with the inherited environment,
+**The rule is fact 9.** Raise's own `exec.js` spawns children with the inherited environment,
 on the poll loop, into `ps`, `tmux`, `osascript`, `gh`, `lavish-axi` and `no-mistakes`. **A
-credential in nmmon's environment is a credential handed to every one of those processes, for
+credential in Raise's environment is a credential handed to every one of those processes, for
 as long as the monitor runs.** A credential read out of a `0600` file into a variable and put
 into a `fetch` header is in one process and in no environment at all.
 
@@ -259,8 +259,8 @@ the secret furthest, and the only fix for it would be to make `exec.js` filter i
 changing the one place that runs commands to contain a credential we chose to put there. That is
 the problem inverted.
 
-*Recommended, and **ruled: A**.* `~/.nmmon/config.json`, written `0600` exactly as `readOrCreateToken`
-already writes `token`, is the only place a Bitbucket credential lives. nmmon **refuses to read
+*Recommended, and **ruled: A**.* `~/.raise/config.json`, written `0600` exactly as `readOrCreateToken`
+already writes `token`, is the only place a Bitbucket credential lives. Raise **refuses to read
 the file at all if its mode is group- or other-readable** and says so once - the ssh rule, and the
 only thing that makes a documented `0600` more than a comment, since a file can be created
 correctly and chmodded later. There is deliberately **no environment fallback for the Bitbucket
@@ -270,7 +270,7 @@ The asymmetry with decision 1 is intended and worth stating in `AGENTS.md`: **Gi
 may come from the environment because it is already there and `gh` would read it regardless;
 Bitbucket's may not, because we would be the one putting it there.**
 
-Two consequences that follow: `nmmon doctor` reports whether the feature is configured and whether
+Two consequences that follow: `raise doctor` reports whether the feature is configured and whether
 the file's mode is safe, and never any part of a value; and the configuration never enters the SSE
 frame, which already excludes it by construction since only `Row` crosses.
 
@@ -336,7 +336,7 @@ ever wrong.
 - **`src/forge.js`**, following `LavishState` exactly: constructed with `{execAsync, fetch,
   config}`, fired at most once per interval **off** the poll path, never awaited, the page using
   the last answer. Neither `exec.js` nor `globalThis.fetch` is imported there; both are defaulted
-  at the edge in `server.js` and `bin/nmmon.js`.
+  at the edge in `server.js` and `bin/raise.js`.
 - **`buildRows` gains a map of forge readings keyed by URL**, consulted ahead of the three existing
   sources. It stays pure - the readings arrive as a parameter, like `reviewUrls` does.
 - **`server.test.js` gains a sibling to its `exec` guard**: `fetch: () => assert.fail('no outbound
@@ -360,16 +360,16 @@ Two edits, neither of them a deletion.
 
 **In "Security"**, a new paragraph after the one about the hook payload:
 
-> **One optional feature sends anything at all, and it is off until you configure it.** nmmon can
+> **One optional feature sends anything at all, and it is off until you configure it.** Raise can
 > ask GitHub or Bitbucket whether a pull request already on your dashboard is still open - once a
 > no-mistakes run ends nothing is watching it, so a stored "open" can be days old. What goes out is
 > that pull request's own URL, the one the row already links to, to the forge that hosts it.
 > Nothing else: no transcript, no prompt text, no file contents, no branch names, no list of your
 > repositories, and no request to any host other than the forge in the URL. With it off - which is
-> the default - nmmon makes no outbound network request of any kind. GitHub goes through your own
-> `gh` login, so nmmon never sees a GitHub credential at all; Bitbucket needs an API token with the
+> the default - Raise makes no outbound network request of any kind. GitHub goes through your own
+> `gh` login, so Raise never sees a GitHub credential at all; Bitbucket needs an API token with the
 > single scope `read:pullrequest:bitbucket`, which grants no access to your source code, kept
-> `0600` in `~/.nmmon/config.json`, never logged, never echoed, and never sent anywhere but
+> `0600` in `~/.raise/config.json`, never logged, never echoed, and never sent anywhere but
 > Bitbucket.
 
 ---
@@ -433,14 +433,14 @@ that is the acceptance criterion the exception was found by: **this may never le
 current than it found it**, so a stale forge reading does not displace a fresh local one either.
 
 **The config file is re-read while the monitor runs.** It was read once when the server was
-constructed, which meant `nmmon doctor` - which re-reads it every time - could report an opt-in
+constructed, which meant `raise doctor` - which re-reads it every time - could report an opt-in
 the poll loop had never seen. Three surfaces, one story: `ForgeState` takes a reader
 (`watchForgeConfig`), the cost is one `stat` per poll, and only the positive case is cached so a
 file written later is still noticed. A changed file also clears the failure backoff, so a
 corrected credential is not a fifteen-minute wait.
 
 **A settled lookup is no longer retained.** `#pending` existed for the one-shot CLI's `settle`,
-which the server never calls - so `nmmon serve` accumulated a promise per lookup per pull
+which the server never calls - so `raise serve` accumulated a promise per lookup per pull
 request per minute, forever. Each entry now removes itself.
 
 ### The minimum Bitbucket scope, and why it is better news than expected
@@ -448,16 +448,16 @@ request per minute, forever. Each entry now removes itself.
 **`read:pullrequest:bitbucket`, on its own.** Atlassian's API token permission reference:
 *"Allows viewing of pull requests, plus the ability to comment on pull requests"*, and
 explicitly *"does not imply the `read:repository:bitbucket` scope"*. That non-implication is
-the part worth knowing - a token minted for nmmon **cannot read the user's source code**, which
+the part worth knowing - a token minted for Raise **cannot read the user's source code**, which
 is a much easier thing to ask somebody to create. There is no narrower option: Atlassian bundles
-commenting into the read scope, and nmmon simply never writes.
+commenting into the read scope, and Raise simply never writes.
 
 Two facts with a shelf life, both checked on 07/08/2026 rather than recalled:
 
 - **App passwords are gone**, not going: brownouts from 09/06/2026, removal completed
   28/07/2026. The credential is an Atlassian API token, sent as HTTP Basic auth with the
   account email - so it is a **pair**, which is why the config block has two fields and why
-  `~/.nmmon/token`'s one-line shape could not be reused.
+  `~/.raise/token`'s one-line shape could not be reused.
 - **Rate limits**: Bitbucket 1000/hour keyed on the user, GitHub 5000/hour. Bitbucket binds, and
   the cadence chosen (a minute for open pull requests, never again once merged, fifteen minutes
   after a failure) puts a realistic page an order of magnitude under it.
@@ -467,7 +467,7 @@ Two facts with a shelf life, both checked on 07/08/2026 rather than recalled:
 - **No GitHub token path.** Ruled, and see decision 1 - it is a decision to reopen, not a gap.
 - **No page marker saying an answer came from the forge.** One answer per fact; the chip has
   always been gated on one boolean and the forge just makes it true where nothing else could.
-- **No warning banner.** A `problem` from the config reader reaches `nmmon doctor` and nowhere
+- **No warning banner.** A `problem` from the config reader reaches `raise doctor` and nowhere
   else, and is set only when somebody has evidently tried to configure this and it is not
   working. The page stays silent, the way it does about no-mistakes and Lavish.
 - **No forge beyond github.com and bitbucket.org.** A GitHub Enterprise host is not github.com,

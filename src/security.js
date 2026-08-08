@@ -53,7 +53,7 @@ export function tokenMatches(provided, expected) {
 }
 
 export function extractToken(req, url) {
-  const header = req.headers['x-nmmon-token'];
+  const header = req.headers['x-raise-token'];
   if (typeof header === 'string' && header) return header;
   return url.searchParams.get('t') || '';
 }

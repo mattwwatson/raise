@@ -647,7 +647,7 @@ test('two runs on one checkout land on the worktrees that started them', () => {
   // the link by recency or parkedness alone hands the parked run to both trees
   // and leaves the other with no pipeline at all - the failure the link was
   // added to fix, reproduced through the link. Ownership is deliberately empty
-  // here: `nmmon status` is one-shot and has no memory of it, so the branch has
+  // here: `raise status` is one-shot and has no memory of it, so the branch has
   // to be what separates them.
   const rows = build({
     sessions: [
@@ -2048,7 +2048,7 @@ test('an unattributable run offers no dismissal - there is no session to answer'
 
 test('a session with no announcement to answer cannot be dismissed', () => {
   // A record from a Claude Code old enough not to have sent one, or one written
-  // before nmmon recorded it. There is nothing to key a dismissal on, so no
+  // before Raise recorded it. There is nothing to key a dismissal on, so no
   // control is offered rather than one keyed on a guess.
   const [row] = build({
     sessions: [nudged({ blockAnnouncedAt: null })],

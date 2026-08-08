@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>nmmon</title>
+    <title>Raise</title>
     <link id="favicon" rel="icon" href="data:," />
     <style>
       :root {
@@ -759,7 +759,7 @@
   </head>
   <body>
     <header>
-      <h1>nmmon</h1>
+      <h1>Raise</h1>
       <div class="counts" id="counts"></div>
       <div class="spacer"></div>
       <button id="notify">Enable alerts</button>
@@ -776,7 +776,7 @@
     <div class="toast" id="toast"></div>
 
     <script type="module">
-      const TOKEN = '__NMMON_TOKEN__';
+      const TOKEN = '__RAISE_TOKEN__';
 
       // Imported with the token, so serving it needs no exception to the rule
       // that /health is the only unauthenticated route.
@@ -924,7 +924,7 @@
         try {
           const res = await fetch('/focus?t=' + TOKEN, {
             method: 'POST',
-            headers: { 'content-type': 'application/json', 'x-nmmon-token': TOKEN },
+            headers: { 'content-type': 'application/json', 'x-raise-token': TOKEN },
             body: JSON.stringify({ sessionId: row.sessionId }),
           });
           const data = await res.json();
@@ -938,7 +938,7 @@
             toast(data.hint ? data.reason + '  ->  ' + data.hint : data.reason, true);
           }
         } catch (err) {
-          toast('Could not reach nmmon: ' + err.message, true);
+          toast('Could not reach Raise: ' + err.message, true);
         }
       }
 
@@ -955,7 +955,7 @@
         try {
           const res = await fetch('/dismiss?t=' + TOKEN, {
             method: 'POST',
-            headers: { 'content-type': 'application/json', 'x-nmmon-token': TOKEN },
+            headers: { 'content-type': 'application/json', 'x-raise-token': TOKEN },
             body: JSON.stringify({ sessionId: row.sessionId }),
           });
           const data = await res.json();
@@ -964,11 +964,11 @@
           // request triggers.
           if (!data.ok) toast(data.reason, true);
         } catch (err) {
-          toast('Could not reach nmmon: ' + err.message, true);
+          toast('Could not reach Raise: ' + err.message, true);
         }
       }
 
-      // The PR link comes from the no-mistakes database, which nmmon only ever
+      // The PR link comes from the no-mistakes database, which Raise only ever
       // reads. The page allows inline script, so a "javascript:" value in that
       // column would run in the origin holding the monitor token. Only ever
       // navigate to the web.
@@ -1435,7 +1435,7 @@
         // Both states mean a person is the blocker, so both belong in the count
         // you see from another tab.
         const wantsYou = (s.blocked || 0) + (s.review || 0);
-        document.title = wantsYou ? '(' + wantsYou + ') nmmon' : 'nmmon';
+        document.title = wantsYou ? '(' + wantsYou + ') Raise' : 'Raise';
         showFavicon();
 
         rowsEl.innerHTML = '';

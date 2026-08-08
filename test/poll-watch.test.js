@@ -150,7 +150,7 @@ test('isPipelineCommand matches no-mistakes itself, not talk about it', () => {
   // ON no-mistakes, which says the word constantly.
   assert.equal(isPipelineCommand('grep -rn "no-mistakes" src/'), false);
   assert.equal(isPipelineCommand('npm test --prefix /Users/x/work/no-mistakes-monitor'), false);
-  assert.equal(isPipelineCommand('node /Users/x/work/no-mistakes-monitor/bin/nmmon.js status'), false);
+  assert.equal(isPipelineCommand('node /Users/x/work/no-mistakes-monitor/bin/raise.js status'), false);
   assert.equal(
     isPipelineCommand('/bin/zsh -c eval \'no-mistakes axi respond --instructions "..."\''),
     false,

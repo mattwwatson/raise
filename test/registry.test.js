@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { SessionRegistry, stateForEvent, isSafeSessionId } from '../src/registry.js';
 
 function scratch() {
-  const dir = mkdtempSync(join(tmpdir(), 'nmmon-test-'));
+  const dir = mkdtempSync(join(tmpdir(), 'raise-test-'));
   return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 

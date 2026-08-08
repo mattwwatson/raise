@@ -2,7 +2,7 @@
  * Installing the Claude Code hooks.
  *
  * Asking every colleague to hand-edit settings.json is how this ends up broken
- * on four machines, so nmmon merges the entries itself - idempotently, showing
+ * on four machines, so Raise merges the entries itself - idempotently, showing
  * what it will change, and keeping a backup.
  *
  * The merge is a pure function so it can be tested without a real settings
@@ -34,7 +34,7 @@ export const HOOK_EVENTS = [
 ];
 
 /** Anything containing this is one of ours and may be replaced on reinstall. */
-export const HOOK_MARKER = 'nmmon-hook.js';
+export const HOOK_MARKER = 'raise-hook.js';
 
 export function hookCommand(nodePath, scriptPath) {
   return `${quoteIfNeeded(nodePath)} ${quoteIfNeeded(scriptPath)}`;
@@ -60,7 +60,7 @@ function containsOurHook(group) {
  * Deliberately three states rather than a boolean. `HOOK_EVENTS` grows, and
  * every time it does, every existing installation is momentarily short of one -
  * so an all-or-nothing answer reports a working setup as "not installed", and
- * the copy that goes with that tells the user nmmon cannot see when Claude is
+ * the copy that goes with that tells the user Raise cannot see when Claude is
  * waiting and cannot focus windows. Neither is true while `SessionStart` and
  * `Notification` are still there; the signal just arrives a few seconds later.
  * The re-run still needs asking for, so `missing` names what it will add.
@@ -143,7 +143,7 @@ export function readSettings(settingsPath) {
   } catch (err) {
     throw new Error(
       `${settingsPath} is not valid JSON (${err.message}). Fix it before installing hooks - ` +
-        'nmmon will not overwrite a file it cannot parse.',
+        'Raise will not overwrite a file it cannot parse.',
     );
   }
 }
@@ -155,7 +155,7 @@ export function writeSettings(settingsPath, settings, { backup = true } = {}) {
   mkdirSync(dirname(settingsPath), { recursive: true });
   let backupPath = null;
   if (backup && existsSync(settingsPath)) {
-    backupPath = `${settingsPath}.nmmon-backup`;
+    backupPath = `${settingsPath}.raise-backup`;
     copyFileSync(settingsPath, backupPath);
   }
   writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);

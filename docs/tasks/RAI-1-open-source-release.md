@@ -16,7 +16,7 @@ the record of *why* is the part worth keeping.
 
 ## The decision
 
-`nmmon` today is framed as an accessory to `no-mistakes`. The pi work makes that framing
+`raise` today is framed as an accessory to `no-mistakes`. The pi work makes that framing
 wrong: once two harnesses are supported it is a category, not a plugin. The generic product
 is one sentence:
 
@@ -76,7 +76,7 @@ pointer. Option B on evidence of demand, not speculation. Do not let it delay th
 ### 0.5 pi's event mechanism - answered
 
 pi has an `extensions` array in its own `settings.json`, and the working tree already
-registers into it: `src/pi-extension.js` installs the path, `hooks/nmmon-pi-extension.js`
+registers into it: `src/pi-extension.js` installs the path, `hooks/raise-pi-extension.js`
 posts the same wire format the Claude Code hook posts. So there is no missing plumbing and no
 second parser. This is not an open question any more.
 
@@ -137,9 +137,9 @@ dashboard. This phase is entirely test-driven and does not touch naming.
 - Test first: a scratch `NM_HOME` with **no database at all**. Assert the server starts, the
   poll loop runs, sessions appear, and nothing warns or degrades visibly. The absent case is
   different from the present-but-wrong-schema case that `nm-state.js` already handles.
-- Audit `src/nm-state.js`, `src/poll-watch.js`, `src/dashboard.js` and `bin/nmmon.js` for
+- Audit `src/nm-state.js`, `src/poll-watch.js`, `src/dashboard.js` and `bin/raise.js` for
   paths that assume a run table exists.
-- `nmmon doctor` must report a missing no-mistakes as **normal**, not as a fault.
+- `raise doctor` must report a missing no-mistakes as **normal**, not as a fault.
 - Check the `no-mistakes axi status` fallback does not shell out pointlessly when the binary
   is absent.
 
@@ -190,7 +190,7 @@ presence and a hint - which is still infinitely better than a blank page.
 
 ### 1.5 Gate
 
-`npm test` and `npm run typecheck` green, plus a **manual run on a scratch `NMMON_HOME` and
+`npm test` and `npm run typecheck` green, plus a **manual run on a scratch `RAISE_HOME` and
 `NM_HOME` with no no-mistakes and no lavish**, eyeballed in the browser. The test suite cannot
 tell you the page looks sane with three sources missing.
 
@@ -203,17 +203,17 @@ Mechanical, but wide. Do it in one commit so bisect stays useful.
 ### 2.1 Surfaces the rename touches
 
 - `package.json`: `name`, `bin` key, `description`
-- `bin/nmmon.js` → renamed
-- `hooks/nmmon-hook.js` → renamed, **and the path recorded in every user's
+- `bin/raise.js` → renamed
+- `hooks/raise-hook.js` → renamed, **and the path recorded in every user's
   `settings.json`**
-- `src/config.js`: `NMMON_HOME`, `NMMON_PORT`, and `~/.nmmon/` (token, `server.json`)
-- `.nmmon-backup` suffix in `src/hooks.js`
+- `src/config.js`: `RAISE_HOME`, `RAISE_PORT`, and `~/.raise/` (token, `server.json`)
+- `.raise-backup` suffix in `src/hooks.js`
 - `README.md`, `AGENTS.md`, `CLAUDE.md`, every test file, every error string
 
 ### 2.2 The migration trap
 
-Anyone already running `nmmon` (me, at minimum) has an installed hook pointing at
-`hooks/nmmon-hook.js` and a token in `~/.nmmon/`. A rename silently breaks both, and the
+Anyone already running `raise` (me, at minimum) has an installed hook pointing at
+`hooks/raise-hook.js` and a token in `~/.raise/`. A rename silently breaks both, and the
 failure mode is the worst one this tool has: **a dashboard that looks fine and reports
 nothing**.
 
@@ -369,7 +369,13 @@ expect and is the one that reads as "someone thought about this".
      that are already open - which was the whole objection to `PostToolUse`.
    - The transcript disproof survives intact, as required: it still covers the idle nudge,
      which no permission hook reports.
-4. Claim `raise` - register `raise.dev` and take the npm package name (`raise-cli` or scoped,
-   with `bin: { raise: ... }`). Verified 04/08/2026: domain free, npm `raise` declares no bin.
+4. Claim `raise` on npm - take the package name (`raise-cli` or scoped, with
+   `bin: { raise: ... }`). Verified 04/08/2026: npm `raise` declares no bin; re-checked
+   08/08/2026: `raise-cli` free, `raise` taken at 0.0.0 with no command in it.
    (Blocks Phase 2, and availability is perishable.)
+
+   **No domain is being claimed.** This step used to require registering `raise.dev` as well.
+   Withdrawn 08/08/2026: the name is not going to carry a site, so a domain buys nothing the
+   npm name does not, and leaving it here would block a later reader on a requirement nobody
+   intends to meet. The npm half stands - that is what `bin: { raise: ... }` needs.
 5. Decide 0.3 and 0.4 - terminal PRs yes/no, Linux at launch yes/no.

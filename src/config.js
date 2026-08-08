@@ -10,9 +10,9 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
 
-/** Where nmmon keeps its own state (session records, token, server info). */
+/** Where Raise keeps its own state (session records, token, server info). */
 export function monitorHome() {
-  return process.env.NMMON_HOME || join(homedir(), '.nmmon');
+  return process.env.RAISE_HOME || join(homedir(), '.raise');
 }
 
 /** Where no-mistakes keeps its state. Shared by every repo on the machine. */
@@ -52,7 +52,7 @@ export function tokenPath() {
 }
 
 /**
- * The one file the user writes rather than one nmmon generates.
+ * The one file the user writes rather than one Raise generates.
  *
  * It holds the opt-in for the forge lookup and, for Bitbucket, a credential -
  * which is why it lives here beside `token` and is held to the same `0600`.
@@ -95,9 +95,9 @@ export function portFromFlag(value) {
 }
 
 export function defaultPort() {
-  const raw = process.env.NMMON_PORT;
+  const raw = process.env.RAISE_PORT;
   if (!raw) return DEFAULT_PORT;
-  return parsePort(raw, 'NMMON_PORT');
+  return parsePort(raw, 'RAISE_PORT');
 }
 
 export function ensureDirs() {

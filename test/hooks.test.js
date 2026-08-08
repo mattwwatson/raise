@@ -9,7 +9,7 @@ import {
   HOOK_EVENTS,
 } from '../src/hooks.js';
 
-const COMMAND = '/usr/local/bin/node /opt/nmmon/hooks/nmmon-hook.js';
+const COMMAND = '/usr/local/bin/node /opt/raise/hooks/raise-hook.js';
 
 test('mergeHooks adds an entry for every event', () => {
   const { settings, changes } = mergeHooks({}, COMMAND);
@@ -43,8 +43,8 @@ test('mergeHooks is idempotent', () => {
 });
 
 test('mergeHooks updates our entry in place rather than stacking duplicates', () => {
-  // This is what happens when nmmon is moved or node is upgraded.
-  const first = mergeHooks({}, '/old/node /old/path/nmmon-hook.js').settings;
+  // This is what happens when Raise is moved or node is upgraded.
+  const first = mergeHooks({}, '/old/node /old/path/raise-hook.js').settings;
   const { settings, changes } = mergeHooks(first, COMMAND);
   assert.ok(changes.every((c) => c.startsWith('update')));
   for (const event of HOOK_EVENTS) {
@@ -98,7 +98,7 @@ test('removeHooks on a clean settings file is a no-op', () => {
 
 test('hookInstallState tells an install that has gone stale from no install at all', () => {
   // Adding an event to HOOK_EVENTS leaves every existing installation one
-  // short. Calling that "not installed" would tell the user nmmon cannot see
+  // short. Calling that "not installed" would tell the user Raise cannot see
   // when Claude is waiting and cannot focus windows, when both still work.
   assert.deepEqual(hookInstallState(mergeHooks({}, COMMAND).settings), {
     state: 'installed',
@@ -120,7 +120,7 @@ test('hookInstallState does not count somebody else\'s hooks as ours', () => {
 
 test('hookCommand quotes paths containing spaces', () => {
   assert.equal(
-    hookCommand('/usr/bin/node', '/Users/a b/nmmon/hooks/nmmon-hook.js'),
-    '/usr/bin/node "/Users/a b/nmmon/hooks/nmmon-hook.js"',
+    hookCommand('/usr/bin/node', '/Users/a b/raise/hooks/raise-hook.js'),
+    '/usr/bin/node "/Users/a b/raise/hooks/raise-hook.js"',
   );
 });

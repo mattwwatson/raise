@@ -22,7 +22,7 @@ One parent session (`SLS-75`) with four detached workers spawned from it (`SLS-8
 
 1. raises the **SLS-75** tab, not the worker's;
 2. switches what that tab is showing to the worker, and **leaves it there** - going back to
-   the 75 tab still shows 86, and the only way to get 75 back is to click 75 in nmmon;
+   the 75 tab still shows 86, and the only way to get 75 back is to click 75 in Raise;
 3. leaves the worker's own tab drawing at half width, the remainder filled with `.`, until
    the mouse moves over it.
 
@@ -153,10 +153,10 @@ cannot mis-split.
 
 ## Deliberately not built
 
-- **Clearing a size clamp that is already on screen.** This stops nmmon *creating* the
+- **Clearing a size clamp that is already on screen.** This stops Raise *creating* the
   two-clients-one-window state; one already showing resolves itself on the next redraw. The
   tmux-side lever is `window-size`, and it belongs to whatever set the session up, not here.
-- **`handoff`.** Its link-window topology is deliberate and correct; nmmon was the half
+- **`handoff`.** Its link-window topology is deliberate and correct; Raise was the half
   asking a question with one answer where there are two.
 - **A most-recently-used tie-break** (`#{client_activity}`). The two rules above resolve every
   case observed, and a third would be one more field and one more test for none of them.

@@ -1,8 +1,10 @@
 ---
 ticket: RAI-3
-status: backlog
+status: shipped
+shipped: 2026-08-08
 size: M
 depends: RAI-2
+branch: RAI-3-rename-to-raise
 ---
 # RAI-3 - Rename the project to raise
 
@@ -15,9 +17,14 @@ availability; it is settled, so do not relitigate it. Do the work, get both gate
 
 ## ⚠️ Read this first - the mistake that ruins the whole job
 
-This repo contains **218 references to `no-mistakes`** and only **11 to
-`no-mistakes-monitor`**. `no-mistakes` is a **separate, external tool** that this one reads the
+This repo contains **380 references to `no-mistakes`** and only **16 to
+`no-mistakes-monitor`** (counted over tracked files, excluding this one). `no-mistakes` is a **separate, external tool** that this one reads the
 state of. Its name is not changing.
+
+> The two figures read 218 and 11 when this plan was written on 05/08/2026; the repo has taken
+> RAI-13 and RAI-20 since. Re-counted 08/08/2026 over **tracked** files - the earlier greps also
+> swept `.lavish/`, an untracked scratch artifact - and excluding **this file**, whose prose
+> necessarily mentions both names and would otherwise make its own check drift.
 
 **A blanket find-replace of `no-mistakes` will destroy this repository.** It would break
 `NM_HOME`, the `~/.no-mistakes` database path, the `no-mistakes axi status` fallback command,
@@ -27,14 +34,21 @@ Only these three tokens change:
 
 - `nmmon` (lower) → `raise`
 - `NMMON` (upper) → `RAISE`
-- `no-mistakes-monitor` (the full repo/package name, all 11) → `raise`
+- `no-mistakes-monitor` **where it is the package name** → `raise-cli`, and where it names the
+  *project* in the README title → `Raise`
+
+**`no-mistakes-monitor` does not go to zero, and that is deliberate.** It is also the name of
+the git repository and of the directory a checkout sits in, and neither is being renamed here -
+so the clone URL, the Bitbucket links, the sample dashboard rows showing a checkout's directory
+name, and recorded observations of real paths all keep it. Renaming those would make a true
+statement false. What changes is only where the string names *this package or project*.
 
 **Never touch bare `no-mistakes`.** Verify before committing:
 
 ```sh
-grep -roE "no-mistakes(-monitor)?" --include="*.js" --include="*.md" --include="*.json" \
-  --include="*.html" . | grep -v node_modules | sed 's/.*://' | sort | uniq -c
-# must print 218 no-mistakes and 0 no-mistakes-monitor
+git ls-files | grep -v 'RAI-3-rename' \
+  | xargs grep -roE "no-mistakes(-monitor)?" | sed 's/.*://' | sort | uniq -c
+# bare no-mistakes must be unchanged at 380; no-mistakes-monitor drops 16 -> 12
 ```
 
 Also unchanged: `NM_HOME`, `src/nm-state.js`, `test/nm-state.test.js`, and every `nm-state`
@@ -51,7 +65,11 @@ so** - starting early leaves the user's live installation in a state they must r
    so anything still in flight will conflict with all of it.
 2. **The documentation pass correcting the tool's stated purpose has landed** - see the note
    under *Documentation* below. Renaming stale framing means doing the work twice.
-3. **The npm package name and `raise.dev` are claimed.**
+3. **The npm package name is claimed.** ~~And `raise.dev`.~~ **No domain is being claimed** -
+   withdrawn 08/08/2026, along with the half of RAI-1 step 4 it restated. The npm name is the
+   captain's to take and does not block this work; checked live 08/08/2026, `raise-cli` is
+   free and `raise` is taken at 0.0.0 with no command in it, which is why the package is
+   `raise-cli` and the command is `raise`.
 4. **`uninstall-hooks` has been run against the live installation**, from the checkout the
    installed hooks actually point at. On this machine that was a treehouse worktree, not the
    main checkout - check `~/.claude/settings.json` for the real path. The pi extension in pi's
@@ -195,21 +213,28 @@ outdated one.
 ```sh
 npm test          # all green - note the count, it should not change
 npm run typecheck # tsc --noEmit
+npm run lint      # oxlint
 ```
 
-Plus, all of these must return nothing:
+This must return nothing but this file, which names both sides of the rename by necessity:
 
 ```sh
-grep -rn "nmmon\|NMMON" --include="*.js" --include="*.json" --include="*.html" . | grep -v node_modules
-grep -rn "no-mistakes-monitor" . | grep -v node_modules | grep -v "^./.git"
+git ls-files | xargs grep -ln "nmmon\|NMMON"
 ```
 
-And this must still return 218:
+And bare `no-mistakes` must still be 380 - the number that matters, and the one a careless
+`sed` destroys:
 
 ```sh
-grep -roE "no-mistakes(-monitor)?" --include="*.js" --include="*.md" --include="*.json" \
-  --include="*.html" . | grep -v node_modules | sed 's/.*://' | sort | uniq -c
+git ls-files | grep -v 'RAI-3-rename' \
+  | xargs grep -roE "no-mistakes(-monitor)?" | sed 's/.*://' | sort | uniq -c
+# 380 no-mistakes, 12 no-mistakes-monitor
 ```
+
+> The second figure is **not** zero, and an earlier draft of this plan asked for zero here
+> while also saying to leave the clone URL alone - two instructions that cannot both be met.
+> The 12 that remain all name the git repository, a directory on disk, or a real path in a
+> recorded observation, none of which this change renames. See the note at the top.
 
 **Test count must not change.** A rename that changes it has changed behaviour.
 
@@ -231,3 +256,54 @@ When the gates are green, tell the user they need to:
    a token, a `server.json` and session records, all of which regenerate.
 
 Do not do any of these for them.
+
+---
+
+## Implementation notes
+
+Shipped 08/08/2026 on `RAI-3-rename-to-raise`. 691 tests, typecheck and lint green, and the
+test count is unchanged from before the rename - which is the assertion that this changed no
+behaviour. Every test that moved moved a *string*; not one assertion changed shape.
+
+**The convention chosen, since the plan asked for one to be named: `Raise` is the product,
+`raise` is the command.** The capital is what makes the prose survive the fact that the name
+is also a verb - lowercase, *"raise says so rather than raising an arbitrary window"* reads as
+an instruction. So the name takes a capital wherever it is the subject of a sentence, in code
+comments, user-facing strings and documentation alike, and stays lowercase for the thing you
+type: `raise serve`, `bin/raise.js`, `~/.raise/`, `RAISE_HOME`, `.raise-backup`. It is now
+recorded under *Coding Conventions* in `AGENTS.md`, because it is the kind of thing the next
+session will otherwise get half right.
+
+Applying it was the only part that could not be mechanical. The sweep itself was one
+case-sensitive substitution over the tracked files, but it produced *"Is there an raise on this
+port"* and *"whatever is listening is not raise"*, and it could not tell the new noun from the
+eleven pre-existing English verbs (`raise a window`, `raises that tab`). Those were separated by
+recasing **only lines the sweep had actually changed**, diffed against `HEAD` - which is also
+what caught the four `git mv`-renamed files being silently skipped by a `--diff-filter=M`.
+
+**`no-mistakes` is untouched: 380 before, 380 after.** That was verified by re-running the
+count against `HEAD` rather than asserted.
+
+Three things the plan asked for that turned out to be already done, or not doable as written:
+
+- **The package description needed no rewrite.** The plan says it "leads with no-mistakes";
+  RAI-2 had already replaced it, and it now opens with the agent sessions. Changing it further
+  would have been a purpose correction smuggled into a rename, which the plan forbids.
+- **`no-mistakes-monitor` could not go to zero**, and the plan asked for that while also saying
+  to leave the clone URL alone. Resolved in favour of the clone URL: the *repository* is not
+  being renamed, so the 12 remaining all name the repo, a directory on disk, or a real path in
+  a recorded observation. Only the package name and the README title were the project.
+- **The stated counts were stale** (218/11, written 05/08 before RAI-13 and RAI-20 landed) and
+  have been corrected to the measured 380/12, along with the greps, which now run over tracked
+  files and skip this file - so neither an untracked `.lavish/` artifact nor this plan's own
+  prose about the rename can skew the check it is asking you to run.
+
+**`raise.dev` was withdrawn**, here and from RAI-1 step 4, on the captain's instruction of
+08/08/2026. No domain is being taken; the npm half of that step still stands, and `raise-cli`
+was re-checked free on the same day.
+
+The four-way token contract (`src/security.js`, both reporters, `public/index.html`) moved in
+this one commit, and both markers were renamed with their files. Verified live rather than by
+inspection: a scratch server on port 7813 accepted `x-raise-token`, returned **401** for the old
+`x-nmmon-token`, and a real `hooks/raise-hook.js` invocation registered a session and rendered
+it as a row.

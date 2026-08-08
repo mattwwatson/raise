@@ -4,14 +4,14 @@ import assert from 'node:assert/strict';
 import { parsePort, portFromFlag, defaultPort, DEFAULT_PORT } from '../src/config.js';
 
 function withEnv(value, fn) {
-  const previous = process.env.NMMON_PORT;
-  if (value === undefined) delete process.env.NMMON_PORT;
-  else process.env.NMMON_PORT = value;
+  const previous = process.env.RAISE_PORT;
+  if (value === undefined) delete process.env.RAISE_PORT;
+  else process.env.RAISE_PORT = value;
   try {
     return fn();
   } finally {
-    if (previous === undefined) delete process.env.NMMON_PORT;
-    else process.env.NMMON_PORT = previous;
+    if (previous === undefined) delete process.env.RAISE_PORT;
+    else process.env.RAISE_PORT = previous;
   }
 }
 
@@ -22,7 +22,7 @@ test('a valid port is accepted from either source', () => {
   assert.equal(withEnv(undefined, defaultPort), DEFAULT_PORT);
 });
 
-test('--port gets the same validation as NMMON_PORT', () => {
+test('--port gets the same validation as RAISE_PORT', () => {
   // Unvalidated, `--port abc` became NaN: listen bound a random port, the URL
   // printed as :NaN, and server.json recorded null - so every hook decided the
   // server was not running and session tracking died with no error anywhere.
@@ -39,5 +39,5 @@ test('--port with no value is a typo, not port 1', () => {
 });
 
 test('the offending value is quoted back in the message', () => {
-  assert.throws(() => parsePort('abc', 'NMMON_PORT'), /NMMON_PORT .* got "abc"/);
+  assert.throws(() => parsePort('abc', 'RAISE_PORT'), /RAISE_PORT .* got "abc"/);
 });

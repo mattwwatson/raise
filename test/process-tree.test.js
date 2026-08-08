@@ -61,7 +61,7 @@ test('a path that merely contains .claude is not mistaken for the agent', () => 
   assert.equal(
     looksLikeClaude({
       command: '/usr/local/bin/node',
-      args: '/usr/local/bin/node /Users/x/.claude/tools/nmmon-hook.js',
+      args: '/usr/local/bin/node /Users/x/.claude/tools/raise-hook.js',
     }),
     false,
   );
@@ -72,7 +72,7 @@ test('the pid recorded is the agent, never the shell that ran the hook', () => {
   // session vanish: it exits the moment the hook returns, and a record whose
   // pid is dead is pruned on the next poll.
   const readProcess = fakeTable({
-    900: '800 s004 /bin/sh -c node /opt/nmmon/hooks/nmmon-hook.js',
+    900: '800 s004 /bin/sh -c node /opt/raise/hooks/raise-hook.js',
     800: '700 s004 /usr/local/bin/node /usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js',
     700: '600 s004 -zsh',
   });
@@ -107,7 +107,7 @@ test('no pid at all rather than a pid we cannot vouch for', () => {
 
 test('a claude with no terminal is still identified under a daemon', () => {
   const readProcess = fakeTable({
-    50: '40 ?? /bin/zsh -c node hooks/nmmon-hook.js',
+    50: '40 ?? /bin/zsh -c node hooks/raise-hook.js',
     40: '30 ?? /Users/x/.local/bin/claude -p --dangerously-skip-permissions',
     30: '1 ?? /usr/local/bin/no-mistakes daemon run',
   });
@@ -121,7 +121,7 @@ test('a Claude Desktop session is identified from the app that spawned it', () =
   // bundled copy of Claude Code through a helper, and none of the three has a
   // controlling terminal - so without this the session is a dead card.
   const readProcess = fakeTable({
-    90: '86825 ?? /bin/zsh -c node hooks/nmmon-hook.js',
+    90: '86825 ?? /bin/zsh -c node hooks/raise-hook.js',
     86825:
       '86824 ?? /Users/x/Library/Application Support/Claude/claude-code/2.1.219/claude.app/Contents/MacOS/claude --output-format stream-json --resume=2205e739-08bc-4ee6-a8d4-b15204bab998',
     86824:
@@ -139,7 +139,7 @@ test('a Claude Desktop session is identified from the app that spawned it', () =
 
 test('a session in a terminal is not a desktop one', () => {
   const readProcess = fakeTable({
-    900: '800 s004 /bin/sh -c node hooks/nmmon-hook.js',
+    900: '800 s004 /bin/sh -c node hooks/raise-hook.js',
     800: '700 s004 /usr/local/bin/node /usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js',
     700: '600 s004 -zsh',
   });
@@ -152,7 +152,7 @@ test('a no-mistakes agent under the daemon is not mistaken for the desktop app',
   // from that absence would fire the resume deep link at a daemon session and
   // import somebody's pipeline transcript into the desktop app.
   const readProcess = fakeTable({
-    50: '40 ?? /bin/zsh -c node hooks/nmmon-hook.js',
+    50: '40 ?? /bin/zsh -c node hooks/raise-hook.js',
     40: '30 ?? /Users/x/.local/bin/claude -p --dangerously-skip-permissions',
     30: '1 ?? /usr/local/bin/no-mistakes daemon run',
   });
@@ -162,7 +162,7 @@ test('a no-mistakes agent under the daemon is not mistaken for the desktop app',
 test('hostApp matches a path only the app can occupy, never the word Claude', () => {
   assert.equal(hostApp([{ pid: 1, command: 'claude', args: 'claude --resume' }]), null);
   assert.equal(
-    hostApp([{ pid: 1, command: 'node', args: 'node /Users/x/.claude/hooks/nmmon-hook.js' }]),
+    hostApp([{ pid: 1, command: 'node', args: 'node /Users/x/.claude/hooks/raise-hook.js' }]),
     null,
   );
   assert.equal(hostApp([]), null);

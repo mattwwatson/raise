@@ -93,7 +93,7 @@ $ ps -o pid=,args= -p 49672
 49672 claude --permission-mode acceptEdits fire up firstmate
 ```
 
-and nmmon already records exactly that number:
+and Raise already records exactly that number:
 
 ```
 cwd=/Users/mattw/work/firstmate  host.pid=49672  tmux_pane=%0
@@ -179,7 +179,7 @@ by a restarted first mate is picked up on the next tick, so the old card stops c
 
 `Row.spawnedBy` carries it to both renderers. The page has `SPAWNER_LABELS = { firstmate:
 'firstmate' }` with no fallback, rendering the outlined `--faint` chip before the agent chip;
-`nmmon status` prints the same word dimmed after the session name. Nothing else on the card moved
+`raise status` prints the same word dimmed after the session name. Nothing else on the card moved
 - no title, no ordering, no colour.
 
 Tests are `test/firstmate.test.js` (both markers, both near-misses, the caching and rate-limiting

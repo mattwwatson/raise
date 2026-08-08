@@ -235,7 +235,7 @@ test('a settled lookup is not retained, because the server never drains them', a
 // -------------------------------------------- the config file, while it runs
 //
 // It is the one file the user writes, and the README tells them to write it, so
-// what `nmmon doctor` reports and what the running server does have to be the
+// what `raise doctor` reports and what the running server does have to be the
 // same story. A reader is passed instead of a reading; these say what that buys.
 
 test('turning the lookup on takes effect without a restart', async () => {
