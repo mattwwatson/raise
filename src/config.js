@@ -51,6 +51,18 @@ export function tokenPath() {
   return join(monitorHome(), 'token');
 }
 
+/**
+ * The one file the user writes rather than one nmmon generates.
+ *
+ * It holds the opt-in for the forge lookup and, for Bitbucket, a credential -
+ * which is why it lives here beside `token` and is held to the same `0600`.
+ * See `src/forge-config.js` for why the credential may not come from the
+ * environment instead.
+ */
+export function forgeConfigPath() {
+  return join(monitorHome(), 'config.json');
+}
+
 export const DEFAULT_PORT = 7717;
 
 /**

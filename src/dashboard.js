@@ -15,11 +15,13 @@
 
 import { basename } from 'node:path';
 import { planFocus } from './focus/index.js';
-import { prStateIsCurrent, pullRequestNumber } from './nm-state.js';
+import { PR_STATE_FRESH_MS, prStateIsCurrent, pullRequestNumber } from './nm-state.js';
+import { pullRequestKey } from './forge.js';
 
 /** @typedef {import('./registry.js').Session} Session */
 /** @typedef {import('./nm-state.js').Run} Run */
 /** @typedef {import('./nm-state.js').PullRequest} PullRequest */
+/** @typedef {import('./forge.js').ForgeReading} ForgeReading */
 
 /**
  * How much a row wants a human, most urgent first.
@@ -406,8 +408,58 @@ export function transcriptPullRequest(summary, repoPath, branch, pullRequests = 
  * @param {string} b
  */
 function sameUrl(a, b) {
-  const normalise = (url) => String(url).replace(/\/+$/, '').toLowerCase();
-  return normalise(a) === normalise(b);
+  return pullRequestKey(a) === pullRequestKey(b);
+}
+
+/**
+ * Let the forge overrule whatever the three local sources concluded.
+ *
+ * This is the one place a source is allowed to *assert* rather than only
+ * disprove, and the reason is that the forge is the authority on its own pull
+ * requests where everything else here is a recollection of one. So it replaces
+ * the state outright when it has a reading, and does nothing at all when it has
+ * none - no credential, no `gh`, no network and a rate limit all arrive here as
+ * an absent reading, which is what makes the feature invisible when it is off.
+ *
+ * The link is never touched. It is the one thing the local sources are as good
+ * at, and the row keeps it in every case.
+ *
+ * **A forge reading ages exactly like anybody else's**, with one exception and
+ * one guard, and both come from the same sentence: freshness exists because an
+ * answer can change. It goes through the same `PR_STATE_FRESH_MS` gate the
+ * database does, so a lookup that stops answering - the network gone, the
+ * machine asleep - stops asserting within five minutes and the row falls back to
+ * "was open, last checked". Without that, "the forge wins" would quietly become
+ * "the forge's last answer wins forever", which is RAI-10 again with a new
+ * source.
+ *
+ * **`merged` is the exception, because it cannot un-merge.** `forge.js` never
+ * asks again once it has that answer, so its `observedAt` is the one reading
+ * here that is frozen by design - and aged through the ordinary gate it would be
+ * the one immutable fact guaranteed to expire, taking the MERGED chip off the
+ * row five minutes later and leaving it off for the rest of the day.
+ *
+ * **The guard is that this may never leave a row *less* current than it found
+ * it.** A stale forge reading beside a local source somebody is still actively
+ * re-observing - a live no-mistakes run polls its `ci` step every couple of
+ * minutes - would be the forge making the page worse than the source it
+ * outranks, which is the whole argument for this feature inverted. Outranking is
+ * for deciding between two answers, not for replacing an answer with silence, so
+ * where the forge has nothing current to say and a local source does, the local
+ * reading stands.
+ *
+ * @param {PullRequest|null} pr
+ * @param {Map<string, ForgeReading>} forgeStates
+ * @param {number} now
+ * @returns {PullRequest|null}
+ */
+function withForgeState(pr, forgeStates, now) {
+  if (!pr || forgeStates.size === 0) return pr;
+  const reading = forgeStates.get(pullRequestKey(pr.url));
+  if (!reading) return pr;
+  const current = reading.state === 'merged' || now - reading.observedAt <= PR_STATE_FRESH_MS;
+  if (!current && pr.current) return pr;
+  return { ...pr, state: reading.state, observedAt: reading.observedAt, current };
 }
 
 /** @param {Run|null} run */
@@ -704,6 +756,7 @@ export function attentionFor({
  *          pullRequests?: PullRequest[],
  *          pipelines?: Set<string>,
  *          runOwners?: Map<string, string>,
+ *          forgeStates?: Map<string, ForgeReading>,
  *          spawnedBy?: Map<string, import('./firstmate.js').SpawnedBy|null>}} input
  * @returns {Row[]}
  */
@@ -718,6 +771,7 @@ export function buildRows({
   pullRequests = [],
   pipelines = new Set(),
   runOwners = new Map(),
+  forgeStates = new Map(),
   spawnedBy = new Map(),
 }) {
   /** @type {Row[]} */
@@ -968,16 +1022,25 @@ export function buildRows({
       // in the URL against this path's basename, so handing it a run match that
       // a branch could take away would drop a real review link every time the
       // pipeline was on another branch.
-      pr:
+      //
+      // The forge, when it has been asked and answered, overrules whichever of
+      // the four won - see `withForgeState`. It is applied here rather than
+      // being a fifth entry in the chain because it settles the *state* of a
+      // pull request the chain has already identified, and identifying one is
+      // still these three sources' job.
+      pr: withForgeState(
         (run?.prUrl && run.branch === branch ? pullRequestForRun(run, now) : null) ||
-        matchPullRequest(session.cwd, branch, pullRequests) ||
-        matchPullRequest(mainCheckout, branch, pullRequests) ||
-        transcriptPullRequest(
-          summary,
-          identityRepo?.repoPath || session.cwd,
-          branch,
-          pullRequests,
-        ),
+          matchPullRequest(session.cwd, branch, pullRequests) ||
+          matchPullRequest(mainCheckout, branch, pullRequests) ||
+          transcriptPullRequest(
+            summary,
+            identityRepo?.repoPath || session.cwd,
+            branch,
+            pullRequests,
+          ),
+        forgeStates,
+        now,
+      ),
       lastActivityAt: summary?.lastActivityAt ?? null,
     });
   }
@@ -1045,7 +1108,11 @@ export function buildRows({
       activity: null,
       mode: null,
       reviewUrl: null,
-      pr: pullRequestForRun(run, now) || matchPullRequest(run.repoPath, run.branch, pullRequests),
+      pr: withForgeState(
+        pullRequestForRun(run, now) || matchPullRequest(run.repoPath, run.branch, pullRequests),
+        forgeStates,
+        now,
+      ),
       // The pipeline's agent has a transcript even when nobody else here does,
       // so it is a better account of when this last moved than the run's own
       // clock, which only ticks when a step changes.

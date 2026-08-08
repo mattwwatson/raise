@@ -107,6 +107,7 @@ test('stopping the server removes the file that tells hooks where to post', asyn
       dbPath: join(dir, 'no-such.sqlite'),
       sessionsPath: join(dir, 'sessions'),
       exec: () => assert.fail('no blocking commands from the server'),
+      fetch: () => assert.fail('no outbound requests from the server'),
       execAsync: async () => '',
     });
     const info = await monitor.start();
@@ -139,6 +140,7 @@ test('/dismiss quiets an idle nudge, and a real prompt spends the dismissal', as
       dbPath: join(dir, 'no-such.sqlite'),
       sessionsPath: join(dir, 'sessions'),
       exec: () => assert.fail('no blocking commands from the server'),
+      fetch: () => assert.fail('no outbound requests from the server'),
       execAsync: async () => '',
     });
     await monitor.start();
@@ -222,6 +224,7 @@ test('/focus never runs a synchronous child process', async () => {
       dbPath: join(dir, 'no-such.sqlite'),
       sessionsPath: join(dir, 'sessions'),
       exec: () => assert.fail('no blocking commands from the server'),
+      fetch: () => assert.fail('no outbound requests from the server'),
       execAsync: async (command, _args = []) => {
         ran.push(command);
         return '';
@@ -281,6 +284,7 @@ test('/focus answers a session that is no longer registered', async () => {
       dbPath: join(dir, 'no-such.sqlite'),
       sessionsPath: join(dir, 'sessions'),
       exec: () => assert.fail('no blocking commands from the server'),
+      fetch: () => assert.fail('no outbound requests from the server'),
       execAsync: async () => '',
     });
     await monitor.start();
@@ -313,6 +317,7 @@ test('an event stream survives a client that vanishes mid-broadcast', async () =
       dbPath: join(dir, 'no-such.sqlite'),
       sessionsPath: join(dir, 'sessions'),
       exec: () => assert.fail('no blocking commands from the server'),
+      fetch: () => assert.fail('no outbound requests from the server'),
       execAsync: async () => '',
     });
     await monitor.start();
@@ -361,6 +366,7 @@ test('the keepalive is an event the page can see, not an invisible comment', asy
       sessionsPath: join(dir, 'sessions'),
       keepaliveMs: 40,
       exec: () => assert.fail('no blocking commands from the server'),
+      fetch: () => assert.fail('no outbound requests from the server'),
       execAsync: async () => '',
     });
     await monitor.start();
@@ -403,6 +409,7 @@ test('the page can load the connection module, and only with the token', async (
       dbPath: join(dir, 'no-such.sqlite'),
       sessionsPath: join(dir, 'sessions'),
       exec: () => assert.fail('no blocking commands from the server'),
+      fetch: () => assert.fail('no outbound requests from the server'),
       execAsync: async () => '',
     });
     await monitor.start();
@@ -456,6 +463,7 @@ test('probeHealth identifies a live monitor, with no token', async () => {
       dbPath: join(dir, 'no-such.sqlite'),
       sessionsPath: join(dir, 'sessions'),
       exec: () => assert.fail('no blocking commands from the server'),
+      fetch: () => assert.fail('no outbound requests from the server'),
       execAsync: async () => '',
     });
     await monitor.start();
@@ -531,6 +539,7 @@ test('/recent serves one session"s history, and only to an authenticated caller'
       dbPath: join(dir, 'no-such.sqlite'),
       sessionsPath: join(dir, 'sessions'),
       exec: () => assert.fail('no blocking commands from the server'),
+      fetch: () => assert.fail('no outbound requests from the server'),
       execAsync: async () => '',
       transcriptFiles: {
         stat: () => ({ size: 1, mtimeMs: 1 }),
@@ -635,6 +644,7 @@ test('a pipeline lands on the session that started it, not on its neighbours', a
       dbPath,
       sessionsPath: join(dir, 'sessions'),
       exec: () => assert.fail('no blocking commands from the server'),
+      fetch: () => assert.fail('no outbound requests from the server'),
       execAsync: async (command) => (command === 'ps' ? ps : ''),
     });
     await monitor.start();
@@ -757,6 +767,7 @@ test('a pipeline driven from a worktree lands on the worktree, not on the checko
       dbPath,
       sessionsPath: join(dir, 'sessions'),
       exec: () => assert.fail('no blocking commands from the server'),
+      fetch: () => assert.fail('no outbound requests from the server'),
       execAsync: async (command) => (command === 'ps' ? ps : ''),
     });
     await monitor.start();
@@ -859,6 +870,7 @@ test('one empty reading does not forget who owns what', async () => {
       dbPath,
       sessionsPath: join(dir, 'sessions'),
       exec: () => assert.fail('no blocking commands from the server'),
+      fetch: () => assert.fail('no outbound requests from the server'),
       execAsync: async (command) => (command === 'ps' ? ps : ''),
     });
     await monitor.start();
@@ -966,6 +978,7 @@ test('a session reading we did not get releases nobody', async () => {
       dbPath,
       sessionsPath,
       exec: () => assert.fail('no blocking commands from the server'),
+      fetch: () => assert.fail('no outbound requests from the server'),
       execAsync: async (command) => (command === 'ps' ? ps : ''),
     });
     await monitor.start();
@@ -1042,6 +1055,7 @@ test('a machine with neither no-mistakes nor lavish-axi runs quietly', async () 
       dbPath: join(dir, 'no-such.sqlite'),
       sessionsPath: join(dir, 'sessions'),
       exec: () => assert.fail('no blocking commands from the server'),
+      fetch: () => assert.fail('no outbound requests from the server'),
       execAsync: async (command) => {
         ran.push(command);
         return '';
@@ -1108,6 +1122,7 @@ test('a firstmate crewmate is marked on the page, and its neighbours are not', a
       dbPath: join(dir, 'no-such.sqlite'),
       sessionsPath: join(dir, 'sessions'),
       exec: () => assert.fail('no blocking commands from the server'),
+      fetch: () => assert.fail('no outbound requests from the server'),
       execAsync: async (command) => (command === 'tmux' ? panes : ''),
     });
     await monitor.start();
@@ -1147,6 +1162,155 @@ test('a firstmate crewmate is marked on the page, and its neighbours are not', a
     // And someone with firstmate's source open is not the first mate: the cwd
     // matches, the lock is right there, and the pid in it is somebody else's.
     assert.equal(byId.get('editing-firstmate')?.spawnedBy, null);
+  } finally {
+    await monitor?.stop();
+    if (previousHome === undefined) delete process.env.NMMON_HOME;
+    else process.env.NMMON_HOME = previousHome;
+    cleanup();
+  }
+});
+
+// ------------------------------------------------- the forge lookup, end to end
+
+/**
+ * A checkout with a branch and a transcript that printed its own pull request.
+ *
+ * The transcript source is the one the forge matters most to: nothing is
+ * watching a pull request opened by hand, so its state is never `current` on its
+ * own and the page can only offer "was open, last checked".
+ */
+function checkoutWithPullRequest(repo, url) {
+  const records = [
+    {
+      type: 'assistant',
+      timestamp: '2026-08-07T01:00:00.000Z',
+      message: { content: [{ type: 'text', text: `opened ${url} from feat/live-pr` }] },
+    },
+  ];
+  return {
+    transcriptFiles: {
+      stat: () => ({ size: 1, mtimeMs: 1 }),
+      readTail: () => ({ text: records.map((r) => JSON.stringify(r)).join('\n'), partial: false }),
+    },
+    gitFiles: {
+      stat: (path) => {
+        if (path === join(repo, '.git')) return { size: 0, mtimeMs: 1, isDirectory: true };
+        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+      },
+      readText: (path) => {
+        if (path === join(repo, '.git', 'HEAD')) return 'ref: refs/heads/feat/live-pr\n';
+        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+      },
+    },
+  };
+}
+
+test('with the forge lookup off, a pull request on the page sends nothing anywhere', async () => {
+  // The requirement this feature is held to: a user who never configures it
+  // cannot tell it exists. `fetch` here is the sibling of the `exec` guard the
+  // other tests carry, and it is the half of "byte-identical when disabled"
+  // that the pure tests in dashboard.test.js cannot prove.
+  const { dir, cleanup } = scratch();
+  const previousHome = process.env.NMMON_HOME;
+  process.env.NMMON_HOME = dir;
+  const repo = join(dir, 'widgets');
+  let monitor = null;
+  try {
+    const port = await freePort();
+    const url = 'https://github.com/acme/widgets/pull/41';
+    monitor = createMonitorServer({
+      port,
+      token: 'test-token',
+      dbPath: join(dir, 'no-such.sqlite'),
+      sessionsPath: join(dir, 'sessions'),
+      exec: () => assert.fail('no blocking commands from the server'),
+      execAsync: async (command) => {
+        assert.notEqual(command, 'gh', 'gh must not run when the lookup is off');
+        return '';
+      },
+      fetch: () => assert.fail('no outbound requests from the server'),
+      forgeConfig: { enabled: false, bitbucket: null, problem: null },
+      ...checkoutWithPullRequest(repo, url),
+    });
+    await monitor.start();
+
+    await fetch(`http://127.0.0.1:${port}/event`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-nmmon-token': 'test-token' },
+      body: JSON.stringify({
+        session_id: 'quiet',
+        hook_event_name: 'SessionStart',
+        cwd: repo,
+        transcript_path: join(dir, 'transcript.jsonl'),
+      }),
+    });
+
+    await (await fetch(`http://127.0.0.1:${port}/state?t=test-token`)).json();
+    for (let i = 0; i < 10; i += 1) await nextTick();
+    const body = await (await fetch(`http://127.0.0.1:${port}/state?t=test-token`)).json();
+
+    const row = body.rows.find((r) => r.sessionId === 'quiet');
+    assert.equal(row.pr.url, url, 'the link is there exactly as it was before');
+    assert.equal(row.pr.current, false, 'and nobody is watching it, so the state is not asserted');
+  } finally {
+    await monitor?.stop();
+    if (previousHome === undefined) delete process.env.NMMON_HOME;
+    else process.env.NMMON_HOME = previousHome;
+    cleanup();
+  }
+});
+
+test('with it on, the forge settles a pull request nothing else was watching', async () => {
+  // The case RAI-10 left open: the run has ended, or there never was one, so
+  // there is no observer at all and the page had a link and no way to find out.
+  const { dir, cleanup } = scratch();
+  const previousHome = process.env.NMMON_HOME;
+  process.env.NMMON_HOME = dir;
+  const repo = join(dir, 'widgets');
+  let monitor = null;
+  try {
+    const port = await freePort();
+    const url = 'https://github.com/acme/widgets/pull/41';
+    const ran = [];
+    monitor = createMonitorServer({
+      port,
+      token: 'test-token',
+      dbPath: join(dir, 'no-such.sqlite'),
+      sessionsPath: join(dir, 'sessions'),
+      exec: () => assert.fail('no blocking commands from the server'),
+      execAsync: async (command, args = []) => {
+        if (command !== 'gh') return '';
+        ran.push(args);
+        return JSON.stringify({ state: 'MERGED' });
+      },
+      fetch: () => assert.fail('GitHub goes through gh, never through a request of ours'),
+      forgeConfig: { enabled: true, bitbucket: null, problem: null },
+      ...checkoutWithPullRequest(repo, url),
+    });
+    await monitor.start();
+
+    await fetch(`http://127.0.0.1:${port}/event`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-nmmon-token': 'test-token' },
+      body: JSON.stringify({
+        session_id: 'watched',
+        hook_event_name: 'SessionStart',
+        cwd: repo,
+        transcript_path: join(dir, 'transcript.jsonl'),
+      }),
+    });
+
+    // Asking is what schedules the lookup, so an answer is never in the same
+    // snapshot that asked for it - the arrangement the Lavish link and the
+    // firstmate chip both use. Registering the session has already produced a
+    // snapshot here, so the wait is all that is needed.
+    for (let i = 0; i < 10; i += 1) await nextTick();
+
+    const body = await (await fetch(`http://127.0.0.1:${port}/state?t=test-token`)).json();
+    const row = body.rows.find((r) => r.sessionId === 'watched');
+    assert.deepEqual(ran, [['pr', 'view', url, '--json', 'state']]);
+    assert.equal(row.pr.state, 'merged');
+    assert.equal(row.pr.current, true, 'and now it may be said as the state now');
   } finally {
     await monitor?.stop();
     if (previousHome === undefined) delete process.env.NMMON_HOME;
