@@ -45,7 +45,7 @@ rewrite.
 
 `AGENTS.md:11` still opens:
 
-> `raise` is a single-page monitor for **one developer's machine**.
+> `nmmon` is a single-page monitor for **one developer's machine**.
 
 The sentence following it is now accurate; this clause is not. It predates the decision to
 publish and reads to a contributor as *this is not for you*.

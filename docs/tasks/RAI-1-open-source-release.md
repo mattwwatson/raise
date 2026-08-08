@@ -198,36 +198,37 @@ tell you the page looks sane with three sources missing.
 
 ## Phase 2 - rename and repackage
 
-Mechanical, but wide. Do it in one commit so bisect stays useful.
+**Shipped 08/08/2026 as RAI-3**, in one commit so bisect stays useful. The surfaces it touched,
+the rename map, the four-way token contract and the naming convention it had to settle - `Raise`
+the product, `raise` the command - are all in
+[`RAI-3-rename-to-raise.md`](RAI-3-rename-to-raise.md), and the convention itself now lives under
+*Coding Conventions* in `AGENTS.md`. The inventory that used to sit here named a set of files
+that no longer exists under those names.
 
-### 2.1 Surfaces the rename touches
+### 2.1 The migration trap
 
-- `package.json`: `name`, `bin` key, `description`
-- `bin/raise.js` → renamed
-- `hooks/raise-hook.js` → renamed, **and the path recorded in every user's
-  `settings.json`**
-- `src/config.js`: `RAISE_HOME`, `RAISE_PORT`, and `~/.raise/` (token, `server.json`)
-- `.raise-backup` suffix in `src/hooks.js`
-- `README.md`, `AGENTS.md`, `CLAUDE.md`, every test file, every error string
+The reasoning is kept because it is what decided the shape of the hand-back. Anyone already
+running the old binary had an installed hook pointing at `hooks/nmmon-hook.js` and a token in
+`~/.nmmon/`, and a rename silently breaks both - the failure mode being the worst one this tool
+has: **a dashboard that looks fine and reports nothing**.
 
-### 2.2 The migration trap
+With one existing user, the answer was not a migration shim but `uninstall-hooks` on the old
+name and `install-hooks` on the new one, done deliberately, with no compatibility code. AGENTS.md
+already forbids shims for versions we do not support. RAI-3 found a second thing that does not
+regenerate - the forge `config.json` RAI-13 had put in the same directory - so the steps a human
+has to run are written out in README's *Upgrading from `nmmon`* section, which owns them.
 
-Anyone already running `raise` (me, at minimum) has an installed hook pointing at
-`hooks/raise-hook.js` and a token in `~/.raise/`. A rename silently breaks both, and the
-failure mode is the worst one this tool has: **a dashboard that looks fine and reports
-nothing**.
+### 2.2 Packaging
 
-Since the only existing user is me, the correct answer is not a migration shim - it is
-`uninstall-hooks` on the old name, then `install-hooks` on the new one, done deliberately.
-Note it in the plan, do it, and add no compatibility code. AGENTS.md already forbids shims for
-versions we do not support.
+Done in the same pass: `"private": true` removed, `"license": "UNLICENSED"` → `MIT` with a
+`LICENSE` file, and the `files` array checked against the renames. The package is `raise-cli`
+with `bin: { raise: ... }`, because `raise` is squatted on npm.
 
-### 2.3 Packaging
+Outstanding:
 
-- `"private": true` → remove
-- `"license": "UNLICENSED"` → `MIT`, and add a `LICENSE` file
-- Publish to npm so install is `npx <name> serve` rather than a Bitbucket clone
-- Verify the `files` array still covers everything after the renames
+- Publish to npm so install is `npx raise-cli serve` rather than a Bitbucket clone. The clone
+  URL in the README is deliberately unchanged until then - the git repository is not being
+  renamed here, and guessing at a future URL is worse than an outdated one.
 - New public GitHub repo. Decide whether to carry the git history across - it is good history
   and the commit messages are readable, but check it for anything repo-private first.
 
@@ -266,8 +267,9 @@ corrections are agent context and could not wait for a launch phase.
 
 What remains here, after the rename has landed:
 
-- Add the new name and command throughout, consistently with whatever prose convention the
-  rename chose (`raise` is a verb; see `RENAME.md`).
+- ~~Add the new name and command throughout~~ - done by RAI-3, which also had to pick the prose
+  convention `raise` being a verb forces. It is recorded under *Coding Conventions* in
+  `AGENTS.md`; follow it rather than re-deciding it.
 - Contributor-facing framing: the terminal adapter path per 0.3, and a pointer to
   `CONTRIBUTING.md`.
 
@@ -369,10 +371,11 @@ expect and is the one that reads as "someone thought about this".
      that are already open - which was the whole objection to `PostToolUse`.
    - The transcript disproof survives intact, as required: it still covers the idle nudge,
      which no permission hook reports.
-4. Claim `raise` on npm - take the package name (`raise-cli` or scoped, with
-   `bin: { raise: ... }`). Verified 04/08/2026: npm `raise` declares no bin; re-checked
-   08/08/2026: `raise-cli` free, `raise` taken at 0.0.0 with no command in it.
-   (Blocks Phase 2, and availability is perishable.)
+4. Claim `raise` on npm - take the package name. Verified 04/08/2026: npm `raise` declares no
+   bin; re-checked 08/08/2026: `raise-cli` free, `raise` taken at 0.0.0 with no command in it.
+   RAI-3 has since named the package `raise-cli` with `bin: { raise: ... }`, so what is left is
+   registering it - which no longer blocks Phase 2, but does block publishing, and availability
+   is perishable.
 
    **No domain is being claimed.** This step used to require registering `raise.dev` as well.
    Withdrawn 08/08/2026: the name is not going to carry a site, so a domain buys nothing the

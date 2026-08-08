@@ -320,7 +320,7 @@ trusting `~/.raise/server.json`, and answers with one of three things:
 
 | Message | Means | Do |
 | --- | --- | --- |
-| `raise is already running on port N (pid P)` | your own monitor is up | `raise open` |
+| `Raise is already running on port N (pid P)` | your own monitor is up | `raise open` |
 | `Port N is held by another Raise (pid P) that this installation has no record of` | a leftover started under a different `RAISE_HOME` - usually a test run or a stray agent shell | `kill P`, or `raise serve --port <n>` |
 | `Port N is in use, and whatever is listening is not Raise` | something unrelated | `lsof -nP -iTCP:N -sTCP:LISTEN` |
 
