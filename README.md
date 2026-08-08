@@ -90,12 +90,13 @@ are filtered out, so what you see is what actually passed between you and Claude
 
 **A row links its pull request.** If a branch has one open, the row shows `PR #41` and takes
 you to it. The state is only shown as a badge while somebody is actually watching the PR -
-which means a no-mistakes run still going *and* a reading from the last few minutes. Once the
-run ends no-mistakes stops checking, so a stored "open" can be days out of date; and a run can
-keep running long after anything stopped looking, so being alive is not on its own enough.
-After that the link stays and the state moves into the tooltip as *"was open, last checked 3d
-ago"*. The link outlives the run on purpose: the run is over in minutes, and the review is what
-you are waiting on for the rest of the day.
+which, unless you turn on the forge lookup below, means a no-mistakes run still going *and* a
+reading from the last few minutes. Once the run ends no-mistakes stops checking, so a stored
+"open" can be days out of date; and a run can keep running long after anything stopped
+looking, so being alive is not on its own enough. After that the link stays and the state
+moves into the tooltip as *"was open, last checked 3d ago"*. The link outlives the run on
+purpose: the run is over in minutes, and the review is what you are waiting on for the rest
+of the day.
 
 Pull requests opened outside a no-mistakes run are picked up from the session's own
 transcript, so a plain `gh pr create` still gets a link.
@@ -408,8 +409,9 @@ can ask GitHub or Bitbucket whether a pull request already on your dashboard is 
 once a no-mistakes run ends nothing is watching it, so a stored "open" can be days old. What
 goes out is that pull request's own URL, the one the row already links to, to the forge that
 hosts it. Nothing else: no transcript, no prompt text, no file contents, no branch names, no
-list of your repositories, and no request to any host other than the forge in the URL. With
-it off - which is the default - nmmon makes no outbound network request of any kind. GitHub
+list of your repositories, and no request to any host but that forge's own API -
+`api.github.com`, reached through `gh`, or `api.bitbucket.org`, and nowhere else. With it
+off - which is the default - nmmon makes no outbound network request of any kind. GitHub
 goes through your own `gh` login, so nmmon never sees a GitHub credential at all; Bitbucket
 needs an API token with the single scope `read:pullrequest:bitbucket`, which grants no access
 to your source code, kept `0600` in `~/.nmmon/config.json`, never logged, never echoed, and
