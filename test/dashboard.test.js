@@ -1159,6 +1159,111 @@ test('a run with no observation time at all cannot present a state as current', 
   assert.equal(rows[0].pr.current, false);
 });
 
+// --------------------------------------------------------------- the forge
+//
+// The one source allowed to *assert* a state rather than only disprove one,
+// because it is the authority on its own pull requests where every other source
+// here is a recollection of one.
+
+const forgeReadings = (url, state, observedAt) =>
+  new Map([[String(url).replace(/\/+$/, '').toLowerCase(), { state, observedAt }]]);
+
+test('the forge overrules a live run that says something else', () => {
+  // The residual RAI-10 could not close: for the couple of minutes between a
+  // merge and no-mistakes noticing, the database reading is honestly fresh and
+  // honestly wrong.
+  const rows = build({
+    sessions: [session()],
+    runs: [
+      run({
+        active: true,
+        prUrl: 'https://github.com/acme/repo/pull/9',
+        prState: 'open',
+        prStateObservedAt: 9500,
+      }),
+    ],
+    branches: new Map([['s1', 'main']]),
+    forgeStates: forgeReadings('https://github.com/acme/repo/pull/9', 'merged', 9900),
+    now: 10_000,
+  });
+  assert.equal(rows[0].pr.state, 'merged');
+  assert.equal(rows[0].pr.current, true);
+  assert.equal(rows[0].pr.observedAt, 9900, 'and it reports when *we* asked');
+});
+
+test('the forge answers for a pull request nobody is watching at all', () => {
+  // The bigger prize, and the reason this feature exists: once the run ends -
+  // or for a pull request opened by hand - there is no observer, so the page had
+  // a link and no way to find out. The transcript source is never `current` on
+  // its own.
+  const rows = build({
+    sessions: [session({ cwd: '/Users/x/work/repo' })],
+    runs: [],
+    summaries: new Map([['s1', seen({ url: 'https://github.com/acme/repo/pull/40', number: 40 })]]),
+    branches: new Map([['s1', 'feat/x']]),
+    forgeStates: forgeReadings('https://github.com/acme/repo/pull/40', 'open', 9000),
+    now: 10_000,
+  });
+  assert.equal(rows[0].pr.number, 40);
+  assert.equal(rows[0].pr.state, 'open');
+  assert.equal(rows[0].pr.current, true);
+});
+
+test('a forge reading ages exactly like anybody else"s', () => {
+  // "The forge wins" must not become "the forge's last answer wins forever",
+  // which would be RAI-10 again with a new source. If the lookups stop
+  // answering - the network gone, the laptop asleep - the row goes back to
+  // saying "was open, last checked" within the same five minutes.
+  const rows = build({
+    sessions: [session()],
+    runs: [],
+    summaries: new Map([['s1', seen({ url: 'https://github.com/acme/repo/pull/40', number: 40 })]]),
+    branches: new Map([['s1', 'feat/x']]),
+    forgeStates: forgeReadings('https://github.com/acme/repo/pull/40', 'open', 0),
+    now: 6 * 60 * 1000,
+  });
+  assert.equal(rows[0].pr.state, 'open', 'the reading survives as a past one');
+  assert.equal(rows[0].pr.current, false);
+});
+
+test('a forge reading for some other review changes nothing', () => {
+  const rows = build({
+    sessions: [session()],
+    runs: [
+      run({
+        active: true,
+        prUrl: 'https://github.com/acme/repo/pull/9',
+        prState: 'open',
+        prStateObservedAt: 9500,
+      }),
+    ],
+    branches: new Map([['s1', 'main']]),
+    forgeStates: forgeReadings('https://github.com/acme/repo/pull/11', 'merged', 9900),
+    now: 10_000,
+  });
+  assert.equal(rows[0].pr.state, 'open');
+});
+
+test('no forge readings at all leaves every row exactly as it was', () => {
+  // The feature disabled has to be byte-identical to before it existed. This is
+  // the pure half of that proof; `server.test.js` holds the half that says no
+  // request goes out.
+  const input = {
+    sessions: [session()],
+    runs: [
+      run({
+        active: true,
+        prUrl: 'https://github.com/acme/repo/pull/9',
+        prState: 'open',
+        prStateObservedAt: 9500,
+      }),
+    ],
+    branches: new Map([['s1', 'main']]),
+    now: 10_000,
+  };
+  assert.deepEqual(build({ ...input, forgeStates: new Map() }), build(input));
+});
+
 test('a run does not lend its pull request to a session that has moved on', () => {
   // Observed live: a merged run from twenty minutes earlier put its PR on a
   // session sitting in the same repo on `main`, so the row said `main` and

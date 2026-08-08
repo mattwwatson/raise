@@ -17,6 +17,8 @@ import { SessionRegistry } from './registry.js';
 import { TranscriptReader, defaultFileAccess } from './transcript-reader.js';
 import { GitBranch, defaultGitAccess } from './git-branch.js';
 import { LavishState } from './lavish.js';
+import { ForgeState } from './forge.js';
+import { readForgeConfig } from './forge-config.js';
 import { PollWatch } from './poll-watch.js';
 import { FirstmateWatch } from './firstmate.js';
 import { buildRows, isDismissibleBlock, summarise } from './dashboard.js';
@@ -86,6 +88,11 @@ export function createMonitorServer({
   token = readOrCreateToken(),
   exec = defaultExec,
   execAsync = defaultExecAsync,
+  // Injected for the same reason `exec` is, and guarded the same way: the suite
+  // passes one that fails the test if it is ever called, which is what proves an
+  // unconfigured nmmon makes no outbound request at all.
+  fetch = globalThis.fetch,
+  forgeConfig = readForgeConfig(),
   dbPath = statePath(),
   sessionsPath = sessionsDir(),
   keepaliveMs = KEEPALIVE_MS,
@@ -97,6 +104,10 @@ export function createMonitorServer({
   const transcripts = new TranscriptReader({ files: transcriptFiles });
   const branches = new GitBranch({ files: gitFiles });
   const lavish = new LavishState({ execAsync });
+  // Off unless `~/.nmmon/config.json` turns it on, and inert rather than absent
+  // when it is off: every method returns immediately and the readings map stays
+  // empty, so `buildRows` behaves exactly as it did before this existed.
+  const forge = new ForgeState({ execAsync, fetch, config: forgeConfig });
   const polls = new PollWatch({ execAsync });
   // Reads a tmux pane name once per pane and a pid file once per lock change,
   // so it costs a `list-panes` only when a window we have never seen turns up.
@@ -213,8 +224,16 @@ export function createMonitorServer({
       pullRequests,
       pipelines,
       runOwners: runOwners.owners,
+      forgeStates: forge.readings,
       spawnedBy,
     });
+    // Asking is what schedules the next answer, the same arrangement `lavish.js`
+    // uses: the rows are what say which pull requests are worth a request, so
+    // the set is whatever is actually rendered rather than everything the
+    // database remembers. A URL seen for the first time is answered on a later
+    // tick, and nothing here is awaited - this loop has one second to do
+    // everything and a network round trip does not fit in it.
+    forge.observe(rows.map((row) => row.pr?.url).filter(Boolean));
     return {
       rows,
       summary: summarise(rows),

@@ -27,6 +27,8 @@ import { SessionRegistry } from '../src/registry.js';
 import { TranscriptReader } from '../src/transcript-reader.js';
 import { GitBranch } from '../src/git-branch.js';
 import { LavishState } from '../src/lavish.js';
+import { ForgeState } from '../src/forge.js';
+import { readForgeConfig } from '../src/forge-config.js';
 import { PollWatch } from '../src/poll-watch.js';
 import { FirstmateWatch } from '../src/firstmate.js';
 import { focusSession } from '../src/focus/index.js';
@@ -42,6 +44,7 @@ import {
   portFromFlag,
   ensureDirs,
   piSettingsPath,
+  forgeConfigPath,
 } from '../src/config.js';
 import { buildRows } from '../src/dashboard.js';
 import { RunOwners } from '../src/run-owner.js';
@@ -348,7 +351,7 @@ async function cmdStatus() {
   }
 
   // Reuse the dashboard projection so the CLI and the page can never disagree.
-  const rows = buildRows({
+  const projection = {
     sessions,
     runs,
     summaries,
@@ -359,7 +362,24 @@ async function cmdStatus() {
     pipelines,
     runOwners: runOwners.owners,
     spawnedBy,
-  });
+  };
+  let rows = buildRows(projection);
+
+  // The forge knows which pull requests are still open, and the rows are what
+  // say which ones are worth asking about - so the projection is built once to
+  // find them, and again once the answers are in. Two passes of a pure function
+  // against one network round trip, and it keeps the CLI agreeing with the page
+  // about a pull request rather than being the one renderer that quietly does
+  // not check. Awaiting is right here and wrong in the server: this is one shot,
+  // so there is no later tick for an answer to arrive on.
+  const forge = new ForgeState({ execAsync, fetch, config: readForgeConfig() });
+  if (forge.enabled) {
+    const urls = rows.map((row) => row.pr?.url).filter(Boolean);
+    if (urls.length > 0) {
+      await forge.load(urls);
+      rows = buildRows({ ...projection, forgeStates: forge.readings });
+    }
+  }
 
   if (warning) console.log(`${yellow('Note')} ${warning}\n`);
   if (rows.length === 0) {
@@ -621,6 +641,26 @@ async function cmdDoctor() {
     ok('lavish-axi', 'available');
   } else {
     off('lavish-axi', 'not installed - review gates will not be detected');
+  }
+
+  // The only outbound request nmmon makes, so its default is off and its default
+  // is silent - `off` rather than `warn`, exactly like no-mistakes and Lavish. A
+  // `problem` is different: it is only ever set when somebody has evidently
+  // tried to configure this and it is not working, and the whole point of
+  // refusing an unsafe file mode is that they find out here rather than by
+  // noticing that nothing happens.
+  const forgeConfig = readForgeConfig();
+  if (forgeConfig.problem) {
+    warn('Pull request state', forgeConfig.problem);
+  } else if (!forgeConfig.enabled) {
+    off(
+      'Pull request state',
+      `not enabled - pull request state comes from no-mistakes only (see ${forgeConfigPath()})`,
+    );
+  } else if (forgeConfig.bitbucket) {
+    ok('Pull request state', 'enabled - GitHub through gh, Bitbucket through its API');
+  } else {
+    ok('Pull request state', 'enabled for GitHub through gh; no Bitbucket credential configured');
   }
 
   const settings = readSettingsQuietly(DEFAULT_SETTINGS);
