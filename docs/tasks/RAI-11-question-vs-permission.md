@@ -1,7 +1,8 @@
 ---
 ticket: RAI-11
-status: in-progress
+status: shipped
 branch: RAI-11-question-vs-permission
+shipped: 2026-08-09
 size: S
 depends: -
 ---
@@ -35,12 +36,12 @@ specific, false claim - and the whole design rests on not doing that.
 
 Read from the source, not assumed:
 
-1. **The wording is not ours.** `src/dashboard.js:637` passes the message through verbatim:
+1. **The wording is not ours.** `dashboard.js` passed the message through verbatim:
    ```js
    message: state === 'blocked' ? session.message || null : null,
    ```
-   Nothing in `public/index.html` or `src/` contains the string. It is Claude Code's own
-   `Notification` text.
+   Nothing in `public/index.html` or `src/` contained the string. It is Claude Code's own
+   `Notification` text. *(That line is now `blockReason(...)`; see Implementation notes.)*
 
 2. **`PermissionRequest` carries no message**, so it cannot be the source of the wording. It
    sets the state; the `Notification` arriving a few seconds later supplies the reason.
@@ -240,3 +241,59 @@ npm run typecheck
 
 Report: the `notification_type` value observed for `AskUserQuestion`, whether a payload change
 was needed, and - if it was - stop and ask before making it.
+
+---
+
+## The decision - neutral wording, and the payload does not move
+
+**Decided by THE CAPTAIN**, in his words *"go with the neutral wording on RAI-11"*. Firstmate
+recommended it; the call was his. Question 2 was put to him because the capture above forced
+it, and the answer is **Option B: no `tool_name`, no change to the hook payload at all.**
+
+**The durable part is the general answer, not this instance.** It is the test the next payload
+proposal has to meet, so it is written here rather than left to be re-argued:
+
+> **The hook payload boundary does not move for something that merely reads better. It moves
+> only for something the page cannot do its job without.**
+
+`tool_name` failed that test cleanly. The page's job is to say *a human is needed here*, and it
+does that correctly today - the state was never wrong, only the sentence explaining it. Buying
+a better sentence with a wider privacy boundary is the trade the rule exists to refuse. It is
+worth noting what was given up, because the cost is real and was accepted knowingly: Raise
+cannot say a session is at a question rather than a permission prompt, and on the evidence
+above it never will be able to without that field.
+
+Two practical merits fell the same way. Neutral wording needs no `raise install-hooks` and no
+session restart - it is live for every already-running session the moment the server restarts,
+where a payload field would have fixed only sessions started afterwards. And it cannot rot: it
+depends on no field Claude Code might rename.
+
+## Implementation notes
+
+`blockReason` in `src/dashboard.js`, pure, and applied on both routes a message reaches a row -
+the session's own and the folded pipeline agent's. The agent route mattered: an agent can call
+`AskUserQuestion` like anything else, and its message is lent to the whole repo's row.
+
+- **Only `permission_prompt` is neutralised**, because it is the only value that cannot be
+  trusted. `idle_prompt` is distinguishable and keeps the wording it earned. The surface was
+  deliberately not flattened.
+- **The wording is `Claude needs your response`** - the same sentence shape as the message it
+  replaces, with the specific claim swapped for the one true either way. It says a human is
+  needed and the session is waiting on them, and invents no category.
+- **It fails closed like `isIdleNudge`.** An absent or unrecognised type passes the message
+  through untouched, so an older reporter reads exactly as it always did.
+- **The message text is never matched.** Deciding on the wording would regress the design that
+  replaced a regex with `notification_type` in the first place. Checked before ruling it out:
+  2.1.226 has exactly one form of this message and it names no tool, so the specificity a text
+  check might have preserved does not exist to preserve. A Claude Code old enough to have
+  worded it *"...to use Bash"* predates the field and so takes the pass-through anyway.
+- **State, ranking and pi are untouched**; `blocked` was always right. pi sends no
+  `notification_type` and `PI_EVENT_STATES` has no `blocked`, so nothing there changes.
+
+Reproduced first, and the red was a behavioural one rather than a missing import: with
+`blockReason` landed as a pass-through, the row test failed carrying the literal
+`Claude needs your permission`, by both the session and the agent route. One pre-existing test
+asserted the old wording while being about something else entirely (a dismissal being spent);
+its expectation moved and its subject did not.
+
+696 tests, typecheck and lint clean.

@@ -1338,7 +1338,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 691 tests, no network, no dependencies, ~2s
+npm test          # 696 tests, no network, no dependencies, ~2s
 npm run lint      # oxlint over src, bin, hooks, public, test, scripts
 npm run typecheck # tsc --noEmit over src, bin, hooks, public, scripts
 ```
@@ -1398,6 +1398,13 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
   process boundary on every turn - unread and unstored, but sent. The two failure modes are
   not comparable: a field we forgot to allow is a feature that quietly does not work, and a
   field we forgot to deny is somebody's source code on a socket.
+
+  **The test a proposed field has to meet, decided on RAI-11: the boundary does not move for
+  something that merely reads better, only for something the page cannot do its job without.**
+  That ticket wanted `tool_name` to tell a question from a permission prompt, which Claude
+  Code makes byte-identical on the wire; it was refused and the row says less instead. The
+  accepted cost is recorded in `docs/tasks/RAI-11-question-vs-permission.md`, along with the
+  capture, so neither the measurement nor the argument needs redoing.
 - **Reading a transcript is not the same as sending one, and the difference is the rule.**
   The server reads the tail of a local file and renders it on the user's own dashboard, in
   the browser, on that same machine. Nothing leaves the machine, and the conversation never
@@ -1474,7 +1481,7 @@ before creating a ticket or touching anything under `docs/tasks/`.**
 ## Commands
 
 ```sh
-npm test                       # 691 tests, ~2s
+npm test                       # 696 tests, ~2s
 npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above

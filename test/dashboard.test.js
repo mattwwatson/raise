@@ -13,8 +13,12 @@ import {
   transcriptPullRequest,
   matchRunForAgentCwd,
   isIdleNudge,
+  blockReason,
 } from '../src/dashboard.js';
 import { pullRequestFromRecords } from '../src/transcript.js';
+
+/** The wording a block Claude Code cannot describe honestly falls back to. */
+const NEEDS_RESPONSE = 'Claude needs your response';
 
 const run = (over = {}) => ({
   runId: 'r1',
@@ -1753,6 +1757,84 @@ test('without a type at all, the message still decides', () => {
   assert.equal(isIdleNudge('Claude needs your permission to use Bash', null), false);
 });
 
+// ----------------------------------- a question is not a request for permission
+
+test('a permission_prompt block does not claim a permission was asked for', () => {
+  // The bug: a session parked at a no-mistakes review gate - a question with
+  // options - was captioned "Claude needs your permission". Claude Code sends
+  // that message, and the identical `notification_type`, for both a genuine
+  // tool approval and an `AskUserQuestion`. See the spec for the capture.
+  assert.equal(blockReason('Claude needs your permission', 'permission_prompt'), NEEDS_RESPONSE);
+});
+
+test('the neutral wording reaches the row, which is where the false claim was read', () => {
+  // Asserted through `buildRows` and not only the pure helper, because the row
+  // is what the page and `raise status` render. A unit test on the helper alone
+  // would pass while the message went on flowing round it.
+  const [row] = build({
+    sessions: [
+      session({
+        state: 'blocked',
+        message: 'Claude needs your permission',
+        notificationType: 'permission_prompt',
+      }),
+    ],
+    runs: [],
+  });
+  assert.equal(row.attention, 'blocked');
+  assert.equal(row.message, NEEDS_RESPONSE);
+});
+
+test('only the ambiguous type is neutralised, and everything else is passed through', () => {
+  // `permission_prompt` is the one value that cannot be trusted. Every kind
+  // Claude Code *can* distinguish keeps the words it earned - flattening the
+  // whole surface would trade one wrong answer for a vaguer page.
+  assert.equal(
+    blockReason('Claude is waiting for your input', 'idle_prompt'),
+    'Claude is waiting for your input',
+  );
+  assert.equal(blockReason('Something new entirely', 'elicitation_dialog'), 'Something new entirely');
+});
+
+test('a block with no notification type keeps todays wording exactly', () => {
+  // Fails closed, the same way `isIdleNudge` does. A session whose Claude Code
+  // predates the field, or whose record was written before this change, must
+  // read exactly as it did - this may not quietly reword an older reporter.
+  assert.equal(
+    blockReason('Claude needs your permission to use Bash', null),
+    'Claude needs your permission to use Bash',
+  );
+  assert.equal(
+    blockReason('Claude needs your permission to use Bash', undefined),
+    'Claude needs your permission to use Bash',
+  );
+  assert.equal(blockReason(null, 'permission_prompt'), NEEDS_RESPONSE);
+  assert.equal(blockReason(null, null), null);
+});
+
+test('a blocked pipeline agent gets the same honesty as a session', () => {
+  // The folded agent lends the row its message, so the false claim reached the
+  // page by this route too. An agent can call `AskUserQuestion` like anything
+  // else, and the ambiguity is in the value, not in who reported it.
+  const [row] = build({
+    sessions: [
+      session({ sessionId: 'human', cwd: '/Users/x/work/repo' }),
+      session({
+        sessionId: 'agent',
+        cwd: '/Users/x/.no-mistakes/worktrees/abc/r1',
+        state: 'blocked',
+        message: 'Claude needs your permission',
+        notificationType: 'permission_prompt',
+        host: {},
+      }),
+    ],
+    runs: [run()],
+    branches: new Map([['human', 'main']]),
+  });
+  assert.equal(row.attention, 'blocked');
+  assert.equal(row.message, NEEDS_RESPONSE);
+});
+
 test('a live pipeline answers a typed idle nudge', () => {
   const [row] = build({
     sessions: [
@@ -1893,7 +1975,7 @@ test('a new block announcement spends the dismissal with no further action', () 
       nudged({
         dismissedBlockAt: 5000,
         blockAnnouncedAt: 9000,
-        message: 'Claude needs your permission to use Bash',
+        message: 'Claude needs your permission',
         notificationType: 'permission_prompt',
       }),
     ],
@@ -1901,7 +1983,10 @@ test('a new block announcement spends the dismissal with no further action', () 
     now: 10000,
   });
   assert.equal(row.attention, 'blocked');
-  assert.equal(row.message, 'Claude needs your permission to use Bash');
+  // Neutral because the type is `permission_prompt`, which Claude Code sends
+  // for a question as readily as for a tool approval - see `blockReason`. This
+  // test is about the dismissal being spent; the wording is incidental to it.
+  assert.equal(row.message, NEEDS_RESPONSE);
   assert.equal(row.dismissed, false);
   // And it is a permission prompt, so no control is offered on it at all.
   assert.equal(row.dismissible, false);
