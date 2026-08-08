@@ -239,27 +239,33 @@ nmmon uninstall-pi
 ```
 
 Raise recognises its own entries in `~/.claude/settings.json` and `~/.pi/agent/settings.json`
-by the *filename* of the hook and the extension, and both filenames changed with the rename. So
-the new binary does not know the old entries are its: `install-hooks` appends a second group per
-event rather than replacing the old one, both fire, and the stale one runs `node` against
-`hooks/nmmon-hook.js`, which no longer exists. `uninstall-hooks` cannot clear them either, for
-the same reason. The hook is built to exit 0 quietly on every path so that it can never break a
-live Claude session, which here means the breakage is **silent and permanent** - nothing
-reports it and nothing cleans it up. If you have already pulled, the remedy left is to edit
-those two settings files by hand and delete the entries naming `nmmon`.
+by the *filename* of the hook and the extension, and both filenames changed with the rename, so
+the new binary does not know the old entries are its. Each one goes on running `node` against
+`hooks/nmmon-hook.js` - a path this change deletes - on every one of the six events it was
+registered for. What you are likely to see for that is a module-not-found on stderr naming the
+old path, which says nothing about a rename, so it is worth knowing to look for it; how loudly
+a failing non-blocking hook is surfaced is Claude Code's business rather than ours, and not
+something to count on.
+
+What is certain is that Raise cannot tidy this up for you. `uninstall-hooks` does not recognise
+the old marker, so it cannot remove the stale entries, and `install-hooks` appends a *second*
+group per event rather than replacing the old one - leaving both registered and both firing. If
+you have already pulled, editing those two settings files by hand and deleting the entries
+naming `nmmon` is the only remedy left.
 
 **Move the forge config across**, if you turned on
 [pull request state from the forge](#pull-request-state-from-the-forge):
 
 ```sh
-mv ~/.nmmon/config.json ~/.raise/config.json   # keep it 0600
+mkdir -p ~/.raise && mv ~/.nmmon/config.json ~/.raise/config.json   # keep it 0600
 ```
 
-Everything else in `~/.nmmon/` regenerates - the token, `server.json`, the session records -
-but this file does not. Left where it is, the lookup silently reverts to off, and it is silent
-in both directions: `raise doctor` reports it as simply not enabled, because from the new
-path's point of view there is no config to have an opinion about. The mode matters as much as
-the move, since an unsafe mode makes Raise refuse the whole file, opt-in included.
+`~/.raise/` is created by `raise serve`, which at this point you have not run yet - hence the
+`mkdir`. Everything else in `~/.nmmon/` regenerates - the token, `server.json`, the session
+records - but this file does not. Left where it is, the lookup silently reverts to off, and it
+is silent in both directions: `raise doctor` reports it as simply not enabled, because from the
+new path's point of view there is no config to have an opinion about. The mode matters as much
+as the move, since an unsafe mode makes Raise refuse the whole file, opt-in included.
 
 ### pi sessions
 

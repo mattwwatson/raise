@@ -254,10 +254,12 @@ When the gates are green, tell the user they need to:
 4. **Move the forge config across first**, before deleting anything:
 
    ```sh
-   mv ~/.nmmon/config.json ~/.raise/config.json   # keep it 0600
+   mkdir -p ~/.raise && mv ~/.nmmon/config.json ~/.raise/config.json   # keep it 0600
    ```
 
-   The mode has to survive the move. `readForgeConfig` refuses the *whole* file when it is
+   The `mkdir` is not decoration: `ensureDirs` is reached from `serve` and from minting the
+   token, so `~/.raise/` does not exist until one of those has run, and this step comes before
+   both. The mode has to survive the move. `readForgeConfig` refuses the *whole* file when it is
    group- or other-readable - the opt-in along with the credential - so a `config.json` that
    arrives at the new path with a loosened mode turns the lookup off just as completely as one
    that never arrived at all.
