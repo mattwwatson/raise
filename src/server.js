@@ -18,7 +18,7 @@ import { TranscriptReader, defaultFileAccess } from './transcript-reader.js';
 import { GitBranch, defaultGitAccess } from './git-branch.js';
 import { LavishState } from './lavish.js';
 import { ForgeState } from './forge.js';
-import { readForgeConfig } from './forge-config.js';
+import { watchForgeConfig } from './forge-config.js';
 import { PollWatch } from './poll-watch.js';
 import { FirstmateWatch } from './firstmate.js';
 import { buildRows, isDismissibleBlock, summarise } from './dashboard.js';
@@ -92,7 +92,12 @@ export function createMonitorServer({
   // passes one that fails the test if it is ever called, which is what proves an
   // unconfigured nmmon makes no outbound request at all.
   fetch = globalThis.fetch,
-  forgeConfig = readForgeConfig(),
+  // A reader rather than a reading: `~/.nmmon/config.json` is the one file the
+  // user writes, and the README tells them to write it, so an answer captured
+  // here would leave `nmmon doctor` reporting an opt-in this server never saw
+  // until somebody restarted it. Costs a `stat` a second - see
+  // `watchForgeConfig`. Tests pass a fixed config, which is accepted too.
+  forgeConfig = watchForgeConfig(),
   dbPath = statePath(),
   sessionsPath = sessionsDir(),
   keepaliveMs = KEEPALIVE_MS,

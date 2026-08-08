@@ -35,14 +35,15 @@ import { forgeConfigPath } from './config.js';
 
 /**
  * @typedef {object} ConfigFileAccess
- * @property {(path: string) => {mode: number}} stat
+ * @property {(path: string) => {mode: number, mtimeMs: number, size: number}} stat
  * @property {(path: string) => string} readText
  */
 
 /** @type {ConfigFileAccess} */
 export const defaultConfigAccess = {
   stat(path) {
-    return { mode: statSync(path).mode };
+    const info = statSync(path);
+    return { mode: info.mode, mtimeMs: info.mtimeMs, size: info.size };
   },
   readText(path) {
     return readFileSync(path, 'utf8');
@@ -131,4 +132,42 @@ export function readForgeConfig({ path = forgeConfigPath(), files = defaultConfi
     };
   }
   return { enabled: true, bitbucket: { email, token }, problem: null };
+}
+
+/**
+ * The same read, kept current under a running monitor.
+ *
+ * This file is the user's to write, and the README tells them to write it - so
+ * an answer captured when the server started is one the server and `nmmon
+ * doctor` disagree about for as long as it runs, the doctor reporting an opt-in
+ * that never reached the poll loop. That is the confident-wrong shape this
+ * codebase is built against, so the file is re-read as it changes instead.
+ *
+ * The cost is a `stat` per poll and nothing else, because the parse is cached
+ * on what that `stat` says. **Only the positive case is remembered**, the same
+ * rule `nm-state.js` follows for the database appearing under a running
+ * monitor: no file at all is the overwhelmingly common case, and caching that
+ * absence would mean a file written later was never noticed. The mode is part
+ * of the key as well as of the answer, so a file chmodded to `0644` after the
+ * server started stops being used on the next poll.
+ *
+ * @param {{path?: string, files?: ConfigFileAccess}} [deps]
+ * @returns {() => ForgeConfig} cheap enough to call on every poll
+ */
+export function watchForgeConfig({ path = forgeConfigPath(), files = defaultConfigAccess } = {}) {
+  /** @type {{key: string, config: ForgeConfig}|null} */
+  let cached = null;
+  return () => {
+    let info;
+    try {
+      info = files.stat(path);
+    } catch {
+      cached = null;
+      return DISABLED;
+    }
+    const key = `${info.mode}:${info.mtimeMs}:${info.size}`;
+    if (cached?.key === key) return cached.config;
+    cached = { key, config: readForgeConfig({ path, files }) };
+    return cached.config;
+  };
 }

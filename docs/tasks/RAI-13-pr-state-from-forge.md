@@ -422,6 +422,27 @@ caller's clock at dispatch now, which is what `lavish.js` says to do and why. It
 understates a reading's freshness by however long the request took - the safe direction for the
 field that decides whether we may assert.
 
+### Three things review changed
+
+**Decision 1 needed one exception, and it is the same sentence: freshness exists because an
+answer can change.** *A forge answer ages exactly like no-mistakes' does* combined badly with
+*a merged pull request is never asked again* - the one immutable fact became the only reading
+guaranteed to expire, so the MERGED chip went five minutes after the merge was seen and stayed
+gone. `merged` is now exempt from the gate; `open` and `closed` keep it. The general form of
+that is the acceptance criterion the exception was found by: **this may never leave a row less
+current than it found it**, so a stale forge reading does not displace a fresh local one either.
+
+**The config file is re-read while the monitor runs.** It was read once when the server was
+constructed, which meant `nmmon doctor` - which re-reads it every time - could report an opt-in
+the poll loop had never seen. Three surfaces, one story: `ForgeState` takes a reader
+(`watchForgeConfig`), the cost is one `stat` per poll, and only the positive case is cached so a
+file written later is still noticed. A changed file also clears the failure backoff, so a
+corrected credential is not a fifteen-minute wait.
+
+**A settled lookup is no longer retained.** `#pending` existed for the one-shot CLI's `settle`,
+which the server never calls - so `nmmon serve` accumulated a promise per lookup per pull
+request per minute, forever. Each entry now removes itself.
+
 ### The minimum Bitbucket scope, and why it is better news than expected
 
 **`read:pullrequest:bitbucket`, on its own.** Atlassian's API token permission reference:

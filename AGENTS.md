@@ -845,6 +845,23 @@ asserting within five minutes and the row falls back to "was open, last checked"
 this feature is RAI-10 reintroduced with a new source, which is the exact shape this file keeps
 warning about.
 
+**It has one exception and one guard, and both are the same sentence read twice: freshness
+exists because an answer can change.** `merged` is exempt, because a merged pull request cannot
+un-merge - and it is the one reading here whose `observedAt` is frozen by design, since
+`forge.js` deliberately never asks again once it has that answer. Aged through the ordinary
+gate, the one immutable fact would be the only one guaranteed to expire: the MERGED chip off
+the row five minutes later and off for the rest of the day. `open` and `closed` keep the gate,
+because both can still change.
+
+The guard is the acceptance criterion for the whole feature: **this may never leave a row less
+current than it found it.** A live no-mistakes run re-observes at about a two-minute cadence,
+so a stale forge reading replacing a fresh local one would be the forge making the page worse
+than the source it outranks - this feature's own argument inverted. Outranking is for deciding
+between two answers, not for replacing an answer with silence, so where the forge has nothing
+current to say and a local source does, the local reading stands whole. Both live in
+`withForgeState`, and a test in `dashboard.test.js` compares a row against the same row built
+with no forge readings at all, which is the property stated directly.
+
 **A disagreement with no-mistakes is not surfaced, because there is nothing in it to say.** It
 means one thing only - no-mistakes' reading is older - which `observedAt` already records. A
 page that argues with itself teaches you to stop believing it, the same failure as a confident
@@ -881,6 +898,20 @@ unsafe, teaches nobody to fix it - and the credential already exposed is exposed
 `nmmon doctor` is where that is said; `readForgeConfig` sets `problem` **only** when somebody
 has evidently tried to configure this and it is not working, never for the ordinary case of no
 file at all. That silence is the same rule no-mistakes and Lavish are held to.
+
+**The config file is re-read while the monitor runs, because three surfaces have to tell one
+story.** `doctor` reads the file each time it is asked, and the README tells the user to write
+it - so a config captured when the server started meant the diagnostic reported an opt-in the
+poll loop had never seen, for as long as nobody restarted. `ForgeState` therefore takes a
+*reader* rather than a config (`watchForgeConfig`), and the one-shot CLI passes the config it
+already has. It costs one `stat` per poll: the parse is cached on what that `stat` says, and
+**only the positive case is remembered** - the same rule `nm-state.js` follows for the database
+appearing under a running monitor, since no file at all is the common case and caching that
+absence would mean a file written later was never noticed. The mode is part of the cache key as
+well as of the answer, so a `chmod 0644` after the fact stops the file being used on the next
+poll, and switching the lookup off drops the readings with it rather than leaving them to age
+out. A *changed* file also clears the schedule, backoffs included: fifteen minutes is the right
+silence for a credential nobody has touched and the wrong one for a credential just corrected.
 
 **Cadence and the two caches.** An open pull request is re-asked once a minute; a **merged** one
 is never asked again, because it cannot un-merge; a **closed** one keeps the ordinary interval,
@@ -1297,7 +1328,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 682 tests, no network, no dependencies, ~2s
+npm test          # 691 tests, no network, no dependencies, ~2s
 npm run lint      # oxlint over src, bin, hooks, public, test, scripts
 npm run typecheck # tsc --noEmit over src, bin, hooks, public, scripts
 ```
@@ -1433,7 +1464,7 @@ before creating a ticket or touching anything under `docs/tasks/`.**
 ## Commands
 
 ```sh
-npm test                       # 682 tests, ~2s
+npm test                       # 691 tests, ~2s
 npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above

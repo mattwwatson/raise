@@ -455,16 +455,23 @@ Bitbucket authenticates with both:
 it nmmon refuses the whole file - opt-in included - and `nmmon doctor` says so rather than
 quietly doing nothing.
 
+**There is nothing to restart.** A running `nmmon serve` picks the file up as you write it, so
+turning the lookup on, correcting a token or fixing the mode all take effect within a second -
+and `nmmon doctor` never reports something the monitor is not actually doing.
+
 Everything about this fails silently and completely. No `gh`, no login, no credential, no
 network, a repository the token cannot see, a rate limit: each of them leaves the row exactly
 as it would have been, showing whatever no-mistakes last knew. Failures are remembered too, so
 a repository nmmon cannot read is asked once and then left alone for fifteen minutes rather
-than retried every minute forever. An open pull request is re-checked about once a minute; a
-merged one is never asked about again, because it cannot un-merge.
+than retried every minute forever - though editing the config file clears that immediately, so
+a corrected credential is never a wait. An open pull request is re-checked about once a minute;
+a merged one is never asked about again, because it cannot un-merge.
 
 A forge answer ages like any other reading: if the lookups stop answering, the badge goes back
 to the tooltip's *"was open, last checked"* within five minutes rather than sitting on an
-answer nobody can confirm.
+answer nobody can confirm. A `MERGED` badge is the one exception, and it is the same rule -
+that answer cannot change, so there is nothing for it to go stale against. Turning this on can
+only ever make a badge more current than it would have been without it, never less.
 
 ## Troubleshooting
 

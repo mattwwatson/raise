@@ -1226,6 +1226,50 @@ test('a forge reading ages exactly like anybody else"s', () => {
   assert.equal(rows[0].pr.current, false);
 });
 
+test('the forge may never leave a row less current than it found it', () => {
+  // The acceptance criterion for the whole feature, and `merged` is the case
+  // that breaks it: a merged pull request is never asked about again - it
+  // cannot un-merge - so its reading is the one here whose `observedAt` is
+  // frozen by design, while a live run keeps re-observing at about a
+  // two-minute cadence. Aged through the ordinary gate, the forge would take
+  // the MERGED chip off a row that had been showing it perfectly well without
+  // any forge at all: this feature making the page worse than the source it
+  // outranks.
+  const url = 'https://github.com/acme/repo/pull/9';
+  const now = 60 * 60 * 1000;
+  const input = {
+    sessions: [session()],
+    runs: [run({ active: true, prUrl: url, prState: 'merged', prStateObservedAt: now - 1000 })],
+    branches: new Map([['s1', 'main']]),
+    now,
+  };
+  assert.equal(build(input)[0].pr.current, true, 'the run is watching, so it says so');
+
+  const rows = build({ ...input, forgeStates: forgeReadings(url, 'merged', now - 30 * 60 * 1000) });
+  assert.equal(rows[0].pr.state, 'merged');
+  assert.equal(rows[0].pr.current, true, 'and the forge agreeing may not take that away');
+});
+
+test('a stale forge reading does not displace a local one still being watched', () => {
+  // The same rule where the answer genuinely could have changed, so the
+  // freshness gate still applies to the forge's word - it just does not get to
+  // replace an answer somebody is still observing with one nobody can confirm.
+  // Outranking decides between two answers; it is not a licence to swap an
+  // answer for silence.
+  const url = 'https://github.com/acme/repo/pull/9';
+  const now = 60 * 60 * 1000;
+  const rows = build({
+    sessions: [session()],
+    runs: [run({ active: true, prUrl: url, prState: 'open', prStateObservedAt: now - 1000 })],
+    branches: new Map([['s1', 'main']]),
+    forgeStates: forgeReadings(url, 'closed', now - 30 * 60 * 1000),
+    now,
+  });
+  assert.equal(rows[0].pr.state, 'open');
+  assert.equal(rows[0].pr.current, true);
+  assert.equal(rows[0].pr.observedAt, now - 1000, 'the local reading is kept whole');
+});
+
 test('a forge reading for some other review changes nothing', () => {
   const rows = build({
     sessions: [session()],

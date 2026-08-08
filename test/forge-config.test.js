@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { readForgeConfig } from '../src/forge-config.js';
+import { readForgeConfig, watchForgeConfig } from '../src/forge-config.js';
 
 /**
  * A fake `~/.nmmon/config.json`.
@@ -131,4 +131,78 @@ test('a malformed file is named rather than silently ignored', () => {
   const config = readForgeConfig({ path: '/c.json', files: files('{ not json') });
   assert.equal(config.enabled, false);
   assert.match(config.problem, /not valid JSON/);
+});
+
+// ------------------------------------------------- the file, while it changes
+//
+// The user writes this file, and the README tells them to. An answer captured
+// when the server started is one `nmmon doctor` and the running server disagree
+// about until somebody restarts it, which is the confident-wrong shape this
+// codebase is built against.
+
+/** A mutable fake file, so a test can edit, chmod or delete it. */
+const editable = () => {
+  const state = { text: '{}', mode: 0o100600, mtimeMs: 1, size: 2, reads: 0 };
+  return {
+    state,
+    write(text) {
+      state.text = text;
+      state.mtimeMs += 1;
+      state.size = text.length;
+    },
+    files: {
+      stat: () => {
+        if (state.text === null) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+        return { mode: state.mode, mtimeMs: state.mtimeMs, size: state.size };
+      },
+      readText: () => {
+        state.reads += 1;
+        return state.text;
+      },
+    },
+  };
+};
+
+test('the file is parsed once and then only when it changes', () => {
+  // The budget is a stat per poll. Re-reading and re-parsing a file nobody has
+  // touched, once a second, forever, is not that.
+  const file = editable();
+  file.write(JSON.stringify({ forge: { enabled: true } }));
+  const read = watchForgeConfig({ path: '/c.json', files: file.files });
+
+  assert.equal(read().enabled, true);
+  for (let poll = 0; poll < 10; poll += 1) assert.equal(read().enabled, true);
+  assert.equal(file.state.reads, 1);
+
+  file.write(JSON.stringify({ forge: { enabled: false } }));
+  assert.equal(read().enabled, false);
+  assert.equal(file.state.reads, 2);
+});
+
+test('a file written under a running monitor is noticed, because absence is not cached', () => {
+  // The same problem `nm-state.js` has with the database appearing: only the
+  // positive case may be remembered, or the ordinary act of configuring this
+  // does nothing until a restart nobody was told about.
+  const file = editable();
+  file.state.text = null;
+  const read = watchForgeConfig({ path: '/c.json', files: file.files });
+  assert.deepEqual(read(), { enabled: false, bitbucket: null, problem: null });
+
+  file.write(JSON.stringify({ forge: { enabled: true } }));
+  assert.equal(read().enabled, true);
+});
+
+test('a chmod after the fact still refuses the file', () => {
+  // The whole point of checking the mode rather than trusting the documented
+  // 0600 is that a file can be written correctly and chmodded later - including
+  // later than the server started.
+  const file = editable();
+  file.write(JSON.stringify({ forge: { enabled: true } }));
+  const read = watchForgeConfig({ path: '/c.json', files: file.files });
+  assert.equal(read().enabled, true);
+
+  file.state.mode = 0o100644;
+  const refused = read();
+  assert.equal(refused.enabled, false);
+  assert.match(refused.problem, /chmod 600/);
 });

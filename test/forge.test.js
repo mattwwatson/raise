@@ -219,6 +219,75 @@ test('a pull request that leaves the page is forgotten', async () => {
   assert.equal(forge.readings.size, 0);
 });
 
+test('a settled lookup is not retained, because the server never drains them', async () => {
+  // `settle` is the CLI's, and the server calls `observe` and nothing else - so
+  // anything only `settle` cleared would be one promise per lookup per pull
+  // request per minute, kept for the life of a process meant to be left running
+  // for weeks.
+  const forge = new ForgeState({ execAsync: ghRunner('OPEN'), config: enabled() });
+  forge.observe([GH], 0);
+  assert.equal(forge.pending, 1);
+  for (let tick = 0; tick < 10; tick += 1) await Promise.resolve();
+  assert.equal(forge.pending, 0);
+  assert.equal(forge.readings.size, 1, 'and the answer is still there');
+});
+
+// -------------------------------------------- the config file, while it runs
+//
+// It is the one file the user writes, and the README tells them to write it, so
+// what `nmmon doctor` reports and what the running server does have to be the
+// same story. A reader is passed instead of a reading; these say what that buys.
+
+test('turning the lookup on takes effect without a restart', async () => {
+  let config = { enabled: false, bitbucket: null, problem: null };
+  const runner = ghRunner('OPEN');
+  const forge = new ForgeState({ execAsync: runner, config: () => config });
+  await forge.load([GH], 0);
+  assert.equal(runner.calls.length, 0);
+
+  config = enabled();
+  await forge.load([GH], 1000);
+  assert.equal(runner.calls.length, 1);
+});
+
+test('turning it off drops the readings rather than leaving them to age out', async () => {
+  // Same rule as a failed lookup: a reading we may no longer refresh is one we
+  // may no longer assert. This is the path an unsafe `chmod` arrives by too -
+  // the mode check refuses the whole file, which reads here as switched off.
+  let config = enabled();
+  const forge = new ForgeState({ execAsync: ghRunner('OPEN'), config: () => config });
+  await forge.load([GH], 0);
+  assert.equal(forge.readings.size, 1);
+
+  config = { enabled: false, bitbucket: null, problem: null };
+  forge.observe([GH], 1000);
+  assert.equal(forge.readings.size, 0);
+});
+
+test('a changed config drops the failure backoff, so a fix is not a wait', async () => {
+  // Fifteen minutes is the right silence for a credential nobody has touched.
+  // It is the wrong one for a credential just corrected, where the user has no
+  // way of knowing that is what they are waiting for.
+  let calls = 0;
+  let config = enabled(CREDENTIAL);
+  const forge = new ForgeState({
+    fetch: () => {
+      calls += 1;
+      return Promise.resolve({ ok: false, status: 401, json: () => assert.fail('not read') });
+    },
+    config: () => config,
+  });
+  await forge.load([BB], 0);
+  assert.equal(calls, 1);
+
+  await forge.load([BB], 1000);
+  assert.equal(calls, 1, 'an unchanged file waits out the backoff');
+
+  config = enabled({ email: 'me@example.com', token: 'the-right-one' });
+  await forge.load([BB], 2000);
+  assert.equal(calls, 2);
+});
+
 test('one review under two spellings is one lookup', async () => {
   // no-mistakes stores a URL and a transcript prints one; they differ in a
   // trailing slash and the case of the host and mean the same review.

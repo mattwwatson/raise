@@ -41,13 +41,19 @@ export const OPEN_REFRESH_MS = 60 * 1000;
  * The failures this covers are the durable kind - no credential, no `gh`, a
  * repository the token cannot see - so retrying them on the open interval would
  * be a request a minute, forever, for an answer that is not coming. Long enough
- * to be silent; short enough that fixing the credential takes effect without a
- * restart.
+ * to be silent; short enough that a `gh auth login` takes effect without a
+ * restart. Fixing the *config file* does not wait for it at all: the file is
+ * re-read as it changes, and a changed one drops every backoff with it.
  */
 export const FAILURE_BACKOFF_MS = 15 * 60 * 1000;
 
 /** How long a single lookup may take before it is abandoned. */
 export const LOOKUP_TIMEOUT_MS = 8000;
+
+/** @typedef {import('./forge-config.js').ForgeConfig} ForgeConfig */
+
+/** What a `ForgeState` with nothing configured behind it is allowed to do. */
+const DISABLED = { enabled: false, bitbucket: null, problem: null };
 
 /**
  * A reading taken from the forge itself.
@@ -178,38 +184,71 @@ export function normaliseForgeState(raw) {
 export class ForgeState {
   #execAsync;
   #fetch;
-  #config;
+  /** @type {() => ForgeConfig} */
+  #readConfig;
+  /**
+   * The config the schedule below was built under, compared by identity.
+   *
+   * A reader that watches the file returns the same object until the file
+   * changes, so this is how a changed one is noticed - see `observe`.
+   *
+   * @type {ForgeConfig|null}
+   */
+  #configInUse = null;
   /** @type {Map<string, ForgeReading>} */
   #readings = new Map();
   /** When each key may next be asked about. Covers answers and failures alike. */
   #nextAskAt = new Map();
   /** @type {Set<string>} */
   #inFlight = new Set();
-  /** Live requests, so the one-shot CLI has something to wait on. */
-  /** @type {Promise<void>[]} */
-  #pending = [];
+  /**
+   * Live requests, so the one-shot CLI has something to wait on.
+   *
+   * Each entry removes itself when it settles. It has to: the server never
+   * calls `settle`, so anything only that drained would be a promise retained
+   * per lookup per pull request per minute, for the life of a process meant to
+   * be left running for weeks.
+   *
+   * @type {Set<Promise<void>>}
+   */
+  #pending = new Set();
 
   /**
    * @param {{execAsync?: Function, fetch?: Function,
-   *          config?: import('./forge-config.js').ForgeConfig}} [deps] both
-   *   runners are injected and defaulted at the edge, so the suite asserts on
-   *   the command and the request that *would* have gone out without either
-   *   happening. A config that is not `enabled` makes every method a no-op.
+   *          config?: ForgeConfig|(() => ForgeConfig)}} [deps] both runners are
+   *   injected and defaulted at the edge, so the suite asserts on the command
+   *   and the request that *would* have gone out without either happening. A
+   *   config that is not `enabled` makes every method a no-op.
+   *
+   *   `config` may be a **reader** rather than a config, and the server passes
+   *   one: the file is the user's to edit while the monitor runs, so a captured
+   *   answer would leave `nmmon doctor` reporting an opt-in the running server
+   *   never saw. The one-shot CLI has nothing to re-read and passes the config
+   *   it already has.
    */
   constructor({ execAsync, fetch, config } = {}) {
     this.#execAsync = execAsync;
     this.#fetch = fetch;
-    this.#config = config || { enabled: false, bitbucket: null, problem: null };
+    const source = config || DISABLED;
+    this.#readConfig = typeof source === 'function' ? source : () => source;
   }
 
   /** @returns {boolean} whether anything here will ever make a request */
   get enabled() {
-    return this.#config.enabled === true;
+    return this.#readConfig().enabled === true;
   }
 
   /** @returns {Map<string, ForgeReading>} what to hand `buildRows` */
   get readings() {
     return this.#readings;
+  }
+
+  /**
+   * @returns {number} lookups still running - what `settle` waits on, and what
+   *   says this holds nothing once they are done
+   */
+  get pending() {
+    return this.#pending.size;
   }
 
   /**
@@ -227,7 +266,23 @@ export class ForgeState {
    * @param {number} [now]
    */
   observe(urls, now = Date.now()) {
-    if (!this.enabled) return;
+    const config = this.#readConfig();
+    if (config !== this.#configInUse) {
+      // The file has changed under a running monitor, which is the one moment a
+      // schedule built under the old answer is worth throwing away: a credential
+      // just fixed would otherwise wait out the fifteen-minute failure backoff,
+      // and the user has no way of knowing that is what they are waiting for.
+      this.#configInUse = config;
+      this.#nextAskAt.clear();
+    }
+    if (config.enabled !== true) {
+      // Turned off - or made unsafe - while the monitor was running. The
+      // readings go with it, for the same reason a failed lookup drops its own:
+      // a reading we may no longer refresh is one we may no longer assert.
+      this.#readings.clear();
+      this.#nextAskAt.clear();
+      return;
+    }
     const wanted = new Set();
     for (const url of urls) {
       const target = parseForgeUrl(url);
@@ -237,7 +292,7 @@ export class ForgeState {
       if (this.#inFlight.has(key)) continue;
       const due = this.#nextAskAt.get(key);
       if (due !== undefined && now < due) continue;
-      this.#start(target, key, now);
+      this.#start(target, key, now, config);
     }
     // A pull request that has left the page is forgotten, so the maps are the
     // size of what is rendered rather than of everything ever seen. It costs one
@@ -266,22 +321,21 @@ export class ForgeState {
 
   /** @returns {Promise<void>} resolves once nothing is in flight */
   async settle() {
-    while (this.#pending.length > 0) {
-      const running = this.#pending.splice(0, this.#pending.length);
-      await Promise.allSettled(running);
-    }
+    while (this.#pending.size > 0) await Promise.allSettled(this.#pending);
   }
 
   /**
    * @param {ForgeTarget} target
    * @param {string} key
    * @param {number} now
+   * @param {ForgeConfig} config the config this lookup was scheduled under, so
+   *   a file edited mid-flight cannot change the credential under it
    */
-  #start(target, key, now) {
+  #start(target, key, now, config) {
     this.#inFlight.add(key);
     this.#nextAskAt.set(key, now + OPEN_REFRESH_MS);
     const request = Promise.resolve()
-      .then(() => this.#lookup(target))
+      .then(() => this.#lookup(target, config))
       .then((state) => {
         if (!state) {
           // Reached the forge and could not make sense of the answer, which is
@@ -308,8 +362,9 @@ export class ForgeState {
       })
       .finally(() => {
         this.#inFlight.delete(key);
+        this.#pending.delete(request);
       });
-    this.#pending.push(request);
+    this.#pending.add(request);
   }
 
   /**
@@ -332,11 +387,12 @@ export class ForgeState {
 
   /**
    * @param {ForgeTarget} target
+   * @param {ForgeConfig} config
    * @returns {Promise<'open'|'merged'|'closed'|null>}
    */
-  async #lookup(target) {
+  async #lookup(target, config) {
     if (target.forge === 'github') return this.#lookupGitHub(target);
-    return this.#lookupBitbucket(target);
+    return this.#lookupBitbucket(target, config);
   }
 
   /**
@@ -375,9 +431,10 @@ export class ForgeState {
    * token minted for nmmon cannot read the user's source code.
    *
    * @param {ForgeTarget} target
+   * @param {ForgeConfig} config
    */
-  async #lookupBitbucket(target) {
-    const credential = this.#config.bitbucket;
+  async #lookupBitbucket(target, config) {
+    const credential = config.bitbucket;
     if (!this.#fetch || !credential) return null;
     const endpoint =
       `https://api.bitbucket.org/2.0/repositories/${encodeURIComponent(target.workspace)}` +

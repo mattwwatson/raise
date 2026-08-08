@@ -424,12 +424,29 @@ function sameUrl(a, b) {
  * The link is never touched. It is the one thing the local sources are as good
  * at, and the row keeps it in every case.
  *
- * **A forge reading ages exactly like anybody else's.** It goes through the same
- * `PR_STATE_FRESH_MS` gate the database does, so a lookup that stops answering -
- * the network gone, the machine asleep - stops asserting within five minutes and
- * the row falls back to "was open, last checked". Without this, "the forge wins"
- * would quietly become "the forge's last answer wins forever", which is RAI-10
- * again with a new source.
+ * **A forge reading ages exactly like anybody else's**, with one exception and
+ * one guard, and both come from the same sentence: freshness exists because an
+ * answer can change. It goes through the same `PR_STATE_FRESH_MS` gate the
+ * database does, so a lookup that stops answering - the network gone, the
+ * machine asleep - stops asserting within five minutes and the row falls back to
+ * "was open, last checked". Without that, "the forge wins" would quietly become
+ * "the forge's last answer wins forever", which is RAI-10 again with a new
+ * source.
+ *
+ * **`merged` is the exception, because it cannot un-merge.** `forge.js` never
+ * asks again once it has that answer, so its `observedAt` is the one reading
+ * here that is frozen by design - and aged through the ordinary gate it would be
+ * the one immutable fact guaranteed to expire, taking the MERGED chip off the
+ * row five minutes later and leaving it off for the rest of the day.
+ *
+ * **The guard is that this may never leave a row *less* current than it found
+ * it.** A stale forge reading beside a local source somebody is still actively
+ * re-observing - a live no-mistakes run polls its `ci` step every couple of
+ * minutes - would be the forge making the page worse than the source it
+ * outranks, which is the whole argument for this feature inverted. Outranking is
+ * for deciding between two answers, not for replacing an answer with silence, so
+ * where the forge has nothing current to say and a local source does, the local
+ * reading stands.
  *
  * @param {PullRequest|null} pr
  * @param {Map<string, ForgeReading>} forgeStates
@@ -440,12 +457,9 @@ function withForgeState(pr, forgeStates, now) {
   if (!pr || forgeStates.size === 0) return pr;
   const reading = forgeStates.get(pullRequestKey(pr.url));
   if (!reading) return pr;
-  return {
-    ...pr,
-    state: reading.state,
-    observedAt: reading.observedAt,
-    current: now - reading.observedAt <= PR_STATE_FRESH_MS,
-  };
+  const current = reading.state === 'merged' || now - reading.observedAt <= PR_STATE_FRESH_MS;
+  if (!current && pr.current) return pr;
+  return { ...pr, state: reading.state, observedAt: reading.observedAt, current };
 }
 
 /** @param {Run|null} run */
