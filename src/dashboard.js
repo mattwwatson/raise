@@ -57,9 +57,10 @@ import { pullRequestKey } from './forge.js';
  * @property {string|null} branch
  * @property {Attention} attention
  * @property {string} attentionLabel `attention`, in words
- * @property {string|null} message why Claude wants you; only set while blocked,
- *   and never the agent's own words verbatim - see `blockReason`, which holds a
- *   message to what its `notification_type` can actually support
+ * @property {string|null} message why Claude wants you; only set while blocked.
+ *   The agent's own words, except for a `permission_prompt` - which Claude Code
+ *   sends for a question as readily as for a tool approval, so `blockReason`
+ *   replaces it with neutral wording
  * @property {import('./registry.js').SessionState|null} sessionState
  * @property {number|null} sessionStateSince
  * @property {number|null} waitingForMs how long blocked, for the "2m" column
