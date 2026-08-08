@@ -1,6 +1,7 @@
 ---
 ticket: RAI-11
-status: backlog
+status: in-progress
+branch: RAI-11-question-vs-permission
 size: S
 depends: -
 ---
@@ -72,6 +73,50 @@ added recently to distinguish `permission_prompt` from `idle_prompt` (see `isIdl
 How to find out: capture a real event. `AskUserQuestion` can be triggered deliberately, and the
 hook can be observed without guessing - do not infer this from documentation alone, since the
 field is new enough that the docs may not enumerate every value.
+
+---
+
+### Answer - captured 08/08/2026 against Claude Code 2.1.226
+
+**`AskUserQuestion` sends `notification_type: "permission_prompt"`, and its `Notification` is
+byte-identical to a real tool approval's.** Question 1 comes back unhelpful, so Question 2 is
+live.
+
+Captured from a live interactive session in an isolated tmux server, with `Notification` and
+`PermissionRequest` hooks writing raw stdin to a file. Both cases below are real events, not
+inferences:
+
+| Trigger | `PermissionRequest.tool_name` | `Notification.notification_type` | `Notification.message` |
+| --- | --- | --- | --- |
+| a question with options | `AskUserQuestion` | `permission_prompt` | `Claude needs your permission` |
+| a genuine tool approval | `Bash` | `permission_prompt` | `Claude needs your permission` |
+
+The `Notification` records differ in **no field at all**. `tool_name` on the earlier
+`PermissionRequest` is the only thing anywhere in either payload that separates them.
+
+Confirmed in the 2.1.226 binary, which explains why:
+
+- **`notification_type` cannot grow a value for this.** The enumerated set is fixed at
+  `permission_prompt`, `idle_prompt`, `auth_success`, `elicitation_dialog`,
+  `elicitation_complete`, `elicitation_response`, `agent_needs_input`, `agent_completed`.
+  There is no question type, and the interactive dialog host hardcodes the argument - one call
+  site, `fzr(message, "permission_prompt")`, for **every** dialog kind it renders.
+- **The wording is a shared constant, not a description of the tool.** One string,
+  `"Claude needs your permission"`, is the notification message for a dozen distinct dialog
+  kinds. Claude Code has a *separate* label map that calls some of those kinds `input needed`
+  rather than a permission prompt - so it knows the difference internally and does not put it
+  in the payload.
+- **`agent_needs_input` is not this.** It belongs to background agents in the multi-agent view
+  (`<label> needs your input: …`), and never fires for an in-session `AskUserQuestion`.
+
+**What would disprove this:** a future Claude Code that either adds a question-shaped value to
+that enum, or stops routing `AskUserQuestion` through the shared dialog host. Re-run the capture
+against the installed binary before assuming this still holds.
+
+**Also observed, and it is the allowlist's own argument made concrete:** the `PermissionRequest`
+for a question carried the entire question text - every prompt, header, option label and option
+description - in `tool_input`. `src/hook-payload.js` already refuses that field, and this is
+what it is refusing.
 
 ---
 
