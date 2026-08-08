@@ -184,7 +184,7 @@ async function focusTerminal(exec, { sessionUuid, tty, termProgram, terminals })
       ok: false,
       reason:
         process.platform === 'darwin'
-          ? 'No supported terminal is running. nmmon can focus iTerm2 and Terminal.app.'
+          ? 'No supported terminal is running. Raise can focus iTerm2 and Terminal.app.'
           : `Focusing is only implemented for macOS terminals so far. On ${process.platform}, use the tmux target shown instead.`,
     };
   }
@@ -248,7 +248,7 @@ export async function focusSession(record, { exec, terminals = ALL_TERMINALS }) 
     if (byTitle.ambiguous) {
       return {
         ok: false,
-        reason: `More than one window is called "${titleNeedle(target.title)}", so nmmon cannot tell which is this session.`,
+        reason: `More than one window is called "${titleNeedle(target.title)}", so Raise cannot tell which is this session.`,
         tmuxSession: target.session,
       };
     }

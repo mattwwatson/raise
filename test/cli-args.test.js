@@ -10,17 +10,17 @@ import { dirname, join } from 'node:path';
 import { parseArgv, parseFlags } from '../src/cli-args.js';
 
 const execFileAsync = promisify(execFile);
-const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'nmmon.js');
+const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'raise.js');
 
 // Serving creates its state directory before it has a chance to reject a bad
-// port, so an unscoped spawn would litter the real ~/.nmmon just by running the
+// port, so an unscoped spawn would litter the real ~/.raise just by running the
 // suite.
-const SCRATCH_HOME = mkdtempSync(join(tmpdir(), 'nmmon-test-'));
+const SCRATCH_HOME = mkdtempSync(join(tmpdir(), 'raise-test-'));
 after(() => rmSync(SCRATCH_HOME, { recursive: true, force: true }));
 
 const cli = (args, env) =>
   execFileAsync(process.execPath, [CLI, ...args], {
-    env: { ...process.env, NMMON_HOME: SCRATCH_HOME, ...env },
+    env: { ...process.env, RAISE_HOME: SCRATCH_HOME, ...env },
   });
 
 test('a bare word is the command', () => {
@@ -34,7 +34,7 @@ test('no arguments means serve', () => {
 });
 
 test('a leading flag is parsed as a flag, not eaten as the command', () => {
-  // Regression: `nmmon --help` used to fall through to `serve` and silently
+  // Regression: `raise --help` used to fall through to `serve` and silently
   // start a server, because the flag was consumed as the command name.
   for (const argv of [['--help'], ['-h']]) {
     const parsed = parseArgv(argv);
@@ -82,25 +82,25 @@ test('bundled short flags each become a flag', () => {
   assert.deepEqual(parseFlags(['-ab']).flags, { a: true, b: true });
 });
 
-test('--help still prints help when NMMON_PORT is malformed', async () => {
-  // The usage text quotes the default port, so it used to resolve NMMON_PORT
+test('--help still prints help when RAISE_PORT is malformed', async () => {
+  // The usage text quotes the default port, so it used to resolve RAISE_PORT
   // unguarded and throw a stack trace instead - at exactly the moment you are
   // asking what that variable is meant to contain.
-  const { stdout } = await cli(['--help'], { NMMON_PORT: 'not-a-port' });
-  assert.match(stdout, /nmmon serve/);
-  assert.match(stdout, /NMMON_PORT is currently set to something that is not a port/);
+  const { stdout } = await cli(['--help'], { RAISE_PORT: 'not-a-port' });
+  assert.match(stdout, /raise serve/);
+  assert.match(stdout, /RAISE_PORT is currently set to something that is not a port/);
 });
 
-test('--help reports the configured port when NMMON_PORT is valid', async () => {
-  const { stdout } = await cli(['--help'], { NMMON_PORT: '9123' });
+test('--help reports the configured port when RAISE_PORT is valid', async () => {
+  const { stdout } = await cli(['--help'], { RAISE_PORT: '9123' });
   assert.match(stdout, /default 9123/);
 });
 
-test('serve still refuses a malformed NMMON_PORT rather than binding a random one', async () => {
+test('serve still refuses a malformed RAISE_PORT rather than binding a random one', async () => {
   // Help is forgiving; actually starting a server is not. A port that reaches
   // server.listen unvalidated binds an ephemeral one and every hook then
-  // decides nmmon is not running.
-  const failed = await cli(['serve'], { NMMON_PORT: 'not-a-port' }).catch((err) => err);
+  // decides Raise is not running.
+  const failed = await cli(['serve'], { RAISE_PORT: 'not-a-port' }).catch((err) => err);
   assert.equal(failed.code, 1);
-  assert.match(failed.stderr, /NMMON_PORT must be a whole number/);
+  assert.match(failed.stderr, /RAISE_PORT must be a whole number/);
 });

@@ -1,7 +1,7 @@
 /**
- * The pi extension that tells nmmon about this session.
+ * The pi extension that tells Raise about this session.
  *
- * The same job as `nmmon-hook.js`, under a stricter rule. That hook is a
+ * The same job as `raise-hook.js`, under a stricter rule. That hook is a
  * separate process: if it throws, a subprocess dies and pi's user never knows.
  * **This runs inside the agent itself**, in-process, and pi awaits event
  * handlers - so an exception here surfaces in somebody's editing loop and a
@@ -20,14 +20,14 @@
  *
  * That walk is a blocking `ps` per ancestor, which is exactly what must not
  * happen in the user's editing loop, so it runs at most once per pi process and
- * only ever inside `post`, past the point where nmmon is known to be running. A
+ * only ever inside `post`, past the point where Raise is known to be running. A
  * machine that never runs the monitor therefore never pays for it at all, and
  * the window identity cannot change for the life of the process, so one walk is
  * all there is to do.
  *
  * It is then sent with *every* post rather than only the first, which the cache
  * makes nearly free. Tying it to one particular event is what makes it losable:
- * a session that starts while nmmon is down, or whose first post fails at the
+ * a session that starts while Raise is down, or whose first post fails at the
  * network layer, would otherwise spend the rest of its life with no window
  * identity at all - an unfocusable dead card on the page, and a record the
  * registry cannot probe for liveness, so it lingers for a fortnight after the
@@ -85,7 +85,7 @@ const EVENTS = [
 const KEEP_ALIVE_SHUTDOWN = new Set(['reload']);
 
 function readServerInfo() {
-  const home = process.env.NMMON_HOME || join(homedir(), '.nmmon');
+  const home = process.env.RAISE_HOME || join(homedir(), '.raise');
   try {
     return JSON.parse(readFileSync(join(home, 'server.json'), 'utf8'));
   } catch {
@@ -153,7 +153,7 @@ function post(payload, read) {
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   fetch(`http://127.0.0.1:${info.port}/event`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-nmmon-token': info.token },
+    headers: { 'content-type': 'application/json', 'x-raise-token': info.token },
     body: JSON.stringify({ ...payload, host }),
     signal: controller.signal,
   })

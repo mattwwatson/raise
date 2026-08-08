@@ -46,12 +46,12 @@ run in CI cannot fail because a token expired or Jira was slow.
 
 ---
 
-## Where it lives, and why not in `nmmon`
+## Where it lives, and why not in `raise`
 
-A new top-level `scripts/` directory, driven by npm scripts. **Not** a `nmmon` subcommand.
+A new top-level `scripts/` directory, driven by npm scripts. **Not** a `raise` subcommand.
 
-`nmmon` is a shipped product whose one sentence is *tell me which session is waiting for me, and
-take me there*. This is the repository's own development workflow. A `nmmon roadmap` command
+`raise` is a shipped product whose one sentence is *tell me which session is waiting for me, and
+take me there*. This is the repository's own development workflow. A `raise roadmap` command
 would enter `usage()`, README's Commands table, and the published `files` array - a dev-workflow
 board shipped to every user of a session monitor. `package.json`'s `files` does not list
 `scripts/`, so this placement keeps it out of the tarball for free, and **`scripts/` must never

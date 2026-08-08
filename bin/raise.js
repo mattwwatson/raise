@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * nmmon - the no-mistakes monitor command line.
+ * Raise - the no-mistakes monitor command line.
  *
- * `nmmon serve` is the whole product; everything else exists to get you there
+ * `raise serve` is the whole product; everything else exists to get you there
  * or to explain why you are not there yet.
  */
 
@@ -52,8 +52,8 @@ import { parseArgv } from '../src/cli-args.js';
 import { probeHealth } from '../src/health.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const HOOK_SCRIPT = resolve(HERE, '..', 'hooks', 'nmmon-hook.js');
-const PI_EXTENSION = resolve(HERE, '..', 'hooks', 'nmmon-pi-extension.js');
+const HOOK_SCRIPT = resolve(HERE, '..', 'hooks', 'raise-hook.js');
+const PI_EXTENSION = resolve(HERE, '..', 'hooks', 'raise-pi-extension.js');
 const DEFAULT_SETTINGS = join(homedir(), '.claude', 'settings.json');
 
 const bold = (s) => `[1m${s}[0m`;
@@ -89,8 +89,8 @@ const CHECK_MARKS = {
 /**
  * Help must never fail.
  *
- * A malformed NMMON_PORT is a real error for `serve`, which reports it properly
- * - but `nmmon --help` is often exactly how you go looking for what that
+ * A malformed RAISE_PORT is a real error for `serve`, which reports it properly
+ * - but `raise --help` is often exactly how you go looking for what that
  * variable is supposed to contain, and throwing out of usage() leaves you with
  * a stack trace instead of the answer.
  */
@@ -98,14 +98,14 @@ function describedDefaultPort() {
   try {
     return String(defaultPort());
   } catch {
-    return `${DEFAULT_PORT}; NMMON_PORT is currently set to something that is not a port`;
+    return `${DEFAULT_PORT}; RAISE_PORT is currently set to something that is not a port`;
   }
 }
 
 /**
  * The port `serve` would most likely use, for diagnostics that must not throw.
  *
- * `doctor` reports on a bad NMMON_PORT by way of the port it then fails to
+ * `doctor` reports on a bad RAISE_PORT by way of the port it then fails to
  * find a server on; refusing to run at all would be a worse diagnosis.
  */
 function probablePort() {
@@ -117,18 +117,18 @@ function probablePort() {
 }
 
 function usage() {
-  return `${bold('nmmon')} - watch every no-mistakes run and agent session on this machine
+  return `${bold('Raise')} - watch every no-mistakes run and agent session on this machine
 
 ${bold('Usage')}
-  nmmon serve              start the monitor and print the dashboard URL
-  nmmon open               print (and open) the dashboard URL
-  nmmon status             one-shot text summary, no server needed
-  nmmon focus <session>    bring a session's window to the front
-  nmmon install-hooks      add the Claude Code hooks to settings.json
-  nmmon uninstall-hooks    remove them again
-  nmmon install-pi         add the pi extension to pi's settings.json
-  nmmon uninstall-pi       remove it again
-  nmmon doctor             check the setup and explain anything missing
+  raise serve              start the monitor and print the dashboard URL
+  raise open               print (and open) the dashboard URL
+  raise status             one-shot text summary, no server needed
+  raise focus <session>    bring a session's window to the front
+  raise install-hooks      add the Claude Code hooks to settings.json
+  raise uninstall-hooks    remove them again
+  raise install-pi         add the pi extension to pi's settings.json
+  raise uninstall-pi       remove it again
+  raise doctor             check the setup and explain anything missing
 
 ${bold('Options')}
   --port <n>               listen on a different port (default ${describedDefaultPort()})
@@ -184,7 +184,7 @@ async function cmdServe(flags) {
     return;
   }
 
-  console.log(`${bold('nmmon')} is watching.`);
+  console.log(`${bold('Raise')} is watching.`);
   console.log(`  Dashboard  ${green(monitor.url())}`);
   console.log(`  Source     ${SOURCE_LABELS[monitor.probe.mode] ?? SOURCE_LABELS.cli}`);
   if (monitor.probe.warning) console.log(`  ${yellow('Note')}       ${monitor.probe.warning}`);
@@ -193,18 +193,18 @@ async function cmdServe(flags) {
   const hooks = hookInstallState(settings);
   if (hooks.state === 'missing') {
     console.log(
-      `\n  ${yellow('Hooks are not installed.')} Pipeline state will still show, but nmmon cannot\n` +
+      `\n  ${yellow('Hooks are not installed.')} Pipeline state will still show, but Raise cannot\n` +
         '  tell when Claude is waiting for you, and cannot focus windows.\n' +
-        `  Run ${bold('nmmon install-hooks')}, then restart your Claude sessions.`,
+        `  Run ${bold('raise install-hooks')}, then restart your Claude sessions.`,
     );
   } else if (hooks.state === 'partial') {
     // Everything already installed keeps working, so this says what is missing
-    // rather than repeating the message above - claiming nmmon is blind while
+    // rather than repeating the message above - claiming Raise is blind while
     // SessionStart and Notification are both in place would be a lie.
     console.log(
-      `\n  ${yellow('Hooks are out of date.')} What is installed still works; nmmon is missing\n` +
+      `\n  ${yellow('Hooks are out of date.')} What is installed still works; Raise is missing\n` +
         `  ${hooks.missing.join(', ')}.\n` +
-        `  Run ${bold('nmmon install-hooks')}, then restart your Claude sessions.`,
+        `  Run ${bold('raise install-hooks')}, then restart your Claude sessions.`,
     );
   }
   console.log(dim('\n  Ctrl-C to stop.'));
@@ -232,7 +232,7 @@ function readServerInfo() {
  * expensive: telling someone to `kill` a pid that belongs to an unrelated
  * program is worse than saying nothing. So the port is asked directly rather
  * than inferred from server.json, which is silent about both a server that was
- * killed rather than stopped and a server started under another NMMON_HOME -
+ * killed rather than stopped and a server started under another RAISE_HOME -
  * the second of which is the usual cause of this message.
  *
  * @param {number} port
@@ -242,30 +242,30 @@ async function explainBusyPort(port) {
   const live = await probeHealth(port);
   if (!live) {
     return [
-      red(`Port ${port} is in use, and whatever is listening is not nmmon.`),
+      red(`Port ${port} is in use, and whatever is listening is not Raise.`),
       `  Find it   ${bold(`lsof -nP -iTCP:${port} -sTCP:LISTEN`)}`,
-      `  Or run    ${bold('nmmon serve --port <n>')}`,
+      `  Or run    ${bold('raise serve --port <n>')}`,
     ];
   }
   const info = readServerInfo();
   if (info?.port === port && info?.pid === live.pid) {
     return [
-      `${bold('nmmon')} is already running on port ${port} (pid ${live.pid}).`,
-      `  Open it   ${bold('nmmon open')}`,
+      `${bold('Raise')} is already running on port ${port} (pid ${live.pid}).`,
+      `  Open it   ${bold('raise open')}`,
     ];
   }
   return [
-    red(`Port ${port} is held by another nmmon (pid ${live.pid}) that this installation has`),
-    red('no record of - most likely a leftover started with a different NMMON_HOME.'),
+    red(`Port ${port} is held by another Raise (pid ${live.pid}) that this installation has`),
+    red('no record of - most likely a leftover started with a different RAISE_HOME.'),
     `  Stop it   ${bold(`kill ${live.pid}`)}`,
-    `  Or run    ${bold('nmmon serve --port <n>')}`,
+    `  Or run    ${bold('raise serve --port <n>')}`,
   ];
 }
 
 async function cmdOpen() {
   const info = readServerInfo();
   if (!info) {
-    console.error(`nmmon is not running. Start it with ${bold('nmmon serve')}.`);
+    console.error(`raise is not running. Start it with ${bold('raise serve')}.`);
     process.exitCode = 1;
     return;
   }
@@ -275,7 +275,7 @@ async function cmdOpen() {
     console.error(
       `Recorded on port ${info.port} (pid ${info.pid}), but nothing is answering - the server has stopped.`,
     );
-    console.error(`Start it with ${bold('nmmon serve')}.`);
+    console.error(`Start it with ${bold('raise serve')}.`);
     process.exitCode = 1;
     return;
   }
@@ -460,14 +460,14 @@ async function cmdStatus() {
 async function cmdFocus(positional) {
   const sessionId = positional[0];
   if (!sessionId) {
-    console.error('Usage: nmmon focus <session-id>');
+    console.error('Usage: raise focus <session-id>');
     process.exitCode = 1;
     return;
   }
   const registry = new SessionRegistry({ dir: sessionsDir() });
   const record = registry.get(sessionId);
   if (!record) {
-    console.error(`No session ${sessionId}. Run ${bold('nmmon status')} to list them.`);
+    console.error(`No session ${sessionId}. Run ${bold('raise status')} to list them.`);
     process.exitCode = 1;
     return;
   }
@@ -531,7 +531,7 @@ async function cmdUninstallHooks(flags) {
   const existing = readSettings(settingsPath);
   const { settings, changes } = removeHooks(existing);
   if (changes.length === 0) {
-    console.log('No nmmon hooks found.');
+    console.log('No Raise hooks found.');
     return;
   }
   if (flags['dry-run']) {
@@ -587,14 +587,14 @@ async function cmdUninstallPiExtension(flags) {
   const existing = readSettings(settingsPath);
   const { settings, changes } = removeExtension(existing);
   if (changes.length === 0) {
-    console.log('No nmmon extension found.');
+    console.log('No Raise extension found.');
     return;
   }
   if (flags['dry-run']) {
     console.log(changes.join('\n'));
     return;
   }
-  if (!flags.yes && !(await confirm(`Remove the nmmon extension from ${settingsPath}?`))) {
+  if (!flags.yes && !(await confirm(`Remove the Raise extension from ${settingsPath}?`))) {
     console.log('Nothing written.');
     return;
   }
@@ -615,7 +615,7 @@ async function cmdDoctor() {
   if (major > 22 || (major === 22 && minor >= 5)) {
     ok('Node', `v${process.versions.node}`);
   } else {
-    bad('Node', `v${process.versions.node} - nmmon needs 22.5 or newer for the built-in SQLite support`);
+    bad('Node', `v${process.versions.node} - Raise needs 22.5 or newer for the built-in SQLite support`);
   }
 
   // no-mistakes is optional, so its absence is reported rather than failed. A
@@ -643,7 +643,7 @@ async function cmdDoctor() {
     off('lavish-axi', 'not installed - review gates will not be detected');
   }
 
-  // The only outbound request nmmon makes, so its default is off and its default
+  // The only outbound request Raise makes, so its default is off and its default
   // is silent - `off` rather than `warn`, exactly like no-mistakes and Lavish. A
   // `problem` is different: it is only ever set when somebody has evidently
   // tried to configure this and it is not working, and the whole point of
@@ -670,11 +670,11 @@ async function cmdDoctor() {
   } else if (hooks.state === 'partial') {
     warn(
       'Claude Code hooks',
-      `out of date - missing ${hooks.missing.join(', ')}. Run ${bold('nmmon install-hooks')} ` +
+      `out of date - missing ${hooks.missing.join(', ')}. Run ${bold('raise install-hooks')} ` +
         'and restart your Claude sessions to pick them up',
     );
   } else {
-    warn('Claude Code hooks', `not installed - run ${bold('nmmon install-hooks')}`);
+    warn('Claude Code hooks', `not installed - run ${bold('raise install-hooks')}`);
   }
 
   // Only reported when pi is actually installed. Telling somebody who does not
@@ -688,7 +688,7 @@ async function cmdDoctor() {
     if (installed) {
       ok('pi extension', `installed in ${piSettings}`);
     } else {
-      warn('pi extension', `not installed - run ${bold('nmmon install-pi')}`);
+      warn('pi extension', `not installed - run ${bold('raise install-pi')}`);
     }
   }
 
@@ -715,7 +715,7 @@ async function cmdDoctor() {
   } else if (process.platform === 'darwin') {
     warn('Terminals', 'no supported terminal running (iTerm2, Terminal.app)');
   } else {
-    warn('Terminals', `focusing is macOS-only so far; on ${process.platform} nmmon still monitors`);
+    warn('Terminals', `focusing is macOS-only so far; on ${process.platform} Raise still monitors`);
   }
 
   // server.json says where the monitor was last started, which is a different
@@ -728,7 +728,7 @@ async function cmdDoctor() {
   } else if (info && live) {
     warn(
       'Server',
-      `server.json names pid ${info.pid}, but port ${info.port} is answered by pid ${live.pid} - stale record, and another nmmon has the port`,
+      `server.json names pid ${info.pid}, but port ${info.port} is answered by pid ${live.pid} - stale record, and another Raise has the port`,
     );
   } else if (info) {
     warn(
@@ -738,13 +738,13 @@ async function cmdDoctor() {
   } else if (live) {
     warn(
       'Server',
-      `port ${probePort} is held by another nmmon (pid ${live.pid}) with no record here - probably a leftover; ${bold(`kill ${live.pid}`)} or use --port`,
+      `port ${probePort} is held by another Raise (pid ${live.pid}) with no record here - probably a leftover; ${bold(`kill ${live.pid}`)} or use --port`,
     );
   } else {
-    warn('Server', `not running - start it with ${bold('nmmon serve')}`);
+    warn('Server', `not running - start it with ${bold('raise serve')}`);
   }
 
-  console.log(`${bold('nmmon doctor')}   home: ${monitorHome()}\n`);
+  console.log(`${bold('raise doctor')}   home: ${monitorHome()}\n`);
   for (const check of checks) {
     const mark = CHECK_MARKS[check.state] ?? red('fail');
     console.log(`  ${mark}  ${check.name.padEnd(22)} ${check.detail}`);

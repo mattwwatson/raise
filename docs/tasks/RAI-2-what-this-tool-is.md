@@ -153,8 +153,8 @@ with the reason (the hooks are the only source that works on a machine with noth
 installed) and a "do not reorder them back".
 
 **The sweep found one thing, in `README.md`.** Under *What it watches*, a paragraph derived a
-general property of nmmon from an optional dependency: *"`no-mistakes` keeps a single daemon and
-a single SQLite database for the whole machine, so nmmon reads every repo's state from one place.
+general property of Raise from an optional dependency: *"`no-mistakes` keeps a single daemon and
+a single SQLite database for the whole machine, so Raise reads every repo's state from one place.
 You do not register repos with it and there is nothing to configure per project."* The
 zero-configuration claim is true and does not come from no-mistakes - sessions report themselves
 through the agent's hooks - so it now leads on that, and the no-mistakes fact is the subordinate

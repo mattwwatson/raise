@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { reportablePayload, REPORTABLE_FIELDS } from '../src/hook-payload.js';
 
-test('the fields nmmon reads are carried through', () => {
+test('the fields Raise reads are carried through', () => {
   const payload = {
     session_id: 's1',
     hook_event_name: 'Notification',
@@ -18,7 +18,7 @@ test('the fields nmmon reads are carried through', () => {
 
 test('prompt text never leaves the session', () => {
   // UserPromptSubmit carries the whole prompt. It is the single most private
-  // thing an agent handles and nmmon has never had a use for it.
+  // thing an agent handles and Raise has never had a use for it.
   const body = reportablePayload({
     session_id: 's1',
     hook_event_name: 'UserPromptSubmit',

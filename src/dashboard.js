@@ -505,7 +505,7 @@ const IDLE_NUDGE_TYPE = 'idle_prompt';
  * back there would be guessing with the answer already in hand.
  *
  * The message is the fallback for a session whose Claude Code predates the
- * field, or whose record was written before nmmon read it. Both paths fail
+ * field, or whose record was written before Raise read it. Both paths fail
  * closed - anything unrecognised, including no message at all, is a block -
  * because the cost of a stale "waiting for you" is a row you distrust, and the
  * cost of the other mistake is a swallowed permission prompt.
@@ -1048,7 +1048,7 @@ export function buildRows({
   // A run we could not tie to any session. Someone ran no-mistakes by hand, the
   // session that started it has gone, or nothing was running to trace it to -
   // `axi run` returns at every gate, so a parked run has no process to walk up
-  // from, and `nmmon status` has no ownership memory at all.
+  // from, and `raise status` has no ownership memory at all.
   //
   // This is the one card on the page that is not a session, and it earns that
   // by admitting what it does not know. The alternative was showing the run on

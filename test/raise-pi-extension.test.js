@@ -16,23 +16,23 @@ import { join } from 'node:path';
 let instance = 0;
 async function loadExtension() {
   instance += 1;
-  const module = await import(`../hooks/nmmon-pi-extension.js?case=${instance}`);
+  const module = await import(`../hooks/raise-pi-extension.js?case=${instance}`);
   return module.default;
 }
 
 /**
- * A scratch NMMON_HOME, a `fetch` that records posts instead of making them,
+ * A scratch RAISE_HOME, a `fetch` that records posts instead of making them,
  * and a process table that counts how often it is read.
  */
 function harness({ serverRunning = true } = {}) {
-  const dir = mkdtempSync(join(tmpdir(), 'nmmon-test-'));
+  const dir = mkdtempSync(join(tmpdir(), 'raise-test-'));
   const startServer = () =>
     writeFileSync(join(dir, 'server.json'), JSON.stringify({ port: 65000, token: 't' }));
   if (serverRunning) startServer();
 
-  const previousHome = process.env.NMMON_HOME;
+  const previousHome = process.env.RAISE_HOME;
   const previousFetch = globalThis.fetch;
-  process.env.NMMON_HOME = dir;
+  process.env.RAISE_HOME = dir;
 
   /** @type {any[]} */
   const posts = [];
@@ -61,8 +61,8 @@ function harness({ serverRunning = true } = {}) {
     fire: (event, payload) => handlers[event](payload, ctx()),
     cleanup: () => {
       globalThis.fetch = previousFetch;
-      if (previousHome === undefined) delete process.env.NMMON_HOME;
-      else process.env.NMMON_HOME = previousHome;
+      if (previousHome === undefined) delete process.env.RAISE_HOME;
+      else process.env.RAISE_HOME = previousHome;
       rmSync(dir, { recursive: true, force: true });
     },
   };
@@ -105,7 +105,7 @@ test('the window identity is walked once and sent with every post', async () => 
   }
 });
 
-test('a session that started while nmmon was down still reports its window', async () => {
+test('a session that started while Raise was down still reports its window', async () => {
   // Anchoring the identity to session_start would strand this session: its only
   // chance to be placed went nowhere, and it would render as a dead card and
   // outlive its own process by a fortnight in the registry.
@@ -127,7 +127,7 @@ test('a session that started while nmmon was down still reports its window', asy
   }
 });
 
-test('a machine not running nmmon never reads the process table', async () => {
+test('a machine not running Raise never reads the process table', async () => {
   const h = harness({ serverRunning: false });
   try {
     (await loadExtension())(h.pi, { readProcess: h.readProcess });

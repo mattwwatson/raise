@@ -23,7 +23,7 @@ active_steps: review, running, 3m44s, agent_pid 38815
 ```
 
 The agent was alive and working. No session was registered for it - nothing under
-`~/.nmmon/sessions/` had a `cwd` inside that run's worktree - so nothing was folded onto the
+`~/.raise/sessions/` had a `cwd` inside that run's worktree - so nothing was folded onto the
 repository's card and the page said nothing about what the pipeline was doing.
 
 **A second run was going at the same time, and its agent *had* registered.** Same machine, same
@@ -37,14 +37,14 @@ rather than a design gap: the two behaved differently.
 Read from the source and the live machine, not assumed:
 
 1. **Pipeline steps run Claude Code.** `~/.no-mistakes/config.yaml` has `agent: claude`, so a
-   step's agent is the same binary nmmon installs its hooks into. "It was a different agent
+   step's agent is the same binary Raise installs its hooks into. "It was a different agent
    backend" is ruled out - and both runs used the same one.
 
 2. **A step with no agent at all is a separate, understood case, and is not this.** The `ci`
    step reports an empty `agent_pid` because the CI monitor runs *inside the no-mistakes
    daemon* with no Claude session anywhere. PR #13 handled that by rendering
    `step.lastActivity` on the pipeline line. This item is about a step that genuinely **has** an
-   agent that nmmon cannot see.
+   agent that Raise cannot see.
 
 3. **Registration happens on `SessionStart` and is never retried.** `HOOK_EVENTS` in
    `src/hooks.js` is `SessionStart`, `UserPromptSubmit`, `PermissionRequest`, `Notification`,
@@ -117,7 +117,7 @@ look at what else could differ between two steps of two runs on one machine:
 
 ## Why this matters more than it looks
 
-nmmon exists to answer *which session needs me*. A pipeline agent that hits a permission prompt
+Raise exists to answer *which session needs me*. A pipeline agent that hits a permission prompt
 while unregistered is a **blocked agent nobody can see** - `AGENTS.md` is explicit that a
 blocked pipeline agent must turn the repository's row red, because the pipeline has stalled and
 only a human can free it. If the agent never registered, that signal cannot fire at all.
@@ -129,7 +129,7 @@ So the visible symptom is a missing marker, and the real cost is a missed block.
 ## Reproduce as a test first
 
 Per `AGENTS.md` and Matt's standing preference. If the cause is a lost `SessionStart`, that is
-testable against a live server on an ephemeral port with a scratch `NMMON_HOME` - see the
+testable against a live server on an ephemeral port with a scratch `RAISE_HOME` - see the
 existing pattern in `test/server.test.js`, which already stops and starts a monitor and asserts
 on what the registry holds afterwards.
 

@@ -1,10 +1,10 @@
 {
-  "name": "no-mistakes-monitor",
+  "name": "raise-cli",
   "version": "0.1.0",
   "description": "One page that shows every agent session on your machine - Claude Code, Claude Desktop and pi - tells you which one is waiting for you, and jumps to that window when you click it.",
   "type": "module",
   "bin": {
-    "nmmon": "bin/nmmon.js"
+    "raise": "bin/raise.js"
   },
   "engines": {
     "node": ">=22.13.0"
@@ -26,8 +26,7 @@
     "hooks/",
     "README.md"
   ],
-  "license": "UNLICENSED",
-  "private": true,
+  "license": "MIT",
   "devDependencies": {
     "@types/node": "26.1.2",
     "oxlint": "1.77.0",

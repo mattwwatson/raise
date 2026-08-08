@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { mergeExtension, removeExtension, EXTENSION_MARKER } from '../src/pi-extension.js';
 
-const OURS = '/Users/x/work/no-mistakes-monitor/hooks/nmmon-pi-extension.js';
+const OURS = '/Users/x/work/no-mistakes-monitor/hooks/raise-pi-extension.js';
 
 test('installing into an empty settings file adds the path', () => {
   const { settings, changes } = mergeExtension({}, OURS);
@@ -28,7 +28,7 @@ test('somebody else"s extensions keep their place', () => {
 
 test('a moved checkout updates our entry rather than adding a second', () => {
   // Two copies would load the extension twice and post every event twice.
-  const existing = { extensions: ['/old/path/hooks/nmmon-pi-extension.js', '/a/other.js'] };
+  const existing = { extensions: ['/old/path/hooks/raise-pi-extension.js', '/a/other.js'] };
   const { settings, changes } = mergeExtension(existing, OURS);
   assert.deepEqual(settings.extensions, [OURS, '/a/other.js']);
   assert.match(changes[0], /^update /);
@@ -36,7 +36,7 @@ test('a moved checkout updates our entry rather than adding a second', () => {
 
 test('a duplicate added by hand is dropped', () => {
   const existing = {
-    extensions: [OURS, '/a/other.js', '/another/nmmon-pi-extension.js'],
+    extensions: [OURS, '/a/other.js', '/another/raise-pi-extension.js'],
   };
   const { settings } = mergeExtension(existing, OURS);
   assert.deepEqual(settings.extensions, [OURS, '/a/other.js']);

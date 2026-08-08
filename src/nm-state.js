@@ -11,7 +11,7 @@
  * nonsense - and re-probe on every read, so an upgrade that restores a schema
  * we know puts us back on the fast path without a restart.
  *
- * **no-mistakes is optional, and its absence is not a degraded state.** nmmon's
+ * **no-mistakes is optional, and its absence is not a degraded state.** Raise's
  * other three sources - the hooks, the transcript and the process table - are
  * complete without it, so a machine that has never installed no-mistakes gets a
  * working monitor with no pipeline rows and, importantly, no warning: there is
@@ -148,7 +148,7 @@ import { basename } from 'node:path';
  * Every column the queries below touch. The probe and the queries have to stay
  * in step: a column that is selected but not probed degrades late, as a query
  * error reported as "lost the database", rather than at startup with the
- * accurate "this build of no-mistakes is not the one nmmon expects".
+ * accurate "this build of no-mistakes is not the one Raise expects".
  *
  * The rule that keeps them in step is that nothing is selected unless it is
  * read, and everything that is read is listed here.
@@ -402,7 +402,7 @@ export class NoMistakesState {
         this.#mode = 'cli';
         this.#warning =
           `no-mistakes database is missing ${missing.join(', ')}. ` +
-          'This build of no-mistakes is newer or older than nmmon expects, so pipeline ' +
+          'This build of no-mistakes is newer or older than Raise expects, so pipeline ' +
           'state is being read the slow way instead. Everything still works, but only ' +
           'repos with a live Claude session are covered.';
         this.#close();

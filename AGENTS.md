@@ -2,13 +2,13 @@
 
 Guidance for Claude Code and other agents working in this repo.
 
-`README.md` is for people who want to *use* nmmon - install it, run it, understand what they
+`README.md` is for people who want to *use* Raise - install it, run it, understand what they
 are looking at. This file is for changing it: architecture, conventions, and the decisions
 that are easy to undo by accident.
 
 ## Project Overview
 
-`nmmon` is a single-page monitor for the machine it runs on. It shows every agent session -
+Raise is a single-page monitor for the machine it runs on. It shows every agent session -
 Claude Code in a terminal, Claude Desktop, or pi - across every repo, ranks them by who needs
 a human, and focuses the window when you click a row.
 
@@ -17,7 +17,7 @@ Everything else is supporting cast. Optimise for that signal arriving fast and n
 wrong.
 
 **The session is the unit, and everything else is an attribute of one.** This is worth stating
-plainly because it was not always true: nmmon began as a monitor for `no-mistakes` and grew
+plainly because it was not always true: Raise began as a monitor for `no-mistakes` and grew
 into a monitor for sessions, and a run of decisions written under the old framing survived
 into the new one. They all shared a shape - treating a pipeline run as a subject in its own
 right - and every one of them eventually put a confident wrong answer on a card. So:
@@ -41,7 +41,7 @@ shows a confident green dot over state that stopped updating is worse than one t
 visibly down, because you stop checking. Any change that could let the page or the CLI assert
 something it no longer knows is a bug, even if nothing throws.
 
-**nmmon watches one machine and serves the one person sitting at it.** No auth, no multi-user
+**Raise watches one machine and serves the one person sitting at it.** No auth, no multi-user
 support, no remote access. Those are scope boundaries rather than gaps waiting to be filled -
 each of them turns a local page into a service, and none should be added speculatively.
 
@@ -106,7 +106,7 @@ one, so it comes last. Do not reorder them back.
 
 | Path | What |
 | --- | --- |
-| `bin/nmmon.js` | CLI |
+| `bin/raise.js` | CLI |
 | `src/cli-args.js` | argument parsing (pure) |
 | `src/config.js` | paths, ports, the shared token; all env-overridable |
 | `src/nm-state.js` | reads the no-mistakes database, with schema probe and fallback |
@@ -124,13 +124,13 @@ one, so it comes last. Do not reorder them back.
 | `src/focus/` | tmux resolution, per-terminal adapters, and raising Claude Desktop |
 | `src/process-tree.js` | which terminal or app, and which agent process, a hook is running under |
 | `src/security.js` | token, Host and Origin checks (pure) |
-| `src/health.js` | probing a port to find out whether nmmon is behind it |
+| `src/health.js` | probing a port to find out whether Raise is behind it |
 | `src/exec.js` | the one place that runs external commands |
 | `src/server.js` | HTTP, server-sent events, the poll loop |
 | `src/hooks.js` | merging our hooks into the user's `~/.claude/settings.json` |
 | `src/hook-payload.js` | which fields may leave an agent and reach us (pure) |
-| `hooks/nmmon-hook.js` | the Claude Code hook |
-| `hooks/nmmon-pi-extension.js` | the pi extension, which is the same reporter in-process |
+| `hooks/raise-hook.js` | the Claude Code hook |
+| `hooks/raise-pi-extension.js` | the pi extension, which is the same reporter in-process |
 | `src/pi-transcript.js` | pi transcripts, normalised into the records `transcript.js` reads |
 | `src/pi-extension.js` | merging our extension into pi's `settings.json` |
 | `public/index.html` | the page, self-contained |
@@ -149,7 +149,7 @@ Rules:
   Keep them that way - if a new rule needs the clock, the filesystem or a subprocess, inject
   it as a parameter rather than importing it.
 - **Never import `src/exec.js` from a module that needs to shell out.** Take a runner as a
-  parameter and default it at the edge (`bin/nmmon.js`, `server.js`). This is what lets the
+  parameter and default it at the edge (`bin/raise.js`, `server.js`). This is what lets the
   suite assert on the AppleScript that *would* have run without stealing your focus mid-test.
 - **Nothing reachable from the server may run a synchronous child process.** Use `execAsync`
   / `tryExecAsync`. The server polls on a 1s timer, pushes a stream and answers hook posts
@@ -160,7 +160,7 @@ Rules:
   focus function, and nothing else in the codebase changes. If adding terminal support
   touches anything else, the abstraction is being broken; say so rather than working around it.
 - Config, paths and ports resolve through `src/config.js` and are env-overridable
-  (`NMMON_HOME`, `NM_HOME`, `NMMON_PORT`) so tests never touch a real installation.
+  (`RAISE_HOME`, `NM_HOME`, `RAISE_PORT`) so tests never touch a real installation.
 
 ## Design decisions worth knowing
 
@@ -231,7 +231,7 @@ dashboard sat on a green "live" dot over state that had stopped updating. Livene
 positive evidence, never the absence of an error. Do not "tidy" the event back into a comment.
 
 **`server.json` is not the source of truth for "is it running".** `serve` asks the port
-itself via `/health`. A monitor started under a different `NMMON_HOME` writes its record
+itself via `/health`. A monitor started under a different `RAISE_HOME` writes its record
 somewhere you will never look, so the file says "not running" while the port disagrees -
 and a record outlives a server that was killed rather than shut down.
 
@@ -316,7 +316,7 @@ read leaves the hooks' answer standing.
 >
 > Not chosen because it costs a hook process and a localhost POST **per tool call**, inside
 > the user's editing loop, and because hooks are read at session start: it fixes nothing
-> until `nmmon install-hooks` is re-run *and* every open session is restarted, which is
+> until `raise install-hooks` is re-run *and* every open session is restarted, which is
 > exactly when a stale block is most annoying. The transcript approach fixes sessions that
 > are already running, for free.
 >
@@ -358,7 +358,7 @@ rather than trusting the page: a tab is seconds behind, and the row it drew as a
 prompt by the time it is clicked. The state rule holds the block to `isIdleNudge` a second time,
 so even a dismissal that somehow reached the record could not suppress a prompt.
 
-**It is server-side, and it says so on the row.** The page and `nmmon status` are one protocol,
+**It is server-side, and it says so on the row.** The page and `raise status` are one protocol,
 so a dismissal only the browser knew would have them disagreeing about the same session; it
 lives with the session record, and both renderers show `Row.dismissed`. That visibility is the
 load-bearing half. The failure this product cares about most is quiet staleness - a confident
@@ -411,7 +411,7 @@ one: a reworded string no longer costs anything, and there is no case where the 
 type disagree. A type we do not recognise is *new*, not missing, so it stays a block and the
 message is not consulted underneath it - falling back there would be guessing with the answer
 already in hand. The message remains the fallback only when there is no type at all, which is
-a Claude Code too old to send one, or a record written before nmmon read it.
+a Claude Code too old to send one, or a record written before Raise read it.
 
 Two other things about this notification are worth knowing, both measured in the 2.1.221
 binary. It is **fired on a six-second tick and only once you have been idle six seconds**, so
@@ -453,7 +453,7 @@ the same terms as `message` and `notificationType`, and a record without it fall
 Two things this does **not** do. It does not shorten a stale block by one millisecond - there
 is no resolution event, so clearing is still the transcript's job. And it does nothing at all
 for a session that is already open: hook *registration* is read at session start, so this
-needs `nmmon install-hooks` re-run and every session restarted. Reading `notification_type`,
+needs `raise install-hooks` re-run and every session restarted. Reading `notification_type`,
 by contrast, took effect everywhere the moment the server restarted, because the hook script's
 *contents* are read fresh on every event. That asymmetry is worth remembering when choosing
 between the two kinds of fix.
@@ -557,7 +557,7 @@ Two rules keep it from becoming a confident wrong answer of its own:
 which is when the dashboard matters most. Without the memory the run would fall off the card of
 the session holding its gate, at the gate, onto an unattributable row nobody can act on - and
 again for as long as a failed run stays visible, since nothing of it is running by then either.
-Verified live - with the run parked, `ps` showed only the daemon, so `nmmon status`, which is
+Verified live - with the run parked, `ps` showed only the daemon, so `raise status`, which is
 one-shot and has no memory, had nothing to attribute the run with at all. The server polls, so
 it catches `axi run` within a second of it starting and holds the answer.
 
@@ -756,7 +756,7 @@ is doing rather than how it ended.
 
 **An unattributable run gets one card, and it says so.** A run we cannot tie to any session -
 started by hand, its session gone, or simply never observed because `axi run` returns at every
-gate and `nmmon status` has no ownership memory at all - is the one thing on this page that is
+gate and `raise status` has no ownership memory at all - is the one thing on this page that is
 not a session. It earns that by admitting what it does not know: `attributable: false`, a
 count of the live sessions sharing its repository, and no `Focus ↗`, because there is nothing
 to focus.
@@ -876,7 +876,7 @@ precisely what this page may not assert.
 
 **The Bitbucket credential lives in a file and may not come from the environment, which is the
 opposite of the intuitive answer.** `exec.js` spawns with no `env` option, so every child
-inherits nmmon's whole environment - `ps`, `tmux`, `osascript`, `gh`, `lavish-axi` and
+inherits Raise's whole environment - `ps`, `tmux`, `osascript`, `gh`, `lavish-axi` and
 `no-mistakes`, most of them on the one-second poll loop. A token in the environment is a token
 handed to all of them for as long as the monitor runs. Read out of a `0600` file into a
 variable and put in a header, it is in one process and in no environment at all. The tempting
@@ -895,7 +895,7 @@ GitHub token path**, and never write a GitHub token to the config file.
 makes a documented `0600` more than a comment, since a file can be written correctly and
 chmodded later. Honouring the half of a file with no secret in it, having just called the file
 unsafe, teaches nobody to fix it - and the credential already exposed is exposed either way.
-`nmmon doctor` is where that is said; `readForgeConfig` sets `problem` **only** when somebody
+`raise doctor` is where that is said; `readForgeConfig` sets `problem` **only** when somebody
 has evidently tried to configure this and it is not working, never for the ordinary case of no
 file at all. That silence is the same rule no-mistakes and Lavish are held to.
 
@@ -1147,7 +1147,7 @@ Three things the rename has to get right, each learned from the other agent:
   `file_path` for the same reason: without it the card reads "Reading Read".
 
 **The pi reporter is an extension, so "never fail" is stricter than for the hook.**
-`nmmon-hook.js` is a separate process - if it throws, a subprocess dies quietly. The pi
+`raise-hook.js` is a separate process - if it throws, a subprocess dies quietly. The pi
 extension runs *inside the agent*, and pi awaits event handlers, so an exception surfaces in
 somebody's editing loop and a slow `fetch` stalls their turn. Every handler catches
 everything; the post is bounded and never awaited.
@@ -1161,7 +1161,7 @@ that the server would then resolve against its own working directory.
 **The extension is registered by path, never copied into `~/.pi/agent/extensions/`.**
 Auto-discovery would work and is shorter, but a copied file is a fork: it goes stale the first
 time the repo is pulled, and the stale half is the one running inside the agent.
-`nmmon-hook.js` is registered the same way for the same reason.
+`raise-hook.js` is registered the same way for the same reason.
 
 **The host terminal for a tmux session is deliberately not stored.** A tmux session can be
 detached and reattached in a different terminal entirely, so it is resolved fresh on every
@@ -1175,7 +1175,7 @@ Focusing that tty - correct for ordinary tmux - raises that one tab no matter wh
 you clicked. Title is the one handle both sides share, since iTerm2 names each tab after the
 tmux pane title. The leading status glyph is stripped first, because Claude Code animates a
 braille spinner through it and the two sides are read a moment apart. On a title collision
-nmmon says so rather than raising an arbitrary window, and nothing is selected inside tmux -
+Raise says so rather than raising an arbitrary window, and nothing is selected inside tmux -
 iTerm2 does not follow tmux's selection in control mode, so doing it anyway would just move
 the user's active window for no visible reason.
 
@@ -1228,6 +1228,16 @@ shell arguments. tmux forbids `:` and `.` in a session name, so `$204:@349` cann
 
 ## Coding Conventions
 
+- **The product is `Raise`; the command is `raise`. The capital is load-bearing, because the
+  name is also a verb.** Written lowercase in running prose it reads as an instruction -
+  *"raise says so rather than raising an arbitrary window"* - so the name takes a capital
+  wherever it is the subject of a sentence, in comments, user-facing strings and documentation
+  alike. Lowercase `raise` is reserved for the thing you actually type: `raise serve`,
+  `raise doctor`, `bin/raise.js`, `~/.raise/`, `RAISE_HOME`, `.raise-backup`. This is why the
+  codebase can still say *"the adapters compete to raise a window"* and mean the verb.
+
+  The npm package is **`raise-cli`**, not `raise`, which is squatted; the `bin` key is what
+  makes the command `raise`, and the two need not match.
 - **Every module opens with a comment explaining why it exists**, not what it does - the
   constraint, the failure it prevents, the thing that is non-obvious. Match that density; it
   is the most valuable thing in the codebase. See `src/exec.js`, `public/connection.js`,
@@ -1351,7 +1361,7 @@ changing it there too.
   on the AppleScript and tmux commands that *would* have run without stealing your focus
   mid-test. A test that touches the real machine does not belong here.
 - New behaviour in a pure module gets a direct unit test. New behaviour in `server.js` gets a
-  test against a live server on an ephemeral port with a scratch `NMMON_HOME`.
+  test against a live server on an ephemeral port with a scratch `RAISE_HOME`.
 
 Coverage uses Node's own instrumentation, so it needs no dependency either. It crashes on
 Homebrew's default Node 26 (a `c8`/`yargs` ESM issue), so pin Node 24 for it:
@@ -1363,12 +1373,12 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 ## Safe-Change Rules
 
 - **`src/hooks.js` writes to the user's `~/.claude/settings.json`.** It must keep showing a
-  diff, asking first, backing up to `.nmmon-backup`, leaving foreign hooks untouched, and
+  diff, asking first, backing up to `.raise-backup`, leaving foreign hooks untouched, and
   being safe to run twice. Never make it write without confirmation.
-- **`hooks/nmmon-hook.js` runs inside someone's live Claude session.** It must never fail and
+- **`hooks/raise-hook.js` runs inside someone's live Claude session.** It must never fail and
   never block: every path exits 0, quietly, within `TIMEOUT_MS`. A monitor that can break
   Claude Code is worse than no monitor.
-- **`hooks/nmmon-pi-extension.js` runs in-process inside someone's live pi session**, which
+- **`hooks/raise-pi-extension.js` runs in-process inside someone's live pi session**, which
   is a stricter version of the rule above: pi awaits event handlers, so a throw reaches the
   user's turn and a slow request stalls it. Every handler catches everything, and the post is
   bounded and never awaited. Do not make it `await` anything on pi's path.
@@ -1405,10 +1415,10 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
   > collapsed are separable: what the page may show and what may leave the machine. The
   > second half has not moved an inch.
 - **The forge lookup is the product's only outbound request, and it is opt-in.** It must stay
-  that way: off unless `~/.nmmon/config.json` says otherwise, silent in every failure, and
+  that way: off unless `~/.raise/config.json` says otherwise, silent in every failure, and
   sending nothing but a pull request URL to the forge already named in it. `server.test.js`
   carries `fetch: () => assert.fail(...)` beside its `exec` guard on every other test, which
-  is what proves an unconfigured nmmon makes no request at all - **do not weaken that guard
+  is what proves an unconfigured Raise makes no request at all - **do not weaken that guard
   either.** If this ever grows a second thing to send or a second place to send it, that is a
   change to the README's privacy section first and code second.
 - **Do not weaken `src/security.js`.** Token, `Host` allowlist and `Origin` allowlist are all
@@ -1480,10 +1490,10 @@ npm run tasks:gate             # this branch's spec says shipped
 npm run tasks:validate         # how disk and Jira differ - needs JIRA_EMAIL and JIRA_TOKEN
 ```
 
-The `nmmon` commands themselves, and their flags, are documented in
+The `raise` commands themselves, and their flags, are documented in
 [README.md](README.md#commands) and only there - a second copy is what drifts.
 
-When exercising them by hand, set `NMMON_HOME` and `NM_HOME` so you do not disturb the
+When exercising them by hand, set `RAISE_HOME` and `NM_HOME` so you do not disturb the
 running installation.
 
 ## Maintaining this file

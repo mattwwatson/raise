@@ -2,7 +2,7 @@
  * Command line parsing.
  *
  * Extracted from the CLI so it can be tested directly. It was originally
- * inline, where `nmmon --help` silently started a server: the leading flag was
+ * inline, where `raise --help` silently started a server: the leading flag was
  * taken as the command name and never parsed as a flag.
  */
 

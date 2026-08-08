@@ -42,7 +42,7 @@ cannot be separated that way - there is no field left that differs.
      so a parked run has no process to walk up from - and parked is exactly when the dashboard
      matters most
    - the monitor was restarted after the run began, so it never saw the process
-   - `nmmon status` is one-shot and has **no `RunOwners` memory at all**, so it is *always* in
+   - `raise status` is one-shot and has **no `RunOwners` memory at all**, so it is *always* in
      this state
 
 3. **Showing it on every matching session is the current, deliberate degradation.** The rule in

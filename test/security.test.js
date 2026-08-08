@@ -49,7 +49,7 @@ test('tokenMatches is exact and type safe', () => {
 
 test('extractToken prefers the header over the query string', () => {
   const url = new URL('http://127.0.0.1:7717/events?t=fromquery');
-  assert.equal(extractToken({ headers: { 'x-nmmon-token': 'fromheader' } }, url), 'fromheader');
+  assert.equal(extractToken({ headers: { 'x-raise-token': 'fromheader' } }, url), 'fromheader');
   assert.equal(extractToken({ headers: {} }, url), 'fromquery');
 });
 
@@ -58,12 +58,12 @@ test('checkRequest reports the specific failure', () => {
   const opts = { token: 'secret', port: 7717 };
 
   assert.deepEqual(
-    checkRequest({ headers: { host: 'evil.com:7717', 'x-nmmon-token': 'secret' } }, url, opts),
+    checkRequest({ headers: { host: 'evil.com:7717', 'x-raise-token': 'secret' } }, url, opts),
     { ok: false, status: 403, reason: 'host not allowed' },
   );
   assert.deepEqual(
     checkRequest(
-      { headers: { host: '127.0.0.1:7717', origin: 'http://evil.com', 'x-nmmon-token': 'secret' } },
+      { headers: { host: '127.0.0.1:7717', origin: 'http://evil.com', 'x-raise-token': 'secret' } },
       url,
       opts,
     ),
@@ -75,7 +75,7 @@ test('checkRequest reports the specific failure', () => {
     reason: 'bad or missing token',
   });
   assert.deepEqual(
-    checkRequest({ headers: { host: '127.0.0.1:7717', 'x-nmmon-token': 'secret' } }, url, opts),
+    checkRequest({ headers: { host: '127.0.0.1:7717', 'x-raise-token': 'secret' } }, url, opts),
     { ok: true },
   );
 });

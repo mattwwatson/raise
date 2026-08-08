@@ -1,11 +1,11 @@
 /**
- * `nmmon serve` against a port it cannot have.
+ * `raise serve` against a port it cannot have.
  *
  * A busy port is the most likely way `serve` ever fails, and it used to fail by
  * printing a Node stack trace - which names the port and nothing else. That is
  * exactly the wrong output: the three reasons a port is busy need three
  * different actions, and the one that actually happened here was a leftover
- * nmmon from a deleted NMMON_HOME, which no amount of reading server.json would
+ * Raise from a deleted RAISE_HOME, which no amount of reading server.json would
  * have revealed.
  */
 
@@ -22,10 +22,10 @@ import { dirname, join } from 'node:path';
 import { createMonitorServer } from '../src/server.js';
 
 const execFileAsync = promisify(execFile);
-const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'nmmon.js');
+const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'raise.js');
 
 function scratch() {
-  const dir = mkdtempSync(join(tmpdir(), 'nmmon-test-'));
+  const dir = mkdtempSync(join(tmpdir(), 'raise-test-'));
   return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
@@ -45,8 +45,8 @@ function freePort() {
  * since a non-zero exit is what every test here is about.
  */
 async function cli(args, home, extraEnv = {}) {
-  const env = { ...process.env, NMMON_HOME: home, NM_HOME: home };
-  delete env.NMMON_PORT;
+  const env = { ...process.env, RAISE_HOME: home, NM_HOME: home };
+  delete env.RAISE_PORT;
   Object.assign(env, extraEnv);
   try {
     const { stdout, stderr } = await execFileAsync(process.execPath, [CLI, ...args], { env });
@@ -63,8 +63,8 @@ function assertNoStackTrace(stderr) {
 }
 
 async function withMonitor(home, port, fn) {
-  const previousHome = process.env.NMMON_HOME;
-  process.env.NMMON_HOME = home;
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = home;
   const monitor = createMonitorServer({
     port,
     token: 'test-token',
@@ -78,8 +78,8 @@ async function withMonitor(home, port, fn) {
     await fn();
   } finally {
     await monitor.stop();
-    if (previousHome === undefined) delete process.env.NMMON_HOME;
-    else process.env.NMMON_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
   }
 }
 
@@ -91,7 +91,7 @@ test('serve says so when this installation is already running', async () => {
       const { code, stderr } = await cli(['serve', '--port', String(port)], dir);
       assert.equal(code, 1);
       assert.match(stderr, new RegExp(`is already running on port ${port} \\(pid ${process.pid}\\)`));
-      assert.match(stderr, /nmmon open/);
+      assert.match(stderr, /raise open/);
       assertNoStackTrace(stderr);
     });
   } finally {
@@ -99,8 +99,8 @@ test('serve says so when this installation is already running', async () => {
   }
 });
 
-test('serve names the leftover nmmon that this installation has no record of', async () => {
-  // The incident: a server started under an NMMON_HOME that no longer exists
+test('serve names the leftover Raise that this installation has no record of', async () => {
+  // The incident: a server started under an RAISE_HOME that no longer exists
   // holds the port and leaves no server.json anywhere, so the record says
   // "not running" while the port says otherwise.
   const theirs = scratch();
@@ -112,9 +112,9 @@ test('serve names the leftover nmmon that this installation has no record of', a
       assert.equal(code, 1);
       assert.match(
         stderr,
-        new RegExp(`Port ${port} is held by another nmmon \\(pid ${process.pid}\\)`),
+        new RegExp(`Port ${port} is held by another Raise \\(pid ${process.pid}\\)`),
       );
-      assert.match(stderr, /NMMON_HOME/);
+      assert.match(stderr, /RAISE_HOME/);
       assert.match(stderr, new RegExp(`kill ${process.pid}`), 'it tells you which pid to stop');
       assertNoStackTrace(stderr);
     });
@@ -124,7 +124,7 @@ test('serve names the leftover nmmon that this installation has no record of', a
   }
 });
 
-test('serve does not claim an unrelated program is nmmon', async () => {
+test('serve does not claim an unrelated program is Raise', async () => {
   const { dir, cleanup } = scratch();
   const port = await freePort();
   const squatter = createServer((req, res) =>
@@ -134,7 +134,7 @@ test('serve does not claim an unrelated program is nmmon', async () => {
   try {
     const { code, stderr } = await cli(['serve', '--port', String(port)], dir);
     assert.equal(code, 1);
-    assert.match(stderr, new RegExp(`Port ${port} is in use, and whatever is listening is not nmmon`));
+    assert.match(stderr, new RegExp(`Port ${port} is in use, and whatever is listening is not Raise`));
     assert.match(stderr, new RegExp(`lsof -nP -iTCP:${port}`), 'it says how to find the culprit');
     assert.ok(!/kill \d/.test(stderr), 'never suggest killing a pid we have not identified');
     assertNoStackTrace(stderr);
@@ -167,7 +167,7 @@ test('open refuses to hand you a URL for a server that has stopped', async () =>
   }
 });
 
-test('doctor reports a port held by an nmmon it has no record of', async () => {
+test('doctor reports a port held by a Raise it has no record of', async () => {
   const theirs = scratch();
   const ours = scratch();
   try {
@@ -175,10 +175,10 @@ test('doctor reports a port held by an nmmon it has no record of', async () => {
     await withMonitor(theirs.dir, port, async () => {
       // doctor takes no --port; it checks the port serve would use, so point
       // the default at the occupied one.
-      const { stdout } = await cli(['doctor'], ours.dir, { NMMON_PORT: String(port) });
+      const { stdout } = await cli(['doctor'], ours.dir, { RAISE_PORT: String(port) });
       assert.match(
         stdout,
-        new RegExp(`port ${port} is held by another nmmon \\(pid ${process.pid}\\)`),
+        new RegExp(`port ${port} is held by another Raise \\(pid ${process.pid}\\)`),
         'doctor must not report "not running" while a server holds the port',
       );
     });

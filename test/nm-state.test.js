@@ -20,7 +20,7 @@ import {
 } from '../src/nm-state.js';
 
 function scratch() {
-  const dir = mkdtempSync(join(tmpdir(), 'nmmon-test-'));
+  const dir = mkdtempSync(join(tmpdir(), 'raise-test-'));
   return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
@@ -417,7 +417,7 @@ test('a half-created database is not mistaken for a version mismatch', () => {
   // poll landing in between is watching no-mistakes be installed. `PRAGMA
   // table_info` on a table that is not there returns no rows rather than
   // throwing, so every column read as missing and the window rendered as "this
-  // build of no-mistakes is newer or older than nmmon expects" - a warning
+  // build of no-mistakes is newer or older than Raise expects" - a warning
   // banner, and a spawn per repo every fifteen seconds, both of them forever.
   const { dir, cleanup } = scratch();
   try {

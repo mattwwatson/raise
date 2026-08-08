@@ -383,7 +383,7 @@ function toolOutcomes(records) {
 /**
  * The last few things that happened, oldest first.
  *
- * This is the one place nmmon shows conversation rather than a reading taken
+ * This is the one place Raise shows conversation rather than a reading taken
  * from it, and it stays on the machine that wrote it: the server reads a local
  * file and renders it on the user's own dashboard, on request, for one session
  * at a time. It is never pushed, never summarised into the hook payload, and

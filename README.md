@@ -1,4 +1,4 @@
-# no-mistakes-monitor (`nmmon`)
+# Raise (`raise`)
 
 One page that shows every agent session on your machine - Claude Code, Claude Desktop and pi -
 tells you which one is waiting for you, and jumps to that window when you click it. If you use
@@ -101,11 +101,11 @@ of the day.
 Pull requests opened outside a no-mistakes run are picked up from the session's own
 transcript, so a plain `gh pr create` still gets a link.
 
-**You can have the badge always be right, by letting nmmon ask.** Turning on
-[pull request state](#pull-request-state-from-the-forge) makes nmmon ask GitHub or Bitbucket
+**You can have the badge always be right, by letting Raise ask.** Turning on
+[pull request state](#pull-request-state-from-the-forge) makes Raise ask GitHub or Bitbucket
 directly, which is the one source that cannot be out of date - so a merged pull request stops
 saying `OPEN` within the minute, and a review nobody is watching gets a real state rather than
-a tooltip. It is off until you configure it, and it is the only thing in nmmon that makes an
+a tooltip. It is off until you configure it, and it is the only thing in Raise that makes an
 outbound request.
 
 **The branch is always shown**, next to the repo name, read straight from `.git/HEAD` - so it
@@ -185,7 +185,7 @@ reason the header dot does.
 - Claude Code, for the "waiting for you" half. pi is supported too, with the caveat below
 - macOS for window focusing. Monitoring itself works anywhere.
 
-Optional, and independently so - nmmon runs with neither, and says nothing about the ones you
+Optional, and independently so - Raise runs with neither, and says nothing about the ones you
 do not have:
 
 | Optional | Without it |
@@ -195,26 +195,26 @@ do not have:
 | `gh` | No pull request state from GitHub, if you turned that on at all - see [pull request state](#pull-request-state-from-the-forge). It is off by default, so on an unconfigured machine `gh` is never looked for. |
 
 Absence is not degradation and is never reported as a fault: no warning banner, no `fail` in
-`nmmon doctor`, and nothing shelled out looking for a command that is not there. `nmmon doctor`
+`raise doctor`, and nothing shelled out looking for a command that is not there. `raise doctor`
 lists each as `--  not installed` so you can tell an integration you skipped from one that
 broke. Install no-mistakes later and a running monitor picks it up within a second - the
-daemon creates its database on first use, and nmmon looks each time it reads.
+daemon creates its database on first use, and Raise looks each time it reads.
 
 ## Install
 
 ```sh
 git clone git@bitbucket.org:mattw_watson/no-mistakes-monitor.git
 cd no-mistakes-monitor
-npm link          # optional, puts `nmmon` on your PATH
-nmmon install-hooks
-nmmon serve
+npm link          # optional, puts `raise` on your PATH
+raise install-hooks
+raise serve
 ```
 
 `install-hooks` merges six hook entries into `~/.claude/settings.json`. It shows you exactly
-what it will change and asks before writing, keeps a `.nmmon-backup` copy, leaves any hooks
-you already have alone, and is safe to run twice. Undo it with `nmmon uninstall-hooks`.
+what it will change and asks before writing, keeps a `.raise-backup` copy, leaves any hooks
+you already have alone, and is safe to run twice. Undo it with `raise uninstall-hooks`.
 
-When a later version of nmmon adds an event to that set, `serve` and `doctor` name the ones
+When a later version of Raise adds an event to that set, `serve` and `doctor` name the ones
 you are missing rather than calling the hooks uninstalled - what you already have keeps
 working, and the new event only makes the signal arrive sooner. Re-run `install-hooks` when it
 suits you, and restart your sessions then.
@@ -222,8 +222,50 @@ suits you, and restart your sessions then.
 **Restart your existing Claude sessions afterwards.** Hooks are read when a session starts, so
 sessions already open will not report themselves until you restart them.
 
-Then open the URL `nmmon serve` prints and leave the tab pinned. Click "Enable alerts" once if
+Then open the URL `raise serve` prints and leave the tab pinned. Click "Enable alerts" once if
 you want desktop notifications when something starts waiting on you.
+
+### Upgrading from `nmmon`
+
+Raise used to be called `nmmon`. If that is what you have installed, two things need doing by
+hand, and the first of them wants doing **before you pull this change**.
+
+**Uninstall the old hooks with the old binary.** From your existing checkout, still on the old
+commit:
+
+```sh
+nmmon uninstall-hooks
+nmmon uninstall-pi
+```
+
+Raise recognises its own entries in `~/.claude/settings.json` and `~/.pi/agent/settings.json`
+by the *filename* of the hook and the extension, and both filenames changed with the rename, so
+the new binary does not know the old entries are its. Each one goes on running `node` against
+`hooks/nmmon-hook.js` - a path this change deletes - on every one of the six events it was
+registered for. What you are likely to see for that is a module-not-found on stderr naming the
+old path, which says nothing about a rename, so it is worth knowing to look for it; how loudly
+a failing non-blocking hook is surfaced is Claude Code's business rather than ours, and not
+something to count on.
+
+What is certain is that Raise cannot tidy this up for you. `uninstall-hooks` does not recognise
+the old marker, so it cannot remove the stale entries, and `install-hooks` appends a *second*
+group per event rather than replacing the old one - leaving both registered and both firing. If
+you have already pulled, editing those two settings files by hand and deleting the entries
+naming `nmmon` is the only remedy left.
+
+**Move the forge config across**, if you turned on
+[pull request state from the forge](#pull-request-state-from-the-forge):
+
+```sh
+mkdir -p ~/.raise && mv ~/.nmmon/config.json ~/.raise/config.json   # keep it 0600
+```
+
+`~/.raise/` is created by `raise serve`, which at this point you have not run yet - hence the
+`mkdir`. Everything else in `~/.nmmon/` regenerates - the token, `server.json`, the session
+records - but this file does not. Left where it is, the lookup silently reverts to off, and it
+is silent in both directions: `raise doctor` reports it as simply not enabled, because from the
+new path's point of view there is no config to have an opinion about. The mode matters as much
+as the move, since an unsafe mode makes Raise refuse the whole file, opt-in included.
 
 ### pi sessions
 
@@ -231,13 +273,13 @@ you want desktop notifications when something starts waiting on you.
 tell them from Claude Code rows at a glance:
 
 ```sh
-nmmon install-pi
+raise install-pi
 ```
 
 That adds one path to `~/.pi/agent/settings.json`, with the same manners as `install-hooks` -
-it shows the change, asks first, keeps a `.nmmon-backup`, leaves your other extensions alone
+it shows the change, asks first, keeps a `.raise-backup`, leaves your other extensions alone
 and in order, and is safe to run twice. Restart any pi sessions afterwards; extensions load at
-startup. Undo it with `nmmon uninstall-pi`.
+startup. Undo it with `raise uninstall-pi`.
 
 Everything on a pi row works the way it does on a Claude Code row - the repo, the branch, the
 pull request, the pipeline step, what it is doing right now, the review gate, and clicking to
@@ -245,7 +287,7 @@ focus the window.
 
 **One thing is genuinely different: a pi row never says "waiting for you".** pi has no
 permission prompt - it runs its tools without asking - so there is no such state to report,
-and nmmon does not invent one. A pi session that has finished its turn shows as idle, not as
+and Raise does not invent one. A pi session that has finished its turn shows as idle, not as
 something demanding your attention. It can still reach the top of the page through its
 pipeline: parked, failed, or waiting on a review.
 
@@ -258,32 +300,32 @@ auth` still works and still shows - it appears next to the repo, the same place 
 
 | Command | Does |
 | --- | --- |
-| `nmmon serve` | Start the monitor and print the dashboard URL |
-| `nmmon open` | Print and open that URL again |
-| `nmmon status` | One-shot text summary; no server needed |
-| `nmmon doctor` | Check the setup and explain anything missing |
-| `nmmon focus <session>` | Bring a session's window to the front from the terminal |
-| `nmmon install-hooks` / `uninstall-hooks` | Manage the Claude Code hooks |
-| `nmmon install-pi` / `uninstall-pi` | Manage the pi extension |
+| `raise serve` | Start the monitor and print the dashboard URL |
+| `raise open` | Print and open that URL again |
+| `raise status` | One-shot text summary; no server needed |
+| `raise doctor` | Check the setup and explain anything missing |
+| `raise focus <session>` | Bring a session's window to the front from the terminal |
+| `raise install-hooks` / `uninstall-hooks` | Manage the Claude Code hooks |
+| `raise install-pi` / `uninstall-pi` | Manage the pi extension |
 
-Useful flags: `--port`, `--settings <path>`, `--dry-run`, `--yes`. `NMMON_PORT` sets the
+Useful flags: `--port`, `--settings <path>`, `--dry-run`, `--yes`. `RAISE_PORT` sets the
 default port when `--port` is absent; if it holds something that is not a port, `serve`
-refuses to start and says so, while `nmmon --help` still prints (that being where you go to
+refuses to start and says so, while `raise --help` still prints (that being where you go to
 find out what the variable should contain).
 
 ### When the port is already taken
 
 `serve` asks the port itself - `/health`, the one unauthenticated route - rather than
-trusting `~/.nmmon/server.json`, and answers with one of three things:
+trusting `~/.raise/server.json`, and answers with one of three things:
 
 | Message | Means | Do |
 | --- | --- | --- |
-| `nmmon is already running on port N (pid P)` | your own monitor is up | `nmmon open` |
-| `Port N is held by another nmmon (pid P) that this installation has no record of` | a leftover started under a different `NMMON_HOME` - usually a test run or a stray agent shell | `kill P`, or `nmmon serve --port <n>` |
-| `Port N is in use, and whatever is listening is not nmmon` | something unrelated | `lsof -nP -iTCP:N -sTCP:LISTEN` |
+| `Raise is already running on port N (pid P)` | your own monitor is up | `raise open` |
+| `Port N is held by another Raise (pid P) that this installation has no record of` | a leftover started under a different `RAISE_HOME` - usually a test run or a stray agent shell | `kill P`, or `raise serve --port <n>` |
+| `Port N is in use, and whatever is listening is not Raise` | something unrelated | `lsof -nP -iTCP:N -sTCP:LISTEN` |
 
-The middle case is the awkward one: a monitor started under another `NMMON_HOME` writes its
-record somewhere you will never look, so `~/.nmmon/server.json` says "not running" while the
+The middle case is the awkward one: a monitor started under another `RAISE_HOME` writes its
+record somewhere you will never look, so `~/.raise/server.json` says "not running" while the
 port very much disagrees. That is why `serve` asks the port rather than the file. `doctor`
 reports the same states, and `open` refuses to print a URL when the recorded server has
 stopped answering.
@@ -295,7 +337,7 @@ when you click it. Rows without a live agent session behind them - a pipeline ru
 no session attached - are plain and do nothing.
 
 The chip beside a row says where the session lives - `tmux`, `tab`, `desktop` - and a session
-whose window nmmon could not place says `no window` rather than guessing at one. Focusing is
+whose window Raise could not place says `no window` rather than guessing at one. Focusing is
 otherwise silent, since the window arriving in front of you is the answer; a short message
 means you were raised onto something less than the row you clicked.
 
@@ -305,7 +347,7 @@ is distinguishable from a session you opened yourself. It marks the crew and the
 alike, and only on firstmate's own evidence: an `fm-` tmux window, or firstmate's lock file
 naming the session. Having firstmate's source open is not enough to earn it, a window some
 other tool spawned gets nothing, and on a machine without firstmate nothing is looked for at
-all. `nmmon status` prints the same word.
+all. `raise status` prints the same word.
 
 The dot in the header is **positive evidence, not the absence of an error**. The server sends
 a `ping` event every 20 seconds; if nothing arrives for 50 the dot goes red, the header reads
@@ -321,12 +363,12 @@ do. So the page never infers that it is live; it waits to be told.
 
 Claude Code turns a finished turn into a loud **Waiting for you** after sixty idle seconds, and
 that escalation is wanted - it is how a session asks for its next instruction. But nothing
-clears it. nmmon retires a stale block when the transcript runs past it, and an idle session
+clears it. Raise retires a stale block when the transcript runs past it, and an idle session
 writes nothing, so a row where nothing is actually gated can sit red for as long as you leave
 it. One was caught at over twelve minutes.
 
 So a row like that carries a **`Not for me`** button. Click it and the row drops to `Idle` and
-says `dismissed`, on the page and in `nmmon status` alike - never silently, because a signal
+says `dismissed`, on the page and in `raise status` alike - never silently, because a signal
 quietly hidden is exactly as bad as one that is quietly wrong.
 
 **A dismissal answers one announcement, not the session.** The next time anything on that
@@ -349,7 +391,7 @@ front - which is why a machine mixing plain tabs and tmux needs no configuration
 - **Plain terminal tab.** The session's own identifiers are captured at session start.
   iTerm2 tabs are matched by their session UUID, which survives the tab being dragged to
   another window. Terminal.app is matched by tty.
-- **tmux pane.** A window can belong to more than one tmux session at once, so nmmon asks for
+- **tmux pane.** A window can belong to more than one tmux session at once, so Raise asks for
   every session this pane lives in, and raises the terminal that is already showing it. Only
   when nothing is showing it does anything move inside tmux, and then only in that one
   session - never in whichever tmux happened to name first.
@@ -358,7 +400,7 @@ front - which is why a machine mixing plain tabs and tmux needs no configuration
 
 The host terminal for a tmux session is deliberately **not** stored, because a tmux session
 can be detached and reattached in a different terminal entirely. If the session is detached
-there is no window to focus, and nmmon tells you the `tmux attach` command instead of failing
+there is no window to focus, and Raise tells you the `tmux attach` command instead of failing
 silently.
 
 Supported terminals today: **iTerm2** and **Terminal.app**, plus **tmux** inside either.
@@ -371,14 +413,14 @@ rather than `tab`, and everything else about them is ordinary: the repo, the bra
 is working on, its pull request, and any no-mistakes run it started all appear exactly as they
 do for a terminal session.
 
-Focusing one brings the app to the front, and says so in a toast: nmmon cannot reach inside
+Focusing one brings the app to the front, and says so in a toast: Raise cannot reach inside
 Claude Desktop to select a session, so it raises the app and leaves the sidebar to you. The
 app's `claude://resume` link looks like the answer and is not - it *imports* a session rather
 than switching to one, and because the app files its sessions under an id of its own, resuming
 one it is already running leaves you with two entries over the same conversation. The one case
 where the app would recognise the id instead of copying is a session an earlier such click
 already imported, so the link would land on that duplicate rather than the session you clicked
-- which is why nmmon never uses it.
+- which is why Raise never uses it.
 
 ## Security
 
@@ -386,7 +428,7 @@ The server binds to `127.0.0.1`, but that alone is not a boundary: any page open
 browser can make requests to localhost, and DNS rebinding can point a hostile domain there.
 Since this server ends up running `osascript` and `tmux`, it also requires
 
-- a shared token, generated per install and kept `0600` in `~/.nmmon/token`
+- a shared token, generated per install and kept `0600` in `~/.raise/token`
 - a `Host` header allowlist, which is what actually defeats DNS rebinding
 - an `Origin` allowlist
 
@@ -404,43 +446,43 @@ from a local file by a local server and rendered in your own browser - it is not
 event stream, not in the hook payload, and not sent anywhere. The token guards that route
 like every other one, which is exactly why localhost alone is not treated as a boundary.
 
-**One optional feature sends anything at all, and it is off until you configure it.** nmmon
+**One optional feature sends anything at all, and it is off until you configure it.** Raise
 can ask GitHub or Bitbucket whether a pull request already on your dashboard is still open -
 once a no-mistakes run ends nothing is watching it, so a stored "open" can be days old. What
 goes out is that pull request's own URL, the one the row already links to, to the forge that
 hosts it. Nothing else: no transcript, no prompt text, no file contents, no branch names, no
 list of your repositories, and no request to any host but that forge's own API -
 `api.github.com`, reached through `gh`, or `api.bitbucket.org`, and nowhere else. With it
-off - which is the default - nmmon makes no outbound network request of any kind. GitHub
-goes through your own `gh` login, so nmmon never sees a GitHub credential at all; Bitbucket
+off - which is the default - Raise makes no outbound network request of any kind. GitHub
+goes through your own `gh` login, so Raise never sees a GitHub credential at all; Bitbucket
 needs an API token with the single scope `read:pullrequest:bitbucket`, which grants no access
-to your source code, kept `0600` in `~/.nmmon/config.json`, never logged, never echoed, and
+to your source code, kept `0600` in `~/.raise/config.json`, never logged, never echoed, and
 never sent anywhere but Bitbucket.
 
 ### Pull request state from the forge
 
-Off by default. Turn it on by writing `~/.nmmon/config.json`:
+Off by default. Turn it on by writing `~/.raise/config.json`:
 
 ```sh
-umask 077 && cat > ~/.nmmon/config.json <<'JSON'
+umask 077 && cat > ~/.raise/config.json <<'JSON'
 {
   "forge": {
     "enabled": true
   }
 }
 JSON
-chmod 600 ~/.nmmon/config.json
+chmod 600 ~/.raise/config.json
 ```
 
 That is the whole of it for GitHub: it goes through `gh`, which authenticates itself, so
-there is no credential to configure and none for nmmon to hold. `gh` needs to be installed
+there is no credential to configure and none for Raise to hold. `gh` needs to be installed
 and logged in (`gh auth login`) - it requires authentication even for a public pull request.
 
 Bitbucket has no equivalent CLI, so it needs a token. Create an
 [API token with scopes](https://support.atlassian.com/bitbucket-cloud/docs/using-api-tokens/)
 under **Account settings → Security → API tokens**, select **Bitbucket** as the app, and give
 it **`read:pullrequest:bitbucket` and nothing else**. That scope allows viewing pull requests
-and explicitly does *not* imply `read:repository:bitbucket`, so a token minted for nmmon
+and explicitly does *not* imply `read:repository:bitbucket`, so a token minted for Raise
 cannot read your source code. Add it with the Atlassian account email it belongs to, because
 Bitbucket authenticates with both:
 
@@ -454,17 +496,17 @@ Bitbucket authenticates with both:
 ```
 
 **The file must be `0600`.** It holds a credential, so if anyone else on the machine can read
-it nmmon refuses the whole file - opt-in included - and `nmmon doctor` says so rather than
+it Raise refuses the whole file - opt-in included - and `raise doctor` says so rather than
 quietly doing nothing.
 
-**There is nothing to restart.** A running `nmmon serve` picks the file up as you write it, so
+**There is nothing to restart.** A running `raise serve` picks the file up as you write it, so
 turning the lookup on, correcting a token or fixing the mode all take effect within a second -
-and `nmmon doctor` never reports something the monitor is not actually doing.
+and `raise doctor` never reports something the monitor is not actually doing.
 
 Everything about this fails silently and completely. No `gh`, no login, no credential, no
 network, a repository the token cannot see, a rate limit: each of them leaves the row exactly
 as it would have been, showing whatever no-mistakes last knew. Failures are remembered too, so
-a repository nmmon cannot read is asked once and then left alone for fifteen minutes rather
+a repository Raise cannot read is asked once and then left alone for fifteen minutes rather
 than retried every minute forever - though editing the config file clears that immediately, so
 a corrected credential is never a wait. An open pull request is re-checked about once a minute;
 a merged one is never asked about again, because it cannot un-merge.
@@ -477,7 +519,7 @@ only ever make a badge more current than it would have been without it, never le
 
 ## Troubleshooting
 
-**Nothing appears.** Run `nmmon doctor`. The usual cause is hooks installed but sessions not
+**Nothing appears.** Run `raise doctor`. The usual cause is hooks installed but sessions not
 restarted.
 
 **A session shows but is not clickable.** It started before the hooks were installed, so it
@@ -488,18 +530,18 @@ send it anything.
 **"tmux session X is not attached to any window."** Exactly what it says - attach it with the
 command shown and it becomes focusable.
 
-**A warning banner about the no-mistakes database.** nmmon probes the schema each time it
+**A warning banner about the no-mistakes database.** Raise probes the schema each time it
 reads, and if a no-mistakes version moves the columns it depends on, it falls back to reading
 each repo through `no-mistakes axi status` instead of guessing. Pipeline state still works; it
 is just limited to repos that have a live agent session. Worth reporting so the fast path can
-be updated - and the banner clears itself, with no restart, once the schema is one nmmon
+be updated - and the banner clears itself, with no restart, once the schema is one Raise
 knows again.
 
 This banner means a no-mistakes that is installed and cannot be read. Not having no-mistakes
 at all is silent by design - see [Requirements](#requirements).
 
-**No pipeline rows, ever.** Check `nmmon doctor`. If it says `--  no-mistakes  not installed`
-then nmmon is looking in `~/.no-mistakes/state.sqlite` and finding nothing, which is the
+**No pipeline rows, ever.** Check `raise doctor`. If it says `--  no-mistakes  not installed`
+then Raise is looking in `~/.no-mistakes/state.sqlite` and finding nothing, which is the
 supported no-no-mistakes setup rather than a fault. `NM_HOME` moves where it looks.
 
 ## Development

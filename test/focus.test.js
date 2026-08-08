@@ -526,7 +526,7 @@ test('focusSession raises the viewer session, not the parent a linked window als
   // into a per-worker viewer session whose tab is the one in front of you.
   //
   // `display-message -p -t %356 '#{session_name}'` returns an arbitrary one of
-  // the two - the parent, when this was reported - so nmmon raised the parent's
+  // the two - the parent, when this was reported - so Raise raised the parent's
   // tab, and `select-window -t %356` then dragged that client onto the worker's
   // window and left it there. Which one tmux names varies with which session was
   // last active, so the fixture below is the ranking, not tmux's mood.

@@ -12,7 +12,7 @@ import { probeHealth } from '../src/health.js';
 const nextTick = () => new Promise((resolve) => setImmediate(resolve));
 
 function scratch() {
-  const dir = mkdtempSync(join(tmpdir(), 'nmmon-test-'));
+  const dir = mkdtempSync(join(tmpdir(), 'raise-test-'));
   return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
@@ -32,7 +32,7 @@ test('a write to a destroyed client cannot take the process down', () => {
   // Sleep, wake, a dropped network, or an abort racing the close handler all
   // leave a response whose socket is gone. An unguarded write emits 'error' on
   // an emitter with no listener, which is an uncaught exception - and since
-  // nmmon is the thing that tells you a session is blocked, its death is
+  // Raise is the thing that tells you a session is blocked, its death is
   // silent.
   const dropped = [];
   const throwing = {
@@ -93,12 +93,12 @@ test('a ticking clock is not a change - elapsed fields must not defeat the push 
 });
 
 test('stopping the server removes the file that tells hooks where to post', async () => {
-  // Left behind, it is not just a stale URL in `nmmon open`: every hook keeps
+  // Left behind, it is not just a stale URL in `raise open`: every hook keeps
   // posting the session id, cwd, transcript path and the token to whatever
   // binds this port next.
   const { dir, cleanup } = scratch();
-  const previousHome = process.env.NMMON_HOME;
-  process.env.NMMON_HOME = dir;
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = dir;
   try {
     const port = await freePort();
     const monitor = createMonitorServer({
@@ -117,8 +117,8 @@ test('stopping the server removes the file that tells hooks where to post', asyn
     await monitor.stop();
     assert.equal(existsSync(join(dir, 'server.json')), false);
   } finally {
-    if (previousHome === undefined) delete process.env.NMMON_HOME;
-    else process.env.NMMON_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
     cleanup();
   }
 });
@@ -127,8 +127,8 @@ test('/dismiss quiets an idle nudge, and a real prompt spends the dismissal', as
   // The whole feature end to end, against a live server: the page and the CLI
   // share `buildRows`, so proving it on `/state` proves both.
   const { dir, cleanup } = scratch();
-  const previousHome = process.env.NMMON_HOME;
-  process.env.NMMON_HOME = dir;
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = dir;
   // Stopped in the finally, so a failed assertion reports itself rather than
   // leaving a listening server to hang the whole run.
   let monitor = null;
@@ -148,7 +148,7 @@ test('/dismiss quiets an idle nudge, and a real prompt spends the dismissal', as
     const post = (path, body) =>
       fetch(`http://127.0.0.1:${port}${path}?t=test-token`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-nmmon-token': 'test-token' },
+        headers: { 'content-type': 'application/json', 'x-raise-token': 'test-token' },
         body: JSON.stringify(body),
       });
     const rowFor = async (sessionId) => {
@@ -201,8 +201,8 @@ test('/dismiss quiets an idle nudge, and a real prompt spends the dismissal', as
     assert.equal(missing.status, 404);
   } finally {
     if (monitor) await monitor.stop();
-    if (previousHome === undefined) delete process.env.NMMON_HOME;
-    else process.env.NMMON_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
     cleanup();
   }
 });
@@ -213,8 +213,8 @@ test('/focus never runs a synchronous child process', async () => {
   // and tmux, and a synchronous child in the HTTP handler stalls the poll
   // timer, every open event stream and every hook post at once.
   const { dir, cleanup } = scratch();
-  const previousHome = process.env.NMMON_HOME;
-  process.env.NMMON_HOME = dir;
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = dir;
   try {
     const port = await freePort();
     const ran = [];
@@ -235,7 +235,7 @@ test('/focus never runs a synchronous child process', async () => {
     // Register a focusable session the way a hook would.
     const registered = await fetch(`http://127.0.0.1:${port}/event`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-nmmon-token': 'test-token' },
+      headers: { 'content-type': 'application/json', 'x-raise-token': 'test-token' },
       body: JSON.stringify({
         session_id: 'focus-me',
         hook_event_name: 'SessionStart',
@@ -247,7 +247,7 @@ test('/focus never runs a synchronous child process', async () => {
 
     const res = await fetch(`http://127.0.0.1:${port}/focus?t=test-token`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-nmmon-token': 'test-token' },
+      headers: { 'content-type': 'application/json', 'x-raise-token': 'test-token' },
       body: JSON.stringify({ sessionId: 'focus-me' }),
     });
     // No terminal answers the fake runner, so the honest outcome is 409 with a
@@ -266,16 +266,16 @@ test('/focus never runs a synchronous child process', async () => {
 
     await monitor.stop();
   } finally {
-    if (previousHome === undefined) delete process.env.NMMON_HOME;
-    else process.env.NMMON_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
     cleanup();
   }
 });
 
 test('/focus answers a session that is no longer registered', async () => {
   const { dir, cleanup } = scratch();
-  const previousHome = process.env.NMMON_HOME;
-  process.env.NMMON_HOME = dir;
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = dir;
   try {
     const port = await freePort();
     const monitor = createMonitorServer({
@@ -291,7 +291,7 @@ test('/focus answers a session that is no longer registered', async () => {
 
     const res = await fetch(`http://127.0.0.1:${port}/focus?t=test-token`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-nmmon-token': 'test-token' },
+      headers: { 'content-type': 'application/json', 'x-raise-token': 'test-token' },
       body: JSON.stringify({ sessionId: 'gone' }),
     });
     assert.equal(res.status, 404);
@@ -299,16 +299,16 @@ test('/focus answers a session that is no longer registered', async () => {
 
     await monitor.stop();
   } finally {
-    if (previousHome === undefined) delete process.env.NMMON_HOME;
-    else process.env.NMMON_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
     cleanup();
   }
 });
 
 test('an event stream survives a client that vanishes mid-broadcast', async () => {
   const { dir, cleanup } = scratch();
-  const previousHome = process.env.NMMON_HOME;
-  process.env.NMMON_HOME = dir;
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = dir;
   try {
     const port = await freePort();
     const monitor = createMonitorServer({
@@ -332,7 +332,7 @@ test('an event stream survives a client that vanishes mid-broadcast', async () =
     // Push through the registry so a broadcast happens right after the abort.
     const posted = await fetch(`http://127.0.0.1:${port}/event`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-nmmon-token': 'test-token' },
+      headers: { 'content-type': 'application/json', 'x-raise-token': 'test-token' },
       body: JSON.stringify({ session_id: 's1', hook_event_name: 'Notification', cwd: dir }),
     });
     assert.equal(posted.status, 204);
@@ -343,8 +343,8 @@ test('an event stream survives a client that vanishes mid-broadcast', async () =
 
     await monitor.stop();
   } finally {
-    if (previousHome === undefined) delete process.env.NMMON_HOME;
-    else process.env.NMMON_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
     cleanup();
   }
 });
@@ -355,8 +355,8 @@ test('the keepalive is an event the page can see, not an invisible comment', asy
   // an error - which never fires while the socket is merely quiet. A server
   // frozen with SIGSTOP left the dashboard on a green "live" dot indefinitely.
   const { dir, cleanup } = scratch();
-  const previousHome = process.env.NMMON_HOME;
-  process.env.NMMON_HOME = dir;
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = dir;
   try {
     const port = await freePort();
     const monitor = createMonitorServer({
@@ -391,16 +391,16 @@ test('the keepalive is an event the page can see, not an invisible comment', asy
 
     await monitor.stop();
   } finally {
-    if (previousHome === undefined) delete process.env.NMMON_HOME;
-    else process.env.NMMON_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
     cleanup();
   }
 });
 
 test('the page can load the connection module, and only with the token', async () => {
   const { dir, cleanup } = scratch();
-  const previousHome = process.env.NMMON_HOME;
-  process.env.NMMON_HOME = dir;
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = dir;
   try {
     const port = await freePort();
     const monitor = createMonitorServer({
@@ -429,15 +429,15 @@ test('the page can load the connection module, and only with the token', async (
 
     await monitor.stop();
   } finally {
-    if (previousHome === undefined) delete process.env.NMMON_HOME;
-    else process.env.NMMON_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
     cleanup();
   }
 });
 
 // -------------------------------------------------------------- probeHealth
 
-/** Occupy a port with something that is emphatically not nmmon. */
+/** Occupy a port with something that is emphatically not Raise. */
 async function occupy(port, handler) {
   const server = createServer(handler);
   await new Promise((resolve) => server.listen(port, '127.0.0.1', resolve));
@@ -450,11 +450,11 @@ async function occupy(port, handler) {
 
 test('probeHealth identifies a live monitor, with no token', async () => {
   // /health is the one unauthenticated route precisely so this is possible: the
-  // caller asking "is nmmon there?" has no reason to know its token, and may be
+  // caller asking "is Raise there?" has no reason to know its token, and may be
   // a different installation entirely.
   const { dir, cleanup } = scratch();
-  const previousHome = process.env.NMMON_HOME;
-  process.env.NMMON_HOME = dir;
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = dir;
   try {
     const port = await freePort();
     const monitor = createMonitorServer({
@@ -472,8 +472,8 @@ test('probeHealth identifies a live monitor, with no token', async () => {
 
     await monitor.stop();
   } finally {
-    if (previousHome === undefined) delete process.env.NMMON_HOME;
-    else process.env.NMMON_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
     cleanup();
   }
 });
@@ -483,7 +483,7 @@ test('probeHealth says nothing is there when nothing is there', async () => {
   assert.equal(await probeHealth(port), null);
 });
 
-test('probeHealth refuses to mistake another program for nmmon', async () => {
+test('probeHealth refuses to mistake another program for Raise', async () => {
   // Anything can be listening on a local port, including something that answers
   // 200 with JSON of its own. Believing it would have us print `kill <pid>` for
   // a pid belonging to an unrelated program.
@@ -497,7 +497,7 @@ test('probeHealth refuses to mistake another program for nmmon', async () => {
   for (const handler of impostors) {
     const close = await occupy(port, handler);
     try {
-      assert.equal(await probeHealth(port), null, `${handler} must not read as nmmon`);
+      assert.equal(await probeHealth(port), null, `${handler} must not read as Raise`);
     } finally {
       await close();
     }
@@ -524,8 +524,8 @@ test('/recent serves one session"s history, and only to an authenticated caller'
   // in every state frame would send it to every open page once a second, to
   // render something that is collapsed nearly all of the time.
   const { dir, cleanup } = scratch();
-  const previousHome = process.env.NMMON_HOME;
-  process.env.NMMON_HOME = dir;
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = dir;
   try {
     const port = await freePort();
     const transcriptPath = join(dir, 'transcript.jsonl');
@@ -550,7 +550,7 @@ test('/recent serves one session"s history, and only to an authenticated caller'
 
     await fetch(`http://127.0.0.1:${port}/event`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-nmmon-token': 'test-token' },
+      headers: { 'content-type': 'application/json', 'x-raise-token': 'test-token' },
       body: JSON.stringify({
         session_id: 'expand-me',
         hook_event_name: 'SessionStart',
@@ -584,8 +584,8 @@ test('/recent serves one session"s history, and only to an authenticated caller'
 
     await monitor.stop();
   } finally {
-    if (previousHome === undefined) delete process.env.NMMON_HOME;
-    else process.env.NMMON_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
     cleanup();
   }
 });
@@ -596,8 +596,8 @@ test('a pipeline lands on the session that started it, not on its neighbours', a
   // three cards showed a pipeline they had nothing to do with, each offering a
   // Focus button to a window that could not answer its gate.
   const { dir, cleanup } = scratch();
-  const previousHome = process.env.NMMON_HOME;
-  process.env.NMMON_HOME = dir;
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = dir;
   const repo = join(dir, 'repo');
   let monitor = null;
   try {
@@ -655,7 +655,7 @@ test('a pipeline lands on the session that started it, not on its neighbours', a
     ]) {
       const registered = await fetch(`http://127.0.0.1:${port}/event`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-nmmon-token': 'test-token' },
+        headers: { 'content-type': 'application/json', 'x-raise-token': 'test-token' },
         body: JSON.stringify({
           session_id: sessionId,
           hook_event_name: 'SessionStart',
@@ -683,8 +683,8 @@ test('a pipeline lands on the session that started it, not on its neighbours', a
     // In the finally, not at the end of the try: a failed assertion that leaves
     // the poll timer running wedges the whole test run rather than failing it.
     await monitor?.stop();
-    if (previousHome === undefined) delete process.env.NMMON_HOME;
-    else process.env.NMMON_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
     cleanup();
   }
 });
@@ -704,8 +704,8 @@ test('a pipeline driven from a worktree lands on the worktree, not on the checko
   // resolved to the wrong one of a checkout's runs would be discarded as
   // already owned, and the run it was really of would land on a bystander.
   const { dir, cleanup } = scratch();
-  const previousHome = process.env.NMMON_HOME;
-  process.env.NMMON_HOME = dir;
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = dir;
   const repo = join(dir, 'repo');
   const worktree = join(dir, 'trees', '2', 'repo');
   const sibling = join(dir, 'trees', '1', 'repo');
@@ -779,7 +779,7 @@ test('a pipeline driven from a worktree lands on the worktree, not on the checko
     ]) {
       const registered = await fetch(`http://127.0.0.1:${port}/event`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-nmmon-token': 'test-token' },
+        headers: { 'content-type': 'application/json', 'x-raise-token': 'test-token' },
         body: JSON.stringify({
           session_id: sessionId,
           hook_event_name: 'SessionStart',
@@ -815,8 +815,8 @@ test('a pipeline driven from a worktree lands on the worktree, not on the checko
     assert.equal(body.rows.length, 3);
   } finally {
     await monitor?.stop();
-    if (previousHome === undefined) delete process.env.NMMON_HOME;
-    else process.env.NMMON_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
     cleanup();
   }
 });
@@ -828,8 +828,8 @@ test('one empty reading does not forget who owns what', async () => {
   // single tick, and a parked run has no live process to be re-observed from,
   // so it would scatter back across its repo silently and for good.
   const { dir, cleanup } = scratch();
-  const previousHome = process.env.NMMON_HOME;
-  process.env.NMMON_HOME = dir;
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = dir;
   const repo = join(dir, 'repo');
   let monitor = null;
   try {
@@ -881,7 +881,7 @@ test('one empty reading does not forget who owns what', async () => {
     ]) {
       const registered = await fetch(`http://127.0.0.1:${port}/event`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-nmmon-token': 'test-token' },
+        headers: { 'content-type': 'application/json', 'x-raise-token': 'test-token' },
         body: JSON.stringify({
           session_id: sessionId,
           hook_event_name: 'SessionStart',
@@ -923,8 +923,8 @@ test('one empty reading does not forget who owns what', async () => {
     db.close();
   } finally {
     await monitor?.stop();
-    if (previousHome === undefined) delete process.env.NMMON_HOME;
-    else process.env.NMMON_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
     cleanup();
   }
 });
@@ -936,8 +936,8 @@ test('a session reading we did not get releases nobody', async () => {
   // let go of the lot in a single tick. A parked run has no live process to be
   // re-observed from, so it would scatter back across its repo for good.
   const { dir, cleanup } = scratch();
-  const previousHome = process.env.NMMON_HOME;
-  process.env.NMMON_HOME = dir;
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = dir;
   const repo = join(dir, 'repo');
   const sessionsPath = join(dir, 'sessions');
   const hidden = join(dir, 'sessions-unreadable');
@@ -989,7 +989,7 @@ test('a session reading we did not get releases nobody', async () => {
     ]) {
       const registered = await fetch(`http://127.0.0.1:${port}/event`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-nmmon-token': 'test-token' },
+        headers: { 'content-type': 'application/json', 'x-raise-token': 'test-token' },
         body: JSON.stringify({
           session_id: sessionId,
           hook_event_name: 'SessionStart',
@@ -1030,8 +1030,8 @@ test('a session reading we did not get releases nobody', async () => {
     db.close();
   } finally {
     await monitor?.stop();
-    if (previousHome === undefined) delete process.env.NMMON_HOME;
-    else process.env.NMMON_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
     cleanup();
   }
 });
@@ -1044,8 +1044,8 @@ test('a machine with neither no-mistakes nor lavish-axi runs quietly', async () 
   // there - and a banner would send the user looking for a fault they do not
   // have.
   const { dir, cleanup } = scratch();
-  const previousHome = process.env.NMMON_HOME;
-  process.env.NMMON_HOME = dir;
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = dir;
   try {
     const port = await freePort();
     const ran = [];
@@ -1069,7 +1069,7 @@ test('a machine with neither no-mistakes nor lavish-axi runs quietly', async () 
     // path and a transcript in front of the Lavish lookup.
     await fetch(`http://127.0.0.1:${port}/event`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-nmmon-token': 'test-token' },
+      headers: { 'content-type': 'application/json', 'x-raise-token': 'test-token' },
       body: JSON.stringify({ session_id: 'quiet', hook_event_name: 'SessionStart', cwd: dir }),
     });
 
@@ -1087,8 +1087,8 @@ test('a machine with neither no-mistakes nor lavish-axi runs quietly', async () 
 
     await monitor.stop();
   } finally {
-    if (previousHome === undefined) delete process.env.NMMON_HOME;
-    else process.env.NMMON_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
     cleanup();
   }
 });
@@ -1100,8 +1100,8 @@ test('a firstmate crewmate is marked on the page, and its neighbours are not', a
   // identified by its lock rather than by its window, because the captain's
   // window is the one firstmate leaves free to be renamed.
   const { dir, cleanup } = scratch();
-  const previousHome = process.env.NMMON_HOME;
-  process.env.NMMON_HOME = dir;
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = dir;
   let monitor;
   try {
     const fmHome = join(dir, 'firstmate');
@@ -1137,7 +1137,7 @@ test('a firstmate crewmate is marked on the page, and its neighbours are not', a
     for (const [sessionId, cwd, pane, pid] of sessions) {
       const registered = await fetch(`http://127.0.0.1:${port}/event`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-nmmon-token': 'test-token' },
+        headers: { 'content-type': 'application/json', 'x-raise-token': 'test-token' },
         body: JSON.stringify({
           session_id: sessionId,
           hook_event_name: 'SessionStart',
@@ -1164,8 +1164,8 @@ test('a firstmate crewmate is marked on the page, and its neighbours are not', a
     assert.equal(byId.get('editing-firstmate')?.spawnedBy, null);
   } finally {
     await monitor?.stop();
-    if (previousHome === undefined) delete process.env.NMMON_HOME;
-    else process.env.NMMON_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
     cleanup();
   }
 });
@@ -1211,8 +1211,8 @@ test('with the forge lookup off, a pull request on the page sends nothing anywhe
   // other tests carry, and it is the half of "byte-identical when disabled"
   // that the pure tests in dashboard.test.js cannot prove.
   const { dir, cleanup } = scratch();
-  const previousHome = process.env.NMMON_HOME;
-  process.env.NMMON_HOME = dir;
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = dir;
   const repo = join(dir, 'widgets');
   let monitor = null;
   try {
@@ -1236,7 +1236,7 @@ test('with the forge lookup off, a pull request on the page sends nothing anywhe
 
     await fetch(`http://127.0.0.1:${port}/event`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-nmmon-token': 'test-token' },
+      headers: { 'content-type': 'application/json', 'x-raise-token': 'test-token' },
       body: JSON.stringify({
         session_id: 'quiet',
         hook_event_name: 'SessionStart',
@@ -1254,8 +1254,8 @@ test('with the forge lookup off, a pull request on the page sends nothing anywhe
     assert.equal(row.pr.current, false, 'and nobody is watching it, so the state is not asserted');
   } finally {
     await monitor?.stop();
-    if (previousHome === undefined) delete process.env.NMMON_HOME;
-    else process.env.NMMON_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
     cleanup();
   }
 });
@@ -1264,8 +1264,8 @@ test('with it on, the forge settles a pull request nothing else was watching', a
   // The case RAI-10 left open: the run has ended, or there never was one, so
   // there is no observer at all and the page had a link and no way to find out.
   const { dir, cleanup } = scratch();
-  const previousHome = process.env.NMMON_HOME;
-  process.env.NMMON_HOME = dir;
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = dir;
   const repo = join(dir, 'widgets');
   let monitor = null;
   try {
@@ -1291,7 +1291,7 @@ test('with it on, the forge settles a pull request nothing else was watching', a
 
     await fetch(`http://127.0.0.1:${port}/event`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-nmmon-token': 'test-token' },
+      headers: { 'content-type': 'application/json', 'x-raise-token': 'test-token' },
       body: JSON.stringify({
         session_id: 'watched',
         hook_event_name: 'SessionStart',
@@ -1313,8 +1313,8 @@ test('with it on, the forge settles a pull request nothing else was watching', a
     assert.equal(row.pr.current, true, 'and now it may be said as the state now');
   } finally {
     await monitor?.stop();
-    if (previousHome === undefined) delete process.env.NMMON_HOME;
-    else process.env.NMMON_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
     cleanup();
   }
 });

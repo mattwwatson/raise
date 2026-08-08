@@ -8,7 +8,7 @@
  * **A path into the checkout, never a copy into `~/.pi/agent/extensions/`.**
  * Auto-discovery would work and is one line shorter, but a copied file is a
  * fork: it goes stale the first time the repo is pulled, and the stale half is
- * the one running inside the agent. `nmmon-hook.js` is registered the same way
+ * the one running inside the agent. `raise-hook.js` is registered the same way
  * for the same reason.
  *
  * The merge is a pure function so the CLI can show a truthful preview before
@@ -28,7 +28,7 @@
  */
 
 /** Anything containing this is ours and may be replaced on reinstall. */
-export const EXTENSION_MARKER = 'nmmon-pi-extension.js';
+export const EXTENSION_MARKER = 'raise-pi-extension.js';
 
 /** @param {unknown} entry */
 function isOurs(entry) {
@@ -45,7 +45,7 @@ function isOurs(entry) {
  * handlers see earlier ones' mutations.
  *
  * @param {PiSettings} existingSettings
- * @param {string} extensionPath absolute path to `hooks/nmmon-pi-extension.js`
+ * @param {string} extensionPath absolute path to `hooks/raise-pi-extension.js`
  * @returns {{settings: PiSettings, changes: string[]}}
  */
 export function mergeExtension(existingSettings, extensionPath) {
@@ -83,7 +83,7 @@ export function removeExtension(existingSettings) {
   if (!Array.isArray(settings.extensions)) return { settings, changes };
 
   const kept = settings.extensions.filter((entry) => !isOurs(entry));
-  if (kept.length !== settings.extensions.length) changes.push('remove the nmmon extension');
+  if (kept.length !== settings.extensions.length) changes.push('remove the Raise extension');
   if (kept.length === 0) {
     // An empty array is noise in somebody else's config file; if we added the
     // key we take it away again.

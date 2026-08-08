@@ -93,7 +93,7 @@ Suggested shape, following the pattern the same file already uses:
    answers** - `checkoutFor` exists precisely because asking separately meant stat-ing the same
    HEAD twice per session per poll. Do not add a fourth accessor.
 2. Thread it into `buildRows` as a `Map<sessionId, string|null>`, exactly as `branches` and
-   `mainCheckouts` are threaded today, from `src/server.js` and `bin/nmmon.js`. `dashboard.js`
+   `mainCheckouts` are threaded today, from `src/server.js` and `bin/raise.js`. `dashboard.js`
    is pure and may not touch the filesystem.
 3. Use it for `title`, `titlePath` and the `transcriptPullRequest` repo path. Fall back to
    `session.cwd` when there is no root, which is a directory that is not in a repository.
@@ -181,7 +181,7 @@ should be folded in:
 2. **A no-mistakes `review` step ran with a live `agent_pid` and registered no session**, so
    nothing was folded onto the card. The `ci` step's equivalent turned out to be by design (the
    CI monitor runs inside the daemon with no agent at all), but this one is unexplained and is
-   upstream of nmmon.
+   upstream of raise.
 
 ---
 

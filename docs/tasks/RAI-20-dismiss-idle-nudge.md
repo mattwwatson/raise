@@ -80,7 +80,7 @@ whose working is the wrong outcome.
 
 ## Two constraints that are the whole design
 
-**Server-side, not browser storage.** `nmmon status` and the page are one protocol; a dismissal
+**Server-side, not browser storage.** `raise status` and the page are one protocol; a dismissal
 only the browser knows about would have the CLI and the page disagreeing about the same session.
 It belongs with the session record, alongside the other state the registry holds.
 
@@ -98,7 +98,7 @@ dismissed, so *nothing is waiting* and *I told it to stop saying so* are never c
 - A new block announcement on that session - a permission prompt above all - re-reds it without
   any further action.
 - A permission-prompt row offers no dismiss control at all.
-- `nmmon status` and the page agree about a dismissed session.
+- `raise status` and the page agree about a dismissed session.
 - A dismissed row visibly says so.
 - The dismissal survives a page reload, and does not survive a genuinely new block.
 
@@ -142,7 +142,7 @@ nudge means the turn ended and nobody typed, which is idle in the page's own wor
 red because its folded pipeline agent is stuck looks identical and is not this session's to
 answer, so checking the attention would have offered a control that could not work.
 
-**Both renderers say `dismissed`** - `public/index.html` beside the state word, `bin/nmmon.js`
+**Both renderers say `dismissed`** - `public/index.html` beside the state word, `bin/raise.js`
 after the repo name. That is the load-bearing constraint from above, not decoration.
 
 **And `Row.dismissed` is true only while the dismissal is what quietened the row**, which is the
@@ -155,7 +155,7 @@ an `idle` attention. Both cases are pinned in `test/dashboard.test.js`.
 
 Verified live as well as in tests, against a copy of the real session records served by a second
 monitor on its own port: a genuine `idle_prompt` on the captain's firstmate session was
-dismissed, dropped to `Idle · dismissed` in the page and in `nmmon status`, went red again on a
+dismissed, dropped to `Idle · dismissed` in the page and in `raise status`, went red again on a
 `PermissionRequest` with no further action and offered no control while it was one, and survived
 a browser reload.
 

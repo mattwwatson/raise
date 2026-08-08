@@ -1,13 +1,13 @@
 /**
  * Reading the one file a user writes, and refusing to read it when it is unsafe.
  *
- * The forge lookup is the only outbound network request nmmon makes, so it is
+ * The forge lookup is the only outbound network request Raise makes, so it is
  * off until this file says otherwise. Everything about the shape here follows
  * from two decisions.
  *
  * **The credential lives in a file, never in the environment.** That is the
  * opposite of the intuitive answer, and the reason is `src/exec.js`: it spawns
- * with no `env` option, so every child inherits nmmon's whole environment - `ps`
+ * with no `env` option, so every child inherits Raise's whole environment - `ps`
  * and `tmux` and `osascript` and `gh` and `lavish-axi` and `no-mistakes`, most
  * of them on the one-second poll loop. A token in the environment is a token
  * handed to all of them for as long as the monitor runs. Read out of a `0600`
@@ -17,7 +17,7 @@
  * inverted to protect a secret we chose to put there.
  *
  * **GitHub has no credential here at all**, deliberately. `gh` authenticates
- * itself, so nmmon never sees a GitHub token - and `gh` already reads `GH_TOKEN`
+ * itself, so Raise never sees a GitHub token - and `gh` already reads `GH_TOKEN`
  * and `GITHUB_TOKEN` out of the environment we hand it, so there is nothing a
  * token path of our own could add.
  *
@@ -53,7 +53,7 @@ export const defaultConfigAccess = {
 /**
  * What the forge lookup is allowed to do, and why not, when it is not.
  *
- * `problem` is for `nmmon doctor` and for nowhere else. It is set only when the
+ * `problem` is for `raise doctor` and for nowhere else. It is set only when the
  * user has evidently tried to configure this and it is not working - a
  * malformed file, an unsafe mode, half a Bitbucket credential. Never for the
  * ordinary case of no file at all, which is the default and must be silent: a
@@ -72,7 +72,7 @@ const GROUP_OR_OTHER_READABLE = 0o077;
 const DISABLED = { enabled: false, bitbucket: null, problem: null };
 
 /**
- * Read `~/.nmmon/config.json`.
+ * Read `~/.raise/config.json`.
  *
  * Fails closed in every direction: anything unexpected disables the lookup
  * rather than half-enabling it, because the failure this guards is an outbound
@@ -138,7 +138,7 @@ export function readForgeConfig({ path = forgeConfigPath(), files = defaultConfi
  * The same read, kept current under a running monitor.
  *
  * This file is the user's to write, and the README tells them to write it - so
- * an answer captured when the server started is one the server and `nmmon
+ * an answer captured when the server started is one the server and `raise
  * doctor` disagree about for as long as it runs, the doctor reporting an opt-in
  * that never reached the poll loop. That is the confident-wrong shape this
  * codebase is built against, so the file is re-read as it changes instead.

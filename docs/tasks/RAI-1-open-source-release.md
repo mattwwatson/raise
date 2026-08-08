@@ -16,7 +16,7 @@ the record of *why* is the part worth keeping.
 
 ## The decision
 
-`nmmon` today is framed as an accessory to `no-mistakes`. The pi work makes that framing
+`raise` today is framed as an accessory to `no-mistakes`. The pi work makes that framing
 wrong: once two harnesses are supported it is a category, not a plugin. The generic product
 is one sentence:
 
@@ -76,7 +76,7 @@ pointer. Option B on evidence of demand, not speculation. Do not let it delay th
 ### 0.5 pi's event mechanism - answered
 
 pi has an `extensions` array in its own `settings.json`, and the working tree already
-registers into it: `src/pi-extension.js` installs the path, `hooks/nmmon-pi-extension.js`
+registers into it: `src/pi-extension.js` installs the path, `hooks/raise-pi-extension.js`
 posts the same wire format the Claude Code hook posts. So there is no missing plumbing and no
 second parser. This is not an open question any more.
 
@@ -137,9 +137,9 @@ dashboard. This phase is entirely test-driven and does not touch naming.
 - Test first: a scratch `NM_HOME` with **no database at all**. Assert the server starts, the
   poll loop runs, sessions appear, and nothing warns or degrades visibly. The absent case is
   different from the present-but-wrong-schema case that `nm-state.js` already handles.
-- Audit `src/nm-state.js`, `src/poll-watch.js`, `src/dashboard.js` and `bin/nmmon.js` for
+- Audit `src/nm-state.js`, `src/poll-watch.js`, `src/dashboard.js` and `bin/raise.js` for
   paths that assume a run table exists.
-- `nmmon doctor` must report a missing no-mistakes as **normal**, not as a fault.
+- `raise doctor` must report a missing no-mistakes as **normal**, not as a fault.
 - Check the `no-mistakes axi status` fallback does not shell out pointlessly when the binary
   is absent.
 
@@ -190,7 +190,7 @@ presence and a hint - which is still infinitely better than a blank page.
 
 ### 1.5 Gate
 
-`npm test` and `npm run typecheck` green, plus a **manual run on a scratch `NMMON_HOME` and
+`npm test` and `npm run typecheck` green, plus a **manual run on a scratch `RAISE_HOME` and
 `NM_HOME` with no no-mistakes and no lavish**, eyeballed in the browser. The test suite cannot
 tell you the page looks sane with three sources missing.
 
@@ -198,36 +198,37 @@ tell you the page looks sane with three sources missing.
 
 ## Phase 2 - rename and repackage
 
-Mechanical, but wide. Do it in one commit so bisect stays useful.
+**Shipped 08/08/2026 as RAI-3**, in one commit so bisect stays useful. The surfaces it touched,
+the rename map, the four-way token contract and the naming convention it had to settle - `Raise`
+the product, `raise` the command - are all in
+[`RAI-3-rename-to-raise.md`](RAI-3-rename-to-raise.md), and the convention itself now lives under
+*Coding Conventions* in `AGENTS.md`. The inventory that used to sit here named a set of files
+that no longer exists under those names.
 
-### 2.1 Surfaces the rename touches
+### 2.1 The migration trap
 
-- `package.json`: `name`, `bin` key, `description`
-- `bin/nmmon.js` → renamed
-- `hooks/nmmon-hook.js` → renamed, **and the path recorded in every user's
-  `settings.json`**
-- `src/config.js`: `NMMON_HOME`, `NMMON_PORT`, and `~/.nmmon/` (token, `server.json`)
-- `.nmmon-backup` suffix in `src/hooks.js`
-- `README.md`, `AGENTS.md`, `CLAUDE.md`, every test file, every error string
+The reasoning is kept because it is what decided the shape of the hand-back. Anyone already
+running the old binary had an installed hook pointing at `hooks/nmmon-hook.js` and a token in
+`~/.nmmon/`, and a rename silently breaks both - the failure mode being the worst one this tool
+has: **a dashboard that looks fine and reports nothing**.
 
-### 2.2 The migration trap
+With one existing user, the answer was not a migration shim but `uninstall-hooks` on the old
+name and `install-hooks` on the new one, done deliberately, with no compatibility code. AGENTS.md
+already forbids shims for versions we do not support. RAI-3 found a second thing that does not
+regenerate - the forge `config.json` RAI-13 had put in the same directory - so the steps a human
+has to run are written out in README's *Upgrading from `nmmon`* section, which owns them.
 
-Anyone already running `nmmon` (me, at minimum) has an installed hook pointing at
-`hooks/nmmon-hook.js` and a token in `~/.nmmon/`. A rename silently breaks both, and the
-failure mode is the worst one this tool has: **a dashboard that looks fine and reports
-nothing**.
+### 2.2 Packaging
 
-Since the only existing user is me, the correct answer is not a migration shim - it is
-`uninstall-hooks` on the old name, then `install-hooks` on the new one, done deliberately.
-Note it in the plan, do it, and add no compatibility code. AGENTS.md already forbids shims for
-versions we do not support.
+Done in the same pass: `"private": true` removed, `"license": "UNLICENSED"` → `MIT` with a
+`LICENSE` file, and the `files` array checked against the renames. The package is `raise-cli`
+with `bin: { raise: ... }`, because `raise` is squatted on npm.
 
-### 2.3 Packaging
+Outstanding:
 
-- `"private": true` → remove
-- `"license": "UNLICENSED"` → `MIT`, and add a `LICENSE` file
-- Publish to npm so install is `npx <name> serve` rather than a Bitbucket clone
-- Verify the `files` array still covers everything after the renames
+- Publish to npm so install is `npx raise-cli serve` rather than a Bitbucket clone. The clone
+  URL in the README is deliberately unchanged until then - the git repository is not being
+  renamed here, and guessing at a future URL is worse than an outdated one.
 - New public GitHub repo. Decide whether to carry the git history across - it is good history
   and the commit messages are readable, but check it for anything repo-private first.
 
@@ -266,8 +267,9 @@ corrections are agent context and could not wait for a launch phase.
 
 What remains here, after the rename has landed:
 
-- Add the new name and command throughout, consistently with whatever prose convention the
-  rename chose (`raise` is a verb; see `RENAME.md`).
+- ~~Add the new name and command throughout~~ - done by RAI-3, which also had to pick the prose
+  convention `raise` being a verb forces. It is recorded under *Coding Conventions* in
+  `AGENTS.md`; follow it rather than re-deciding it.
 - Contributor-facing framing: the terminal adapter path per 0.3, and a pointer to
   `CONTRIBUTING.md`.
 
@@ -369,7 +371,14 @@ expect and is the one that reads as "someone thought about this".
      that are already open - which was the whole objection to `PostToolUse`.
    - The transcript disproof survives intact, as required: it still covers the idle nudge,
      which no permission hook reports.
-4. Claim `raise` - register `raise.dev` and take the npm package name (`raise-cli` or scoped,
-   with `bin: { raise: ... }`). Verified 04/08/2026: domain free, npm `raise` declares no bin.
-   (Blocks Phase 2, and availability is perishable.)
+4. Claim `raise` on npm - take the package name. Verified 04/08/2026: npm `raise` declares no
+   bin; re-checked 08/08/2026: `raise-cli` free, `raise` taken at 0.0.0 with no command in it.
+   RAI-3 has since named the package `raise-cli` with `bin: { raise: ... }`, so what is left is
+   registering it - which no longer blocks Phase 2, but does block publishing, and availability
+   is perishable.
+
+   **No domain is being claimed.** This step used to require registering `raise.dev` as well.
+   Withdrawn 08/08/2026: the name is not going to carry a site, so a domain buys nothing the
+   npm name does not, and leaving it here would block a later reader on a requirement nobody
+   intends to meet. The npm half stands - that is what `bin: { raise: ... }` needs.
 5. Decide 0.3 and 0.4 - terminal PRs yes/no, Linux at launch yes/no.
