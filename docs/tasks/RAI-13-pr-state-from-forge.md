@@ -1,9 +1,10 @@
 ---
 ticket: RAI-13
-status: in-progress
+status: shipped
 size: L
 depends: RAI-10
 branch: RAI-13-pr-state-from-forge
+shipped: 2026-08-08
 ---
 # RAI-13 - Read pull request state from the forge
 
@@ -206,10 +207,12 @@ outside, per the convention in `AGENTS.md`.
 
 ---
 
-## Proposed design - the four decisions, with the rule each turns on
+## The four decisions, with the rule each turns on
 
-**Status: awaiting the captain. Nothing below is built.** No network layer, no configuration
-file, no credential path exists on this branch.
+**Decided. All four were put to the captain with the recommendations below, and all four came
+back as recommended - with one narrowing, on decision 1: `gh` is the whole GitHub path and no
+token path was built.** What is recorded below is the reasoning as it was put; the
+[implementation notes](#implementation-notes) record what changed in the building.
 
 ### 1. Is `gh` a hard requirement, or is a token path needed too?
 
@@ -227,15 +230,14 @@ would hand it anyway, so reading the same variable ourselves takes no custody `g
 taking. The env path is therefore not a second way to answer the question; it is the same answer
 when the CLI is not installed.
 
-**Recommendation: B, stated as one branch.** `gh` is asked first. If `gh` is absent or does not
-answer *and* `GH_TOKEN` or `GITHUB_TOKEN` is set in nmmon's own environment, the REST call is made
-with it. A GitHub token is **never** written to nmmon's configuration file, and no variable name
-outside those two is ever consulted - which is the "no assumptions from one machine" rule holding.
-The branch is exercised only when it is the sole way through, and it is fully testable through the
-injected runner and the injected `fetch`.
+*Recommended:* B, as one branch - `gh` first, the REST call only when `gh` is absent.
 
-*The reading to reject explicitly:* "`gh` is a hard requirement because it is cleaner." It is
-cleaner, but the cleanliness is credential custody, and the environment path takes none.
+**Ruled: A. `gh` is the whole GitHub path, and the reason given is a better one than the
+recommendation's.** Not custody, which the analysis above shows the two readings tie on -
+*durability*. `gh` is the interface most likely to keep working across changes to GitHub's own
+rules, and a second path built against the REST API is a second thing to keep current for a
+case `gh` already covers. So there is no GitHub token path, and adding one later is a decision
+to reopen rather than a gap to fill.
 
 ### 2. Where does configuration live?
 
@@ -257,7 +259,7 @@ the secret furthest, and the only fix for it would be to make `exec.js` filter i
 changing the one place that runs commands to contain a credential we chose to put there. That is
 the problem inverted.
 
-**Recommendation: A.** `~/.nmmon/config.json`, written `0600` exactly as `readOrCreateToken`
+*Recommended, and **ruled: A**.* `~/.nmmon/config.json`, written `0600` exactly as `readOrCreateToken`
 already writes `token`, is the only place a Bitbucket credential lives. nmmon **refuses to read
 the file at all if its mode is group- or other-readable** and says so once - the ssh rule, and the
 only thing that makes a documented `0600` more than a comment, since a file can be created
@@ -274,7 +276,8 @@ frame, which already excludes it by construction since only `Row` crosses.
 
 ### 3. What happens when a forge answer contradicts no-mistakes?
 
-**Confirmed: the forge wins, and the disagreement is not surfaced.** Two qualifications below are
+*Recommended, and **ruled: confirmed** - the forge takes precedence, and the disagreement is not
+surfaced.* Two qualifications below are
 the actual mechanism, and without them "the forge wins" reintroduces the bug RAI-10 just fixed.
 
 **The rule is that the page shows one answer per fact.** This codebase refuses a second opinion
@@ -299,7 +302,7 @@ on. It is not news.
 
 ### 4. Does this run for pull requests with no live run at all?
 
-**Recommendation: yes, and it is the reason to build this at all.**
+*Recommended, and **ruled: yes**. It is the reason to build this at all.*
 
 **The rule is that a source is worth adding where nothing else is answering.** RAI-10's
 implementation notes settle where that is: a live run's reading is already bounded to the ~2 minute
@@ -383,3 +386,68 @@ be a test proving it.
 
 Report the design decisions taken, the minimum scopes required for Bitbucket, and the exact
 wording proposed for the README's privacy section.
+
+---
+
+## Implementation notes
+
+### The shape it took
+
+`src/forge.js` follows `LavishState` closely enough that the comparison is the fastest way in:
+`observe` both answers and schedules, requests are fired and never awaited, and the page uses
+the last answer. `src/forge-config.js` is separate because reading the file is a different
+concern from using it, and because the mode refusal wanted tests of its own.
+
+The one shape decision not in the design above: **the forge settles the state of a pull request
+the existing chain has already identified, rather than being a fourth entry in that chain.**
+`withForgeState` wraps the chain's result. Identifying *which* pull request a row has is
+branch-gated, slug-checked local work that a forge lookup has nothing to add to - and making it
+a fourth source would have meant the forge deciding identity, which is the failure mode the
+three-source ranking spent RAI-15 and RAI-16 learning to avoid.
+
+### Two things the building changed
+
+**A `fetch` guard, on every server test rather than one.** The Definition of done asks for a
+test proving the disabled feature is byte-identical. The pure half is one `assert.deepEqual` in
+`dashboard.test.js`; the half that matters is `fetch: () => assert.fail('no outbound requests
+from the server')` sitting beside the existing `exec` guard on all sixteen other server tests.
+That is the arrangement `AGENTS.md` already trusts for `exec`, and it is what will catch the
+future change that makes a request unconditionally rather than the one that makes it on purpose.
+
+**The clock bug the tests caught, which is `lavish.js`'s documented mistake made again.**
+Readings and backoffs were being stamped with `Date.now()` on the *return* of a request whose
+window had been opened on the *injected* clock. Every test that moved time forward then saw a
+backoff that had already expired, or one that never would. Everything is stamped from the
+caller's clock at dispatch now, which is what `lavish.js` says to do and why. It also
+understates a reading's freshness by however long the request took - the safe direction for the
+field that decides whether we may assert.
+
+### The minimum Bitbucket scope, and why it is better news than expected
+
+**`read:pullrequest:bitbucket`, on its own.** Atlassian's API token permission reference:
+*"Allows viewing of pull requests, plus the ability to comment on pull requests"*, and
+explicitly *"does not imply the `read:repository:bitbucket` scope"*. That non-implication is
+the part worth knowing - a token minted for nmmon **cannot read the user's source code**, which
+is a much easier thing to ask somebody to create. There is no narrower option: Atlassian bundles
+commenting into the read scope, and nmmon simply never writes.
+
+Two facts with a shelf life, both checked on 07/08/2026 rather than recalled:
+
+- **App passwords are gone**, not going: brownouts from 09/06/2026, removal completed
+  28/07/2026. The credential is an Atlassian API token, sent as HTTP Basic auth with the
+  account email - so it is a **pair**, which is why the config block has two fields and why
+  `~/.nmmon/token`'s one-line shape could not be reused.
+- **Rate limits**: Bitbucket 1000/hour keyed on the user, GitHub 5000/hour. Bitbucket binds, and
+  the cadence chosen (a minute for open pull requests, never again once merged, fifteen minutes
+  after a failure) puts a realistic page an order of magnitude under it.
+
+### What is deliberately not built
+
+- **No GitHub token path.** Ruled, and see decision 1 - it is a decision to reopen, not a gap.
+- **No page marker saying an answer came from the forge.** One answer per fact; the chip has
+  always been gated on one boolean and the forge just makes it true where nothing else could.
+- **No warning banner.** A `problem` from the config reader reaches `nmmon doctor` and nowhere
+  else, and is set only when somebody has evidently tried to configure this and it is not
+  working. The page stays silent, the way it does about no-mistakes and Lavish.
+- **No forge beyond github.com and bitbucket.org.** A GitHub Enterprise host is not github.com,
+  and guessing would mean an outbound request to a machine the user never expected us to reach.

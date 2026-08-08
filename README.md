@@ -66,8 +66,10 @@ WORKING
 ```
 
 That comes from the transcript Claude Code already writes, so it is quoted rather than
-guessed at. Nothing leaves your machine: the server reads a local file and renders it on your
-own dashboard, in your own browser.
+guessed at. The transcript never leaves your machine: the server reads a local file and
+renders it on your own dashboard, in your own browser. Nothing else leaves it either, unless
+you deliberately turn on the one feature that asks a forge about a pull request - see
+[Security](#security).
 
 **Expand a row to see the last few things it did.** The chevron on the right of any session
 row opens a panel with what you asked, what Claude said back, and every tool it ran with how
@@ -97,6 +99,13 @@ you are waiting on for the rest of the day.
 
 Pull requests opened outside a no-mistakes run are picked up from the session's own
 transcript, so a plain `gh pr create` still gets a link.
+
+**You can have the badge always be right, by letting nmmon ask.** Turning on
+[pull request state](#pull-request-state-from-the-forge) makes nmmon ask GitHub or Bitbucket
+directly, which is the one source that cannot be out of date - so a merged pull request stops
+saying `OPEN` within the minute, and a review nobody is watching gets a real state rather than
+a tooltip. It is off until you configure it, and it is the only thing in nmmon that makes an
+outbound request.
 
 **The branch is always shown**, next to the repo name, read straight from `.git/HEAD` - so it
 is right for worktrees and for sessions that have never run the pipeline. It is also what ties
@@ -182,6 +191,7 @@ do not have:
 | --- | --- |
 | `no-mistakes` | No pipeline rows: nothing is parked, failed or running a step, and no pull request comes from the database. Sessions, blocks, reviews and focusing are unaffected. |
 | `lavish-axi` | No "waiting on your review" rows. That state is detected by watching for a live `lavish-axi poll` and by nothing else, so without Lavish there is nothing to detect. |
+| `gh` | No pull request state from GitHub, if you turned that on at all - see [pull request state](#pull-request-state-from-the-forge). It is off by default, so on an unconfigured machine `gh` is never looked for. |
 
 Absence is not degradation and is never reported as a fault: no warning banner, no `fail` in
 `nmmon doctor`, and nothing shelled out looking for a command that is not there. `nmmon doctor`
@@ -392,6 +402,69 @@ Expanding a row shows conversation text, and that is the only place it appears. 
 from a local file by a local server and rendered in your own browser - it is not in the
 event stream, not in the hook payload, and not sent anywhere. The token guards that route
 like every other one, which is exactly why localhost alone is not treated as a boundary.
+
+**One optional feature sends anything at all, and it is off until you configure it.** nmmon
+can ask GitHub or Bitbucket whether a pull request already on your dashboard is still open -
+once a no-mistakes run ends nothing is watching it, so a stored "open" can be days old. What
+goes out is that pull request's own URL, the one the row already links to, to the forge that
+hosts it. Nothing else: no transcript, no prompt text, no file contents, no branch names, no
+list of your repositories, and no request to any host other than the forge in the URL. With
+it off - which is the default - nmmon makes no outbound network request of any kind. GitHub
+goes through your own `gh` login, so nmmon never sees a GitHub credential at all; Bitbucket
+needs an API token with the single scope `read:pullrequest:bitbucket`, which grants no access
+to your source code, kept `0600` in `~/.nmmon/config.json`, never logged, never echoed, and
+never sent anywhere but Bitbucket.
+
+### Pull request state from the forge
+
+Off by default. Turn it on by writing `~/.nmmon/config.json`:
+
+```sh
+umask 077 && cat > ~/.nmmon/config.json <<'JSON'
+{
+  "forge": {
+    "enabled": true
+  }
+}
+JSON
+chmod 600 ~/.nmmon/config.json
+```
+
+That is the whole of it for GitHub: it goes through `gh`, which authenticates itself, so
+there is no credential to configure and none for nmmon to hold. `gh` needs to be installed
+and logged in (`gh auth login`) - it requires authentication even for a public pull request.
+
+Bitbucket has no equivalent CLI, so it needs a token. Create an
+[API token with scopes](https://support.atlassian.com/bitbucket-cloud/docs/using-api-tokens/)
+under **Account settings → Security → API tokens**, select **Bitbucket** as the app, and give
+it **`read:pullrequest:bitbucket` and nothing else**. That scope allows viewing pull requests
+and explicitly does *not* imply `read:repository:bitbucket`, so a token minted for nmmon
+cannot read your source code. Add it with the Atlassian account email it belongs to, because
+Bitbucket authenticates with both:
+
+```json
+{
+  "forge": {
+    "enabled": true,
+    "bitbucket": { "email": "you@example.com", "token": "..." }
+  }
+}
+```
+
+**The file must be `0600`.** It holds a credential, so if anyone else on the machine can read
+it nmmon refuses the whole file - opt-in included - and `nmmon doctor` says so rather than
+quietly doing nothing.
+
+Everything about this fails silently and completely. No `gh`, no login, no credential, no
+network, a repository the token cannot see, a rate limit: each of them leaves the row exactly
+as it would have been, showing whatever no-mistakes last knew. Failures are remembered too, so
+a repository nmmon cannot read is asked once and then left alone for fifteen minutes rather
+than retried every minute forever. An open pull request is re-checked about once a minute; a
+merged one is never asked about again, because it cannot un-merge.
+
+A forge answer ages like any other reading: if the lookups stop answering, the badge goes back
+to the tooltip's *"was open, last checked"* within five minutes rather than sitting on an
+answer nobody can confirm.
 
 ## Troubleshooting
 

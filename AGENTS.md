@@ -26,7 +26,7 @@ right - and every one of them eventually put a confident wrong answer on a card.
 | --- | --- | --- |
 | needs a human | always - it is the product | hooks, and the transcript that disproves a stale block |
 | a no-mistakes run | it is tied to *this* session | the no-mistakes database and the process table |
-| a pull request | it is on this checkout's branch | the database, or the session's own transcript |
+| a pull request | it is on this checkout's branch | the database, or the session's own transcript - and, when it is switched on, the forge that hosts it |
 | a Lavish review | this session is sitting in a poll | the process table |
 
 Two consequences that are not obvious, and that the sections below keep returning to. **A
@@ -115,6 +115,8 @@ one, so it comes last. Do not reorder them back.
 | `src/transcript-reader.js` | the tail read behind that, cached on mtime, branch and agent |
 | `src/git-branch.js` | the branch a checkout is on, and the checkout a worktree belongs to, read from `.git` |
 | `src/lavish.js` | resolving a Lavish artifact to the page waiting on you |
+| `src/forge.js` | asking GitHub or Bitbucket whether a pull request is still open |
+| `src/forge-config.js` | the one file a user writes, and the mode check that refuses it |
 | `src/poll-watch.js` | which sessions are in a `lavish-axi poll`, which have a pipeline running, and which are driving one |
 | `src/firstmate.js` | which sessions firstmate started, from the markers it sets on itself |
 | `src/run-owner.js` | which session started which run, remembered across the gaps |
@@ -825,6 +827,75 @@ A live no-mistakes run is being watched right now, so its `pr_state` is real *fo
 something is actually looking*. The database's history is branch-verified but frozen. The
 transcript is neither, and is the only one that sees a pull request no-mistakes never opened.
 
+**A fourth outranks all three, and it is the only source allowed to *assert*.** Every one of
+the above is somebody's recollection of a pull request; the forge is the authority on its own.
+So where the transcript may only ever clear a block and never announce one - indirect evidence
+gets to disprove and nothing else - `withForgeState` in `dashboard.js` replaces the state
+outright. That asymmetry is deliberate and is the answer to the reasonable question of why this
+source may do more, given how load-bearing the "only ever disprove" rule is elsewhere.
+
+It settles the *state*, never the identity: the three sources above still decide **which** pull
+request a row has, and the forge is applied to whatever they concluded. It also never touches
+the link, which the local sources are just as good at and which the row keeps in every case.
+
+**"The forge wins" must not become "the forge's last answer wins forever."** A forge reading
+carries its own `observedAt` and goes through the same `PR_STATE_FRESH_MS` gate as the
+database, so a lookup that stops answering - the network gone, the laptop asleep - stops
+asserting within five minutes and the row falls back to "was open, last checked". Without that
+this feature is RAI-10 reintroduced with a new source, which is the exact shape this file keeps
+warning about.
+
+**A disagreement with no-mistakes is not surfaced, because there is nothing in it to say.** It
+means one thing only - no-mistakes' reading is older - which `observedAt` already records. A
+page that argues with itself teaches you to stop believing it, the same failure as a confident
+wrong chip, and this codebase refuses a second opinion everywhere else it has been tempted: an
+unplaceable run gets one card that admits it rather than three that quietly disagree.
+
+**A failed lookup is not an answer, and it drops the previous reading.** No credential, no
+`gh`, no network, a private repo, a rate limit: none of these contradict anything, so the row
+returns to exactly what it showed before this existed. The old reading is dropped rather than
+left to age out - it would age out either way, but a reading we can no longer confirm is
+precisely what this page may not assert.
+
+**The Bitbucket credential lives in a file and may not come from the environment, which is the
+opposite of the intuitive answer.** `exec.js` spawns with no `env` option, so every child
+inherits nmmon's whole environment - `ps`, `tmux`, `osascript`, `gh`, `lavish-axi` and
+`no-mistakes`, most of them on the one-second poll loop. A token in the environment is a token
+handed to all of them for as long as the monitor runs. Read out of a `0600` file into a
+variable and put in a header, it is in one process and in no environment at all. The tempting
+fix for the other arrangement - teach `exec.js` to filter what it passes - is the problem
+inverted to protect a secret we chose to put there, so there is deliberately **no environment
+fallback** for it.
+
+**GitHub is the asymmetry, and it is on purpose.** There is no GitHub credential here at all:
+`gh` authenticates itself, and it already reads `GH_TOKEN` and `GITHUB_TOKEN` out of the
+environment it is handed, so a token path of our own would be a second way to compute an answer
+`gh` was going to give anyway. It was ruled a hard requirement rather than one option of two:
+`gh` is the interface most likely to survive a change in GitHub's own rules. **Do not add a
+GitHub token path**, and never write a GitHub token to the config file.
+
+**An unsafe file mode refuses the whole file, the opt-in included.** ssh's rule, and it is what
+makes a documented `0600` more than a comment, since a file can be written correctly and
+chmodded later. Honouring the half of a file with no secret in it, having just called the file
+unsafe, teaches nobody to fix it - and the credential already exposed is exposed either way.
+`nmmon doctor` is where that is said; `readForgeConfig` sets `problem` **only** when somebody
+has evidently tried to configure this and it is not working, never for the ordinary case of no
+file at all. That silence is the same rule no-mistakes and Lavish are held to.
+
+**Cadence and the two caches.** An open pull request is re-asked once a minute; a **merged** one
+is never asked again, because it cannot un-merge; a **closed** one keeps the ordinary interval,
+because it can be reopened and `closed` over a reopened review is the same quiet staleness this
+removes. A failure is cached for fifteen minutes - the failures this covers are the durable kind,
+and retrying them on the open interval is a request a minute forever for an answer that is not
+coming. The set asked about is whatever is *rendered*, fed back from `buildRows`, so it is
+bounded by the row count and a pull request that leaves the page is forgotten.
+
+**Timestamps come from the caller's clock at dispatch, never `Date.now()` on return.** Same rule
+and same reason as `lavish.js`: mixing the injected clock with the wall clock reads as working
+and quietly is not, and a test that moves the clock cannot see it. It also understates a
+reading's freshness by however long the request took, which is the safe direction for the field
+that decides whether we may assert.
+
 The first of those is `pullRequestForRun`, and it is worth knowing that it is the source a
 session card usually shows rather than a fallback - the runs query carries `pr_url` and
 `pr_state` too, so any card with a matched run takes its pull request from there. It was
@@ -1186,6 +1257,12 @@ Keep it that way - it has no build step and must open as a file.
   something away, and it must never be the more inviting of the two. It appears only on
   `Row.dismissible` - Claude Code's idle nudge - and a permission-prompt row gets *no* control
   rather than a disabled one.
+- **Where a pull request's state came from is not on the card, and the page needed no change
+  to gain the forge.** The chip has always been gated on one boolean, `PullRequest.current`,
+  and a forge reading simply makes that true where nothing else could. A "from the forge"
+  marker would be the second opinion the source ranking exists to avoid - one answer per fact -
+  and it would be noise on a page whose whole job is to be scannable. The tooltip's
+  *"last checked N ago"* already says everything a reader can act on.
 - **The `dismissed` marker sits beside the state word, because the two are one sentence.** It
   is the only thing separating "nothing is waiting" from "I told it to stop saying so", and the
   page may never let those look alike - a signal hidden without a word is exactly the quiet
@@ -1220,7 +1297,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 650 tests, no network, no dependencies, ~2s
+npm test          # 682 tests, no network, no dependencies, ~2s
 npm run lint      # oxlint over src, bin, hooks, public, test, scripts
 npm run typecheck # tsc --noEmit over src, bin, hooks, public, scripts
 ```
@@ -1238,8 +1315,8 @@ changing it there too.
   pipeline'`). Use a factory helper with an overrides object for fixtures - see the `run()` /
   `session()` pattern at the top of `test/dashboard.test.js`.
 - Comment the *why* in a test when the case is subtle, same as in source.
-- **Inject everything external**: the exec runner, the clock, the process table, the pid
-  liveness probe. The focus adapters take an injected command runner so the suite can assert
+- **Inject everything external**: the exec runner, `fetch`, the clock, the process table, the
+  pid liveness probe. The focus adapters take an injected command runner so the suite can assert
   on the AppleScript and tmux commands that *would* have run without stealing your focus
   mid-test. A test that touches the real machine does not belong here.
 - New behaviour in a pure module gets a direct unit test. New behaviour in `server.js` gets a
@@ -1296,6 +1373,13 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
   > stop. It was relaxed on purpose, for the expando, once it was clear the two halves it
   > collapsed are separable: what the page may show and what may leave the machine. The
   > second half has not moved an inch.
+- **The forge lookup is the product's only outbound request, and it is opt-in.** It must stay
+  that way: off unless `~/.nmmon/config.json` says otherwise, silent in every failure, and
+  sending nothing but a pull request URL to the forge already named in it. `server.test.js`
+  carries `fetch: () => assert.fail(...)` beside its `exec` guard on every other test, which
+  is what proves an unconfigured nmmon makes no request at all - **do not weaken that guard
+  either.** If this ever grows a second thing to send or a second place to send it, that is a
+  change to the README's privacy section first and code second.
 - **Do not weaken `src/security.js`.** Token, `Host` allowlist and `Origin` allowlist are all
   three load-bearing - this server ends up running `osascript` and `tmux`, and localhost is
   not a boundary. `/health` is the only unauthenticated route and returns liveness only.
@@ -1349,7 +1433,7 @@ before creating a ticket or touching anything under `docs/tasks/`.**
 ## Commands
 
 ```sh
-npm test                       # 650 tests, ~2s
+npm test                       # 682 tests, ~2s
 npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
