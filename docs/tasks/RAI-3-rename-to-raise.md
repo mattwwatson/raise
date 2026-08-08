@@ -251,9 +251,28 @@ When the gates are green, tell the user they need to:
 2. Install the pi extension with the new binary
 3. **Restart every open Claude Code and pi session** - hooks are read at session start, so
    nothing already running reports itself until it restarts
-4. Note that `~/.nmmon/` is now orphaned. The new binary uses `~/.raise/` and will mint a fresh
-   token. `~/.nmmon/` can be deleted once the new install is confirmed working - it holds only
-   a token, a `server.json` and session records, all of which regenerate.
+4. **Move the forge config across first**, before deleting anything:
+
+   ```sh
+   mv ~/.nmmon/config.json ~/.raise/config.json   # keep it 0600
+   ```
+
+   The mode has to survive the move. `readForgeConfig` refuses the *whole* file when it is
+   group- or other-readable - the opt-in along with the credential - so a `config.json` that
+   arrives at the new path with a loosened mode turns the lookup off just as completely as one
+   that never arrived at all.
+
+5. Note that `~/.nmmon/` is then orphaned. The new binary uses `~/.raise/` and will mint a
+   fresh token, so what is left behind - the token, `server.json` and `sessions/` - all
+   regenerates and the directory can be deleted once the new install is confirmed working.
+
+   This plan originally said that was the *whole* contents of `~/.nmmon/`, and it was true on
+   05/08/2026 when the plan was written. **RAI-13 falsified it** by putting `config.json` in
+   the same directory, which holds the forge opt-in and a Bitbucket API credential and
+   regenerates from nothing. Following the instruction as written would have destroyed a
+   credential the user would have had to recreate. The failure mode worth carrying forward is
+   the general one: an instruction handed to a human ages against the code, and this one aged
+   for three days between being written and being run.
 
 Do not do any of these for them.
 

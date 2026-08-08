@@ -225,6 +225,42 @@ sessions already open will not report themselves until you restart them.
 Then open the URL `raise serve` prints and leave the tab pinned. Click "Enable alerts" once if
 you want desktop notifications when something starts waiting on you.
 
+### Upgrading from `nmmon`
+
+Raise used to be called `nmmon`. If that is what you have installed, two things need doing by
+hand, and the first of them wants doing **before you pull this change**.
+
+**Uninstall the old hooks with the old binary.** From your existing checkout, still on the old
+commit:
+
+```sh
+nmmon uninstall-hooks
+nmmon uninstall-pi
+```
+
+Raise recognises its own entries in `~/.claude/settings.json` and `~/.pi/agent/settings.json`
+by the *filename* of the hook and the extension, and both filenames changed with the rename. So
+the new binary does not know the old entries are its: `install-hooks` appends a second group per
+event rather than replacing the old one, both fire, and the stale one runs `node` against
+`hooks/nmmon-hook.js`, which no longer exists. `uninstall-hooks` cannot clear them either, for
+the same reason. The hook is built to exit 0 quietly on every path so that it can never break a
+live Claude session, which here means the breakage is **silent and permanent** - nothing
+reports it and nothing cleans it up. If you have already pulled, the remedy left is to edit
+those two settings files by hand and delete the entries naming `nmmon`.
+
+**Move the forge config across**, if you turned on
+[pull request state from the forge](#pull-request-state-from-the-forge):
+
+```sh
+mv ~/.nmmon/config.json ~/.raise/config.json   # keep it 0600
+```
+
+Everything else in `~/.nmmon/` regenerates - the token, `server.json`, the session records -
+but this file does not. Left where it is, the lookup silently reverts to off, and it is silent
+in both directions: `raise doctor` reports it as simply not enabled, because from the new
+path's point of view there is no config to have an opinion about. The mode matters as much as
+the move, since an unsafe mode makes Raise refuse the whole file, opt-in included.
+
 ### pi sessions
 
 [pi](https://pi.dev) sessions are watched too, and they are marked with a `pi` chip so you can
