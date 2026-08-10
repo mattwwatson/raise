@@ -10,12 +10,12 @@ of your fifteen terminal tabs it was in. That is what this fixes.
 
 ```
 WAITING FOR YOU
-  hexbattle      HXB-56-residue-never-drains   Waiting for you - permission to use Bash   2m   tmux
+  hexbattle      HXB-56-residue-never-drains   Waiting for you - Claude needs your response   2m   tmux
 PIPELINE PARKED
-  firstmate      fm/poll-dispatch              Pipeline parked at a gate                  12s  tab
+  firstmate      fm/poll-dispatch              Pipeline parked at a gate                      12s  tab
                  NO-MISTAKES  review
 WORKING
-  moroku-skills  feature/dev-setup-skill       Working                                         tab
+  moroku-skills  feature/dev-setup-skill       Working                                             tab
                  NO-MISTAKES  test · Running npm test
 ```
 
@@ -58,10 +58,10 @@ two are happening at once:
 
 ```
 WAITING FOR YOU
-  hexbattle      Waiting for you - Claude needs your permission   Editing terrain.js   2m
+  hexbattle      Waiting for you - Claude needs your response    Editing terrain.js   2m
                  Design landing page with hex game visuals
 WORKING
-  money-webapp   Working                                          Running npm
+  money-webapp   Working                                         Running npm
                  Build PR feedback automation
 ```
 
@@ -120,7 +120,7 @@ to make the right card obvious:
 
 ```
 no-mistakes-monitor  Open Source Planning     feat/session-names   3m  tmux  Focus ↗
-Waiting for you - Claude needs your permission
+Waiting for you - Claude needs your response
 Add Pi support and promote session monitoring tool
 ```
 

@@ -57,7 +57,10 @@ import { pullRequestKey } from './forge.js';
  * @property {string|null} branch
  * @property {Attention} attention
  * @property {string} attentionLabel `attention`, in words
- * @property {string|null} message why Claude wants you; only set while blocked
+ * @property {string|null} message why Claude wants you; only set while blocked.
+ *   The agent's own words, except for a `permission_prompt` - which Claude Code
+ *   sends for a question as readily as for a tool approval, so `blockReason`
+ *   replaces it with neutral wording
  * @property {import('./registry.js').SessionState|null} sessionState
  * @property {number|null} sessionStateSince
  * @property {number|null} waitingForMs how long blocked, for the "2m" column
@@ -520,6 +523,56 @@ export function isIdleNudge(message, notificationType) {
 }
 
 /**
+ * What Claude Code calls a dialog waiting on a human, whatever the dialog is.
+ */
+const PERMISSION_PROMPT_TYPE = 'permission_prompt';
+
+/**
+ * What a block reads as when Claude Code cannot say what it is really asking.
+ *
+ * Deliberately the same sentence shape as the message it replaces, with the
+ * specific claim swapped for the general one that is true either way: a human
+ * is needed, and the session is waiting on them.
+ */
+const NEEDS_RESPONSE = 'Claude needs your response';
+
+/**
+ * Why a blocked session wants you, said only as precisely as we actually know.
+ *
+ * Claude Code sends `permission_prompt` for *every* dialog it puts in front of
+ * a human, and the message with it is one shared constant - so a question with
+ * options, such as a no-mistakes review gate, arrives claiming "Claude needs
+ * your permission". The state is right and the reason is a confident, specific
+ * falsehood, which is the one thing this page may not do.
+ *
+ * Nothing on the wire can separate the two. Captured live from Claude Code
+ * 2.1.226 with a control, an `AskUserQuestion` and a real `Bash` approval
+ * produce byte-identical `Notification` payloads; only `tool_name` on the
+ * earlier `PermissionRequest` differs, and that field is not ours to have - see
+ * the hook payload's allowlist and RAI-11's spec for the decision. The
+ * transcript cannot stand in either: a pending tool's record is not flushed to
+ * disk while its dialog is open.
+ *
+ * So the honest answer is the vague one, and **only for the value that is
+ * ambiguous**. A kind Claude Code *can* distinguish keeps the words it earned -
+ * `idle_prompt` is already told apart by `isIdleNudge` and reads as it always
+ * did. Flattening every message would trade one wrong answer for a page that
+ * says less about the cases it had right.
+ *
+ * Fails closed exactly as `isIdleNudge` does: an absent or unrecognised type is
+ * passed through untouched, so a reporter too old to send the field, or a
+ * record written before this existed, reads precisely as it did before.
+ *
+ * @param {string|null|undefined} message
+ * @param {string|null|undefined} [notificationType]
+ * @returns {string|null}
+ */
+export function blockReason(message, notificationType) {
+  if (notificationType === PERMISSION_PROMPT_TYPE) return NEEDS_RESPONSE;
+  return message || null;
+}
+
+/**
  * Whether a session recorded as blocked has demonstrably carried on since.
  *
  * The hooks announce that Claude wants permission and then go quiet until the
@@ -838,7 +891,7 @@ export function buildRows({
       activity,
       summary: title,
       state,
-      message: state === 'blocked' ? session.message || null : null,
+      message: state === 'blocked' ? blockReason(session.message, session.notificationType) : null,
       lastActivityAt: summary?.lastActivityAt ?? null,
     });
   }
@@ -941,8 +994,14 @@ export function buildRows({
       // registry keeps a message for as long as it holds the block, so reading
       // it off a row blocked by its *agent* would caption the agent's block
       // with the human's granted prompt.
+      // `blockReason` rather than the raw message: Claude Code describes every
+      // dialog as a permission prompt, so the specific claim is only safe to
+      // repeat for the kinds it can actually tell apart. The agent's message
+      // has already been through it where it was built.
       message:
-        (sessionState === 'blocked' ? session.message : null) ||
+        (sessionState === 'blocked'
+          ? blockReason(session.message, session.notificationType)
+          : null) ||
         (attention === 'blocked' ? agent?.message : null) ||
         null,
       sessionState,
