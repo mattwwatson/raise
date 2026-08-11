@@ -19,8 +19,10 @@ const NOW = 1_700_000_000_000;
  * depends on what the developer running it happens to have open.
  *
  * @param {Record<string, {text: string, mtimeMs: number}>} entries
+ * @param {string[]} [missingDirs] working directories a transcript names that
+ *   are no longer on disk
  */
-function fakeFiles(entries) {
+function fakeFiles(entries, missingDirs = []) {
   const reads = { tail: 0, head: 0, list: 0 };
   const children = (dir) => {
     /** @type {Map<string, boolean>} */
@@ -48,6 +50,11 @@ function fakeFiles(entries) {
         const entry = entries[path];
         if (!entry) throw new Error(`ENOENT: ${path}`);
         return { mtimeMs: entry.mtimeMs };
+      },
+      // Every working directory in these fixtures exists unless a test says
+      // otherwise.
+      directoryExists(path) {
+        return !missingDirs.includes(path);
       },
       readTail(path, bytes) {
         reads.tail += 1;
@@ -95,8 +102,8 @@ const codexTranscript = (cwd) =>
     { timestamp: '2026-08-11T04:09:24.794Z', ordinal: 1, type: 'response_item', payload: { type: 'message', role: 'user', content: [] } },
   );
 
-function scan(entries, over = {}) {
-  const { files, reads } = fakeFiles(entries);
+function scan(entries, over = {}, missingDirs = []) {
+  const { files, reads } = fakeFiles(entries, missingDirs);
   const scanner = new UntrackedScan({
     files,
     roots: ROOTS,
@@ -279,6 +286,20 @@ test('a file that is not JSONL, or names no absolute path, produces no row', () 
     '/home/.claude/projects/-a-repo/broken.jsonl': { text: '{not json\n{"also', mtimeMs: NOW },
   });
   assert.deepEqual(scanner.list({ now: NOW }), []);
+});
+
+test('a working directory that is no longer there produces no row', () => {
+  // `GitBranch` walks up from whatever it is handed until something answers to
+  // `.git`, so a deleted worktree takes the branch of some ancestor repo - and
+  // on a machine where `$HOME` is itself a checkout, that is every deleted path.
+  // Seen while eyeballing the manual run: a card for a directory that does not
+  // exist, confidently labelled `master`. A row may know nothing; it may not
+  // name the wrong branch.
+  const { scanner } = scan({
+    '/home/.claude/projects/-a-gone/s1.jsonl': { text: claudeTranscript('/a/deleted'), mtimeMs: NOW },
+    '/home/.claude/projects/-a-repo/s2.jsonl': { text: claudeTranscript('/a/repo'), mtimeMs: NOW },
+  }, {}, ['/a/deleted']);
+  assert.deepEqual(scanner.list({ now: NOW }).map((f) => f.cwd), ['/a/repo']);
 });
 
 test('transcriptCwd takes the newest absolute path and ignores anything else', () => {

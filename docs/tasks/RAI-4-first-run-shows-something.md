@@ -1,7 +1,8 @@
 ---
 ticket: RAI-4
-status: in-progress
+status: shipped
 branch: RAI-4-first-run-shows-something
+shipped: 2026-08-11
 size: M
 depends: -
 ---
@@ -88,12 +89,12 @@ So the row carries **presence and identity**, and nothing that is a claim about 
 | the name a human gave it | identity, and the only thing telling two apart on one repo |
 | what it was about (`ai-title`) | past tense and safe; null for pi and Codex, which write none |
 | when it last wrote | the entire basis of the row's existence, and quantified rather than asserted |
-| `Never reported to Raise - restart this session to track it` | the remedy, which is the same whatever the cause |
+| `Found on disk, never reported - restart the session and Raise will follow it` | the remedy, which is the same whatever the cause. It sits beside the state word rather than under it - see the implementation notes |
 
 | Deliberately absent | Why |
 | --- | --- |
 | a state word or colour | the four states are one file signature - above |
-| `activity` | "Running Bash" is a present-tense claim, and beside "restart to track it" it contradicts itself |
+| `activity` | "Running Bash" is a present-tense claim, and beside "restart the session" it contradicts the row it sits on |
 | `mode` | same - `plan` describes how the session is configured *now* |
 | `Focus ↗` | there is no window identity at all. Affordance must match capability |
 | the host chip | `unknown` renders as *no window*, which would be a confident wrong claim: it almost certainly has one, we just cannot name it |
@@ -249,3 +250,99 @@ untracked row is waiting on nothing we can name, so it goes last.
 - `npm test`, `npm run lint`, `npm run typecheck`.
 - 1.5's gate: a real manual run against a scratch `RAISE_HOME` and `NM_HOME`, eyeballed in a
   browser.
+
+---
+
+## Implementation notes
+
+Built as specified. Nothing on the **deliberately absent** list was quietly included, and the
+open question was settled the way the evidence pointed, which was also the way the ticket
+leaned - no state word, no colour. Two things the build found that the spec above did not
+predict, both recorded in place rather than only here.
+
+### A deleted working directory names the wrong branch
+
+Found while eyeballing the manual run: a card for `/Users/mattw/work/money-webapp`, a directory
+that does not exist on this machine, confidently labelled `master`.
+
+`GitBranch.checkoutFor` walks up from whatever it is handed until something answers to `.git`.
+For a registered session that is always right, because the path is a live process's own working
+directory. For an untracked row it is not: the path comes from a *file*, and a session whose
+worktree has since been deleted resolves to whichever ancestor is a checkout - which on this
+machine is `$HOME`, the dotfiles repo, on `master`. A row is allowed to know nothing; it is not
+allowed to name the wrong branch.
+
+So `UntrackedScan` requires the working directory to still be a directory. The check is in the
+scan and not in `git-branch.js` deliberately: the walk-up is correct behaviour for every other
+caller, and narrowing it there would be fixing the general case for a problem only this one has.
+
+### The suite was walking the developer's own machine
+
+`createMonitorServer` reads the three agents' homes, and every server test built one - so the
+first run of `npm test` after wiring it up took over two minutes and failed five assertions with
+counts like `9 !== 2`, because `/state` had grown a row per session actually open on the machine.
+
+The fix is in the `scratch()` helpers of `server.test.js` and `cli-serve.test.js`, which now set
+and restore `CLAUDE_CONFIG_DIR`, `PI_CODING_AGENT_DIR` and `CODEX_HOME` alongside the temp
+directory they already make - one place, so a test added later cannot forget. `AGENTS.md` states
+the rule under *Testing and Quality*. Worth knowing that the failure was loud here only by luck:
+had the developer's machine been quiet, the tests would have passed and gone on passing until
+somebody ran them with sessions open.
+
+### Two smaller decisions taken during the build
+
+**The explanation moved onto the state line.** It started as a third line under the card, which
+made the rows that say the least the tallest on the page - visible immediately in the manual run,
+with three untracked cards standing taller than a red one. It now sits beside `Not tracked` as
+`.msg`, which is the same slot and the same reasoning as the `dismissed` marker: the two halves
+are one sentence. The wording lost its repetition in the same pass - `Found on disk, never
+reported - restart the session and Raise will follow it`, which says where the row came from,
+what is missing and what to do.
+
+**`CLAUDE_CONFIG_DIR` reached `bin/raise.js` too.** `config.js` gained `claudeHome()` beside the
+existing `piHome()` and `codexHome()`, and `DEFAULT_SETTINGS` now comes from it rather than
+building `~/.claude/settings.json` by hand. A small tidy, taken because two answers to "where is
+Claude Code's home" in one codebase is how the scan and the hook installer end up disagreeing on
+a machine that has moved it.
+
+### What was added
+
+| | |
+| --- | --- |
+| `src/untracked.js` | the scan, the cwd extractor and the caches. The only new module |
+| `src/config.js` | `claudeHome`, `claudeSettingsPath`, `claudeProjectsDir`, `piSessionsDir`, `codexSessionsDir` |
+| `src/dashboard.js` | the `untracked` input, the `untracked` attention and row kind, `KIND_ORDER` in `sortRows` |
+| `src/server.js` | one `UntrackedScan`, resolved into the existing per-session maps |
+| `bin/raise.js` | the same for `raise status`, scanned inline, and the rendered line |
+| `public/index.html` | the `Not reporting to Raise` group, the faint state, the explanation |
+
+### Tests
+
+780 total, up 24: `test/untracked.test.js` (16), seven in `dashboard.test.js` and one end-to-end
+in `server.test.js` that watches an untracked row become a real one when a hook arrives. Two of
+the sixteen are the evidence for the design rather than tests of it - *a quiet transcript cannot
+tell a finished turn from a session waiting on a human* and *a dangling tool call is not evidence
+of a session that is still alive* - and they are there so that the day Claude Code starts
+flushing a pending `tool_use` eagerly, the suite says so.
+
+### Verified live
+
+`raise serve` on port 7791 with a scratch `RAISE_HOME`, `NM_HOME`, `CLAUDE_CONFIG_DIR`,
+`PI_CODING_AGENT_DIR` and `CODEX_HOME`, no no-mistakes database and nothing installed under
+either optional integration, eyeballed in Chrome in both colour schemes:
+
+```
+WAITING FOR YOU
+  raise           RAI-4-first-run-shows-something   Waiting for you   tab   Focus ↗
+NOT REPORTING TO RAISE
+  firstmate       rates page  main    Not tracked  Found on disk, never reported - …
+                  Fixing the interest rate rounding on the summary card          1m
+  2/hexbattle     HXB-67-sea-depth-gradient   Not tracked  …                 2m  pi
+  work/hexbattle  main                        Not tracked  …              3m  codex
+```
+
+All three agents found from their own roots, disambiguation working across a tracked and an
+untracked card, the pi and Codex chips present, no `Focus ↗` and no expander on any of the three,
+`doctor` reporting a missing no-mistakes as normal, and neither `no-mistakes` nor `lavish-axi`
+run. The no-mistakes worktree fixture and the five-hour-old transcript were both correctly
+absent, as was a fixture whose working directory does not exist.

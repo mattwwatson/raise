@@ -452,7 +452,9 @@ async function cmdStatus() {
     // that reads as bare on one and explained on the other is the page and the
     // CLI disagreeing about the same session.
     if (row.kind === 'untracked') {
-      console.log(`  ${dim('Never reported to Raise - restart this session to track it')}`);
+      console.log(
+        `  ${dim('Found on disk, never reported - restart the session and Raise will follow it')}`,
+      );
     }
     // Why an unplaceable run is here at all, in the same words as the page.
     if (row.attributable === false) {

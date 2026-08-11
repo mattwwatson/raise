@@ -104,6 +104,12 @@ one, so it comes last. Do not reorder them back.
 | the process table (one `ps`, every 3s) | `src/poll-watch.js` | is a review still open, is a pipeline still running, and whose is it? |
 | no-mistakes SQLite DB (polled, 1s) | `src/nm-state.js` | is a pipeline run parked, working, failed? |
 
+A fifth exists and is deliberately not in that table, because it answers a different kind of
+question: **`src/untracked.js` walks the three agents' session directories for transcripts no
+hook has ever accounted for.** It is not a source of *state* - it cannot be, which is the whole
+of its design - it is what stops the first page a stranger sees being blank. See *A session
+nothing has reported* below.
+
 | Path | What |
 | --- | --- |
 | `bin/raise.js` | CLI |
@@ -134,6 +140,7 @@ one, so it comes last. Do not reorder them back.
 | `src/pi-transcript.js` | pi transcripts, normalised into the records `transcript.js` reads |
 | `src/pi-extension.js` | merging our extension into pi's `settings.json` |
 | `src/codex-transcript.js` | Codex rollouts, normalised into those same records |
+| `src/untracked.js` | sessions found on disk that no hook has reported |
 | `public/index.html` | the page, self-contained |
 | `public/connection.js` | the liveness rule (pure, no DOM, injected clock) |
 
@@ -1008,6 +1015,73 @@ review link. A checkout that will not say gets null and matches neither.
 `src/git-branch.js` reads the file directly (handling a worktree's `.git` file) and caches on
 mtime; it never shells out, because nothing reachable from the poll loop may.
 
+**A session nothing has reported still gets a row, and it is the one row that refuses to say
+what a session is doing.** Every other source here is pushed: an agent fires a hook, the hook
+posts, a row exists. That is why a session started *after* `raise install-hooks` appears with no
+activity required - and why one started *before* appears not at all until its next turn. For the
+person who installed Raise that is a footnote. For a stranger it is an empty page at the exact
+moment they have the most sessions open and the least patience, and the conclusion they draw is
+that the tool does not work.
+
+So `src/untracked.js` walks the three agents' session directories for transcripts written in the
+last two hours that no registry record accounts for. The sentence the whole design follows from:
+**a hook record is evidence that a session exists; a recently-modified transcript is evidence
+only that one existed as recently as its mtime.** Every state word, every colour, the focus
+button and the pid liveness prune in `registry.list` hang off the first.
+
+**The four states worth telling apart write byte-identical files, and that is measured rather
+than assumed.** A finished turn, the sixty-second idle nudge, a session stopped at a permission
+prompt and a window closed an hour ago all leave the same records: the nudge is a timer inside
+Claude Code that writes nothing (read live from two registry records on 11/08/2026), and per
+RAI-11's capture a pending `tool_use` is not flushed until the tool resolves, so the prompt
+leaves no trace either. `working` is not the safe fallback: a dangling tool call is exactly what
+a session killed mid-tool leaves behind, and there is no pid to probe because a pid is something
+only a hook reports. So the row carries presence and identity - repo, branch, the name a human
+gave it, the `ai-title`, when it last wrote - and no `activity`, no `mode`, no pull request, no
+`Focus ↗` and no host chip. `test/untracked.test.js` asserts the indistinguishability directly,
+so the day Claude Code starts flushing eagerly the test fails and this decision gets revisited.
+
+`Attention` gains `untracked`, which is the one entry in `ATTENTION_ORDER` that is not an
+attention level but the absence of one. It exists because every row needs a value there; it
+sorts last, renders `--faint`, and is excluded from the coloured groups.
+
+Five bounds keep the scan from becoming a second, worse source:
+
+- **two hours**, erring long on purpose - an over-inclusive window costs a grey row saying
+  "2h ago" at the bottom of the page, and an under-inclusive one costs the empty page this
+  exists to fix.
+- **superseded on every tick**, matched on the transcript path rather than a derived session id,
+  so restarting a session replaces its row on the next poll and not on the next walk.
+- **no `sessionId`**, because `/focus`, `/dismiss` and `/recent` all read the registry. Null is
+  what makes the page's existing affordance rules right with no new condition.
+- **no run attribution, in either direction.** Ownership is walked up to `host.pid`, which these
+  sessions have none of, so claiming a run would be rank standing in for evidence and would put
+  a parked gate on a card nobody can focus. They are left out of `candidateSessions` too, which
+  counts *live* sessions and is only honest while it keeps meaning that.
+- **no-mistakes' own pipeline agents are excluded by path**, not by `matchRunForAgentCwd`. They
+  are the dominant population - 14 of 16 unregistered recent transcripts when measured - and each
+  would arrive as a card titled with a bare run id. The run match is the wrong tool here because a
+  run that finished half an hour ago has left the reading while its worktree transcript is still
+  inside our window: the same dead card, reached by the path that mechanism does not cover. A
+  `startsWith` against `noMistakesHome()` needs no database and never fires on a machine that has
+  no no-mistakes.
+
+**The walk is on a thirty-second interval, and the working directory is read tail-first.**
+Measured at 9.3ms across 1,396 transcripts in 261 directories, so it needs no cap on files - the
+interval is what keeps it off the one-second poll. The first scan runs on the first snapshot, so
+a page opened straight after `raise serve` is populated at once; the interval only delays
+*discovering* a session that becomes untracked later, which is a real case rather than a
+theoretical one, because Codex's hooks are trust-gated and every Codex session is untracked until
+the user approves the hook in Codex's own TUI. For the cwd: Claude Code writes one on every
+conversation record so its tail always has it and its head often does not (172KB in, on the worst
+file of 1,396); Codex and pi write exactly one, on line 1, and none in the tail. It reads **raw**
+lines rather than going through the normalisers, because `cwd` lives on precisely the metadata
+records they exist to drop. Only a positive answer is cached, the same rule `nm-state.js` follows
+for the database appearing under a running monitor. **A cwd that is no longer a directory yields
+no row at all**: `GitBranch` walks up until something answers to `.git`, so a deleted worktree
+would take an ancestor repo's branch - and on a machine where `$HOME` is a checkout, that is every
+deleted path.
+
 **A Claude Desktop session is identified by evidence, never by what it is missing.** The
 desktop app hosts a session by spawning its own bundled Claude Code with no controlling
 terminal, so it registers through the same hooks as any other session and everything that
@@ -1348,7 +1422,9 @@ Keep it that way - it has no build step and must open as a file.
   that competes with `blocked` red - `review` sits under it because it is the same thing
   wearing work clothes. There is no state for a run that finished quietly: it leaves the page
   rather than settling into one, `isDisplayable` being the exact complement of the condition
-  that would have produced it.
+  that would have produced it. `untracked` is last in that list and is **not** one of these: it
+  is the absence of an attention level, it is `--faint` rather than a colour, and it is not in
+  `GROUPS` at all - a card that cannot say what it is doing must not sit among the ones that can.
 - **Affordance must match capability.** A focusable row is a `<button>` and says `Focus ↗`; a
   row with no live session behind it is plain and does nothing. Never render a control that
   might not work.
@@ -1375,6 +1451,13 @@ Keep it that way - it has no build step and must open as a file.
   marker would be the second opinion the source ranking exists to avoid - one answer per fact -
   and it would be noise on a page whose whole job is to be scannable. The tooltip's
   *"last checked N ago"* already says everything a reader can act on.
+- **An untracked row's explanation sits beside its state word too, and for the same reason the
+  `dismissed` marker does.** `Not tracked` and *"Found on disk, never reported - restart the
+  session and Raise will follow it"* are one sentence: the first says what we know, the second
+  says why and what to do. Stacked on two lines they made the cards that say the least the
+  tallest on the page, which inverts the whole ordering. The words live in one constant per
+  renderer and must stay identical in both - the page and the CLI are one protocol, and a row
+  explained on one and bare on the other is the two disagreeing about the same session.
 - **The `dismissed` marker sits beside the state word, because the two are one sentence.** It
   is the only thing separating "nothing is waiting" from "I told it to stop saying so", and the
   page may never let those look alike - a signal hidden without a word is exactly the quiet
@@ -1410,7 +1493,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 756 tests, no network, no dependencies, ~9s
+npm test          # 780 tests, no network, no dependencies, ~9s
 npm run lint      # oxlint over src, bin, hooks, public, test, scripts
 npm run typecheck # tsc --noEmit over src, bin, hooks, public, scripts
 ```
@@ -1432,6 +1515,12 @@ changing it there too.
   pid liveness probe. The focus adapters take an injected command runner so the suite can assert
   on the AppleScript and tmux commands that *would* have run without stealing your focus
   mid-test. A test that touches the real machine does not belong here.
+- **A test that starts a server must point the three agent homes at its scratch directory.**
+  `CLAUDE_CONFIG_DIR`, `PI_CODING_AGENT_DIR` and `CODEX_HOME`, which the `scratch()` helpers in
+  `server.test.js` and `cli-serve.test.js` set and restore. Without them the untracked scan walks
+  whatever transcripts the developer happens to have open, and `/state` grows a row per one -
+  which is both a test touching the real machine and one whose answer changes between two runs a
+  minute apart. It is not a hypothetical: it is what those files did for the length of one commit.
 - New behaviour in a pure module gets a direct unit test. New behaviour in `server.js` gets a
   test against a live server on an ephemeral port with a scratch `RAISE_HOME`.
 
@@ -1557,7 +1646,7 @@ before creating a ticket or touching anything under `docs/tasks/`.**
 ## Commands
 
 ```sh
-npm test                       # 756 tests, ~9s
+npm test                       # 780 tests, ~9s
 npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above

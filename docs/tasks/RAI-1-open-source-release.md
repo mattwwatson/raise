@@ -157,6 +157,17 @@ supports. Keep it small - a field, not a plugin system.
 
 ### 1.4 The empty first run - launch-blocking
 
+**Shipped 11/08/2026 as RAI-4.** The proposal below is what was built - a scan for recently
+modified transcripts with no hook record, rendered as plain, non-focusable rows - and the open
+question at the end was settled the way it leaned, but on evidence rather than caution: the four
+states worth telling apart write byte-identical transcripts, so there is no state word that is
+not a one-in-four guess. That measurement, the five bounds put on the scan, the decision to cover
+Codex (which needs it more than the other two, its hooks being trust-gated) and two things the
+build turned up are all in
+[`RAI-4-first-run-shows-something.md`](RAI-4-first-run-shows-something.md).
+
+The reasoning is kept below because it is what the design answers to.
+
 Both harnesses register at session start (`SessionStart` → `idle`, `session_start` → `idle`),
 so a **new** session appears with no activity required. That is already better than the
 neighbours, where a session does not read as active until clicked.
@@ -182,17 +193,37 @@ only, superseded the instant a hook record arrives, and never a focus button. It
 failure - worktrees and pipeline agents arriving as separate entries - is already handled here
 by `titlePath` disambiguation and `matchRunForAgentCwd`.
 
+> The pipeline-agent half of that last sentence did not survive contact. `matchRunForAgentCwd`
+> places an agent against a run that is *in the reading*, and a run that finished half an hour
+> ago has left it while its worktree transcript is still recent - the same dead card, reached by
+> the path that mechanism does not cover. It is a path test against `noMistakesHome()` instead.
+> `titlePath` disambiguation carried over untouched.
+
 Open question worth settling with a test: can such a row honestly show state at all, or only
 "seen recently, restart to track it"? The transcript can say what a session was doing, but
 `lastActivityAt` going quiet cannot distinguish *finished* from *waiting on a human*, and the
 whole design forbids guessing between those. Leaning towards: no state word, no colour, just
 presence and a hint - which is still infinitely better than a blank page.
 
+> **Answered: no state word, no colour.** And the reason is sharper than "cannot distinguish".
+> A finished turn, the sixty-second idle nudge, a session stopped at a permission prompt and a
+> window closed an hour ago write the *same records* - the nudge writes nothing at all, and per
+> RAI-11's capture a pending `tool_use` is not flushed until the tool resolves. `working` is not
+> a safe fallback either: a dangling tool call is what a session killed mid-tool leaves behind,
+> and there is no pid to probe because a pid is something only a hook reports.
+> `test/untracked.test.js` asserts the indistinguishability directly, so the day Claude Code
+> flushes eagerly the suite says so.
+
 ### 1.5 Gate
 
 `npm test` and `npm run typecheck` green, plus a **manual run on a scratch `RAISE_HOME` and
 `NM_HOME` with no no-mistakes and no lavish**, eyeballed in the browser. The test suite cannot
 tell you the page looks sane with three sources missing.
+
+Run for RAI-4 on 11/08/2026 and it earned its place twice over: the browser is where the
+untracked cards turned out to be the tallest on the page, and where a card appeared for a
+directory that does not exist, confidently labelled with `$HOME`'s branch. Neither was visible
+from the suite. Both are written up in that ticket's implementation notes.
 
 ---
 

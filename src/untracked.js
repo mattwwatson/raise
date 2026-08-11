@@ -128,6 +128,7 @@ export function untrackedRoots() {
  * @typedef {object} UntrackedFiles
  * @property {(dir: string) => {name: string, directory: boolean}[]} list
  * @property {(path: string) => {mtimeMs: number}} stat
+ * @property {(path: string) => boolean} directoryExists
  * @property {(path: string, bytes: number) => {text: string, partial: boolean}} readTail
  * @property {(path: string, bytes: number) => string} readHead
  */
@@ -142,6 +143,13 @@ export const defaultUntrackedFiles = {
   },
   stat(path) {
     return { mtimeMs: statSync(path).mtimeMs };
+  },
+  directoryExists(path) {
+    try {
+      return statSync(path).isDirectory();
+    } catch {
+      return false;
+    }
   },
   readTail(path, bytes) {
     const fd = openSync(path, 'r');
@@ -369,6 +377,14 @@ export class UntrackedScan {
    * shorter than the tail window the first read is the whole file and the
    * fallback never runs.
    *
+   * A directory that is no longer there is not an answer. `GitBranch` walks up
+   * from whatever it is handed until something answers to `.git`, which for a
+   * deleted worktree means the branch of some ancestor repo - and on a machine
+   * where `$HOME` is itself a checkout, that is every deleted path. A row is
+   * allowed to know nothing; it is not allowed to name the wrong branch. This
+   * cannot arise for a registered session, whose directory is a live process's
+   * own, which is why the check belongs here rather than in `git-branch.js`.
+   *
    * @param {string} path
    * @returns {string|null}
    */
@@ -376,7 +392,8 @@ export class UntrackedScan {
     const cached = this.#cwds.get(path);
     if (cached) return cached;
     const cwd = this.#readTailCwd(path) || this.#readHeadCwd(path);
-    if (cwd) this.#cwds.set(path, cwd);
+    if (!cwd || !this.#files.directoryExists(cwd)) return null;
+    this.#cwds.set(path, cwd);
     return cwd;
   }
 
