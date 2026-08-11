@@ -51,8 +51,9 @@ gave the session, if you gave it one.
 
 ## Every row says what it is about
 
-"Working" across four repos tells you nothing about which one to look at. Every row shows
-Claude's own name for the session and the tool it is running this second - and when
+"Working" across four repos tells you nothing about which one to look at. Every row a session
+has reported shows Claude's own name for the session and the tool it is running this second -
+the quiet rows for [sessions that never reported](#install) are the one exception - and when
 no-mistakes is driving, what the pipeline is doing gets a line of its own beneath, because the
 two are happening at once:
 
@@ -213,7 +214,9 @@ raise serve
 
 `install-hooks` merges six hook entries into `~/.claude/settings.json`. It shows you exactly
 what it will change and asks before writing, keeps a `.raise-backup` copy, leaves any hooks
-you already have alone, and is safe to run twice. Undo it with `raise uninstall-hooks`.
+you already have alone, and is safe to run twice. Undo it with `raise uninstall-hooks`. Set
+`CLAUDE_CONFIG_DIR` and both that file and the transcripts Raise reads follow it, as Claude
+Code itself does.
 
 When a later version of Raise adds an event to that set, `serve` and `doctor` name the ones
 you are missing rather than calling the hooks uninstalled - what you already have keeps
@@ -377,7 +380,8 @@ stopped answering.
 
 Any row that can be focused is a button, says `Focus ↗` on the right, and raises that window
 when you click it. Rows without a live agent session behind them - a pipeline running with
-no session attached - are plain and do nothing.
+no session attached, or a session found on disk that has never reported one - are plain and do
+nothing.
 
 The chip beside a row says where the session lives - `tmux`, `tab`, `desktop` - and a session
 whose window Raise could not place says `no window` rather than guessing at one. Focusing is

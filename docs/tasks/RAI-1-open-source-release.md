@@ -161,10 +161,11 @@ supports. Keep it small - a field, not a plugin system.
 modified transcripts with no hook record, rendered as plain, non-focusable rows - and the open
 question at the end was settled the way it leaned, but on evidence rather than caution: the four
 states worth telling apart write byte-identical transcripts, so there is no state word that is
-not a one-in-four guess. That measurement, the five bounds put on the scan, the decision to cover
-Codex (which needs it more than the other two, its hooks being trust-gated) and two things the
-build turned up are all in
-[`RAI-4-first-run-shows-something.md`](RAI-4-first-run-shows-something.md).
+not a one-in-four guess. That measurement, the bounds put on the scan, the decision to cover
+Codex (which needs it more than the other two, its hooks being trust-gated) and what the build
+and the review turned up that this section did not predict are all in
+[`RAI-4-first-run-shows-something.md`](RAI-4-first-run-shows-something.md), which is where the
+count of each lives rather than here.
 
 The reasoning is kept below because it is what the design answers to.
 
