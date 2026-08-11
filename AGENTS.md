@@ -1038,8 +1038,14 @@ leaves no trace either. `working` is not the safe fallback: a dangling tool call
 a session killed mid-tool leaves behind, and there is no pid to probe because a pid is something
 only a hook reports. So the row carries presence and identity - repo, branch, the name a human
 gave it, the `ai-title`, when it last wrote - and no `activity`, no `mode`, no pull request, no
-`Focus ↗` and no host chip. `test/untracked.test.js` asserts the indistinguishability directly,
-so the day Claude Code starts flushing eagerly the test fails and this decision gets revisited.
+`Focus ↗` and no host chip. `test/untracked.test.js` **records that measurement rather than
+re-taking it**: its fixtures are hand-written copies of what was read off a real machine, so
+nothing fails on its own the day Claude Code starts flushing eagerly - the assertion fires only
+once a human has re-measured and edited the fixture, which is what stops this decision standing
+by inertia. Both readings, their dates and one line each on how to re-take them are in
+[docs/tasks/RAI-4-first-run-shows-something.md](docs/tasks/RAI-4-first-run-shows-something.md);
+a test that read a live transcript would be a real tripwire and is exactly the test this suite
+forbids.
 
 `Attention` gains `untracked`, which is the one entry in `ATTENTION_ORDER` that is not an
 attention level but the absence of one. It exists because every row needs a value there; it
@@ -1493,7 +1499,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 780 tests, no network, no dependencies, ~9s
+npm test          # 781 tests, no network, no dependencies, ~9s
 npm run lint      # oxlint over src, bin, hooks, public, test, scripts
 npm run typecheck # tsc --noEmit over src, bin, hooks, public, scripts
 ```
@@ -1646,7 +1652,7 @@ before creating a ticket or touching anything under `docs/tasks/`.**
 ## Commands
 
 ```sh
-npm test                       # 780 tests, ~9s
+npm test                       # 781 tests, ~9s
 npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above

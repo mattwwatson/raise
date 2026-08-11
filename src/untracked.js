@@ -385,13 +385,23 @@ export class UntrackedScan {
    * cannot arise for a registered session, whose directory is a live process's
    * own, which is why the check belongs here rather than in `git-branch.js`.
    *
+   * **The check covers the cached answer as well as the fresh one**, because a
+   * worktree is far more likely to be removed while we are watching it than
+   * before we first looked. The manual run that found this caught only the
+   * already-gone case, which is the same failure reached one scan earlier: the
+   * transcript outlives the worktree by up to the whole two-hour window, so a
+   * cwd resolved while the directory existed would otherwise keep a confident
+   * wrong branch on the page for every tick of it. It costs one `stat` per
+   * untracked session per scan, and only the read - the expensive half - is
+   * remembered. Only a positive answer is cached at all, the rule `nm-state.js`
+   * follows for the database appearing under a running monitor: a file we could
+   * not place is retried rather than written off.
+   *
    * @param {string} path
    * @returns {string|null}
    */
   #cwdFor(path) {
-    const cached = this.#cwds.get(path);
-    if (cached) return cached;
-    const cwd = this.#readTailCwd(path) || this.#readHeadCwd(path);
+    const cwd = this.#cwds.get(path) || this.#readTailCwd(path) || this.#readHeadCwd(path);
     if (!cwd || !this.#files.directoryExists(cwd)) return null;
     this.#cwds.set(path, cwd);
     return cwd;

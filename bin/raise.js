@@ -82,6 +82,17 @@ const SOURCE_LABELS = {
 };
 
 /**
+ * Why an untracked row says nothing about what its session is doing, and what
+ * to do about it. Named rather than written inline because the page holds the
+ * same sentence under the same name (`UNTRACKED_REASON` in `public/index.html`)
+ * and the two must stay byte-identical: the page and the CLI are one protocol,
+ * and a row explained on one and bare on the other is the two renderers
+ * disagreeing about the same session.
+ */
+const UNTRACKED_REASON =
+  'Found on disk, never reported - restart the session and Raise will follow it';
+
+/**
  * How each `doctor` check state is marked. Padded to a common width so the
  * names line up; a state with no entry here is a failure, which is the one
  * default a diagnostic tool may safely have.
@@ -326,7 +337,7 @@ async function cmdStatus() {
   const spawnedBy = new Map(sessions.map((s) => [s.sessionId, firstmate.spawnedBy(s)]));
   const summaries = new Map(
     sessions.map((s) => {
-      const read = transcripts.read(s.transcriptPath, branches.get(s.sessionId));
+      const read = transcripts.read(s.transcriptPath, branches.get(s.sessionId), s.agent);
       const polledFile = polls.fileFor(s.host?.pid, agentPids);
       return [s.sessionId, polledFile ? { ...read, lavishFile: polledFile } : read];
     }),
@@ -452,9 +463,7 @@ async function cmdStatus() {
     // that reads as bare on one and explained on the other is the page and the
     // CLI disagreeing about the same session.
     if (row.kind === 'untracked') {
-      console.log(
-        `  ${dim('Found on disk, never reported - restart the session and Raise will follow it')}`,
-      );
+      console.log(`  ${dim(UNTRACKED_REASON)}`);
     }
     // Why an unplaceable run is here at all, in the same words as the page.
     if (row.attributable === false) {

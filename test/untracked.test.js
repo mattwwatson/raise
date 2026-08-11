@@ -302,6 +302,26 @@ test('a working directory that is no longer there produces no row', () => {
   assert.deepEqual(scanner.list({ now: NOW }).map((f) => f.cwd), ['/a/repo']);
 });
 
+test('a working directory that goes away after it was cached produces no row either', () => {
+  // The same failure as above, reached one scan later - and the likelier order,
+  // because a worktree is usually removed while we are already watching it. The
+  // transcript survives the removal by up to the whole two-hour window, so a
+  // `cwd` remembered from the scan before would go on naming an ancestor repo's
+  // branch for every tick of it. Only the read is worth caching; the check is
+  // not, and it is one `stat`.
+  const missingDirs = [];
+  const { scanner } = scan(
+    {
+      '/home/.claude/projects/-a-tree/s1.jsonl': { text: claudeTranscript('/a/worktree'), mtimeMs: NOW },
+    },
+    {},
+    missingDirs,
+  );
+  assert.deepEqual(scanner.list({ now: NOW }).map((f) => f.cwd), ['/a/worktree']);
+  missingDirs.push('/a/worktree');
+  assert.deepEqual(scanner.list({ now: NOW + SCAN_INTERVAL_MS }), []);
+});
+
 test('transcriptCwd takes the newest absolute path and ignores anything else', () => {
   assert.equal(transcriptCwd([{ cwd: '/first' }, { cwd: '/second' }]), '/second');
   assert.equal(transcriptCwd([{ cwd: '/first' }, { type: 'mode' }]), '/first');
@@ -313,8 +333,7 @@ test('transcriptCwd takes the newest absolute path and ignores anything else', (
 test('a quiet transcript cannot tell a finished turn from a session waiting on a human', () => {
   /*
    * This is the measurement that decided the whole shape of an untracked row,
-   * and it is a test rather than a paragraph because the day it stops being
-   * true is the day this design should be revisited.
+   * written down as a test so the fixtures sit beside the code they justify.
    *
    * Three things a reader would want told apart, as they actually appear on
    * disk. Read live from the registry on 11/08/2026: a session recorded
@@ -327,6 +346,19 @@ test('a quiet transcript cannot tell a finished turn from a session waiting on a
    *
    * So there is no state word an untracked row could choose that is not a
    * one-in-four guess presented as a fact.
+   *
+   * Be clear about what this can and cannot do. The three fixtures below are
+   * hand-written copies of those readings, so the assertions compare the
+   * summariser against itself: **this test cannot notice a change in Claude
+   * Code**. It fires only once a human has re-measured and edited a fixture,
+   * which is what stops the design standing by inertia. Re-measuring is a
+   * human act, and the two recipes are: (a) for the nudge, find a registry
+   * record whose state is `blocked` with `notificationType` `idle_prompt` and
+   * compare its transcript's tail against that of a session recorded
+   * `working`; (b) for the prompt, open a tool-approval dialog and look for
+   * the pending `tool_use` while the dialog is still on screen. A test that
+   * read a live transcript would be a real tripwire, and is exactly the test
+   * this suite forbids.
    */
   // The turn ended: the last tool returned and Claude replied.
   const finishedTurn = parseTranscriptTail(
@@ -347,9 +379,9 @@ test('a quiet transcript cannot tell a finished turn from a session waiting on a
   );
   // A permission dialog is open on screen for the *next* tool. Per RAI-11 the
   // pending `tool_use` is not flushed until the tool resolves, so it is not
-  // here. If Claude Code ever starts flushing eagerly this fixture gains a
-  // record, this assertion fails, and that is the signal to revisit the design
-  // rather than to change the fixture back.
+  // here. Someone who re-takes recipe (b) above and finds a record where this
+  // fixture has none should add it here and follow the failure: that is the
+  // signal to revisit the design rather than to put the fixture back.
   const atPermissionPrompt = parseTranscriptTail(
     jsonl(
       { type: 'user', timestamp: '2026-08-11T04:19:34.697Z', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1' }] } },

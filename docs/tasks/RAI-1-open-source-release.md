@@ -211,8 +211,11 @@ presence and a hint - which is still infinitely better than a blank page.
 > RAI-11's capture a pending `tool_use` is not flushed until the tool resolves. `working` is not
 > a safe fallback either: a dangling tool call is what a session killed mid-tool leaves behind,
 > and there is no pid to probe because a pid is something only a hook reports.
-> `test/untracked.test.js` asserts the indistinguishability directly, so the day Claude Code
-> flushes eagerly the suite says so.
+> `test/untracked.test.js` **records that measurement rather than re-taking it** - its fixtures
+> are hand-written copies of what was read off a real machine, so nothing fails on its own the
+> day Claude Code flushes eagerly, and the assertion fires only once a human has re-measured and
+> edited the fixture. Both readings, their dates and how to re-take them are in
+> [RAI-4-first-run-shows-something.md](RAI-4-first-run-shows-something.md).
 
 ### 1.5 Gate
 

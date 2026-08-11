@@ -318,12 +318,29 @@ a machine that has moved it.
 
 ### Tests
 
-780 total, up 24: `test/untracked.test.js` (16), seven in `dashboard.test.js` and one end-to-end
+781 total, up 25: `test/untracked.test.js` (17), seven in `dashboard.test.js` and one end-to-end
 in `server.test.js` that watches an untracked row become a real one when a hook arrives. Two of
-the sixteen are the evidence for the design rather than tests of it - *a quiet transcript cannot
+the seventeen are the evidence for the design rather than tests of it - *a quiet transcript cannot
 tell a finished turn from a session waiting on a human* and *a dangling tool call is not evidence
-of a session that is still alive* - and they are there so that the day Claude Code starts
-flushing a pending `tool_use` eagerly, the suite says so.
+of a session that is still alive*.
+
+**Those two record a measurement; they do not trip on a change.** Their fixtures are hand-written
+copies of what was read off a real machine, so nothing in the suite re-takes the reading and
+nothing fails on its own the day Claude Code starts flushing a pending `tool_use` eagerly. The
+assertion fires only *after* a human has re-measured and edited the fixture, which is when it
+stops the design being left as it is by inertia. A genuine tripwire would mean a test reading a
+live transcript, and a test that touches the real machine does not belong in this suite.
+
+So the recipes are recorded here, with their dates, because a measurement nobody can re-take is
+just an assertion with a citation:
+
+| Measured | When | How to re-take it |
+| --- | --- | --- |
+| the idle nudge writes nothing that a finished turn does not | 11/08/2026, live off the session registry | find a record whose state is `blocked` with `notificationType` `idle_prompt`, and compare the tail of its transcript against that of a session recorded `working` |
+| a pending `tool_use` is not flushed while its dialog is open | RAI-11's capture | open a tool-approval dialog and look for the pending `tool_use` in the transcript while the dialog is still on screen - it was absent at +30s and +46s |
+
+The symmetry is the point: this repo refuses to state what it cannot know about a session, and it
+does not get to overclaim about its own test suite either.
 
 ### Verified live
 
