@@ -1382,12 +1382,13 @@ Keep it that way - it has no build step and must open as a file.
   alarm. It explains a *quiet* row and appears on no other kind: a row red for its pipeline
   agent, or working because the transcript ran past the block, is not quiet and has nothing for
   it to explain.
-- **The agent chip names pi and stays silent about Claude Code**, and `AGENT_LABELS` has no
-  entry for it. Claude Code is most of the rows, and a chip on every card saying so is noise
-  on a page whose whole job is to be scannable - the same reason `mode` hides `normal`. pi is
-  worth marking because what its states can mean differs: a pi row never turns red for a
-  permission prompt, because pi has none. It is outlined and `--faint`, quieter than the host
-  chip beside it, since provenance must not compete with where your window actually is.
+- **The agent chip names pi and Codex and stays silent about Claude Code**, and `AGENT_LABELS`
+  has no entry for it. Claude Code is most of the rows, and a chip on every card saying so is
+  noise on a page whose whole job is to be scannable - the same reason `mode` hides `normal`.
+  The other two are worth marking because what their states can mean differs: a pi row never
+  turns red for a permission prompt, because pi has none, and a Codex row that does turn red
+  carries no reason with it. It is outlined and `--faint`, quieter than the host chip beside
+  it, since provenance must not compete with where your window actually is.
 - **The spawner chip says who started the window, and `SPAWNER_LABELS` has no fallback
   either.** It sits beside the agent chip, wears the same outlined `--faint` style and comes
   first, because it answers the earlier question - who started this, then what is running in it.

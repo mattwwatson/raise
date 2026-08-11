@@ -53,7 +53,8 @@ import { pullRequestKey } from './forge.js';
  * @property {string|null} titlePath the path `title` was derived from, which is
  *   what disambiguation grows
  * @property {string|null} sessionName the name a human gave this session, in
- *   either agent; null unless one was set, which is most of the time
+ *   Claude Code or pi - Codex has no equivalent; null unless one was set, which
+ *   is most of the time
  * @property {string|null} branch
  * @property {Attention} attention
  * @property {string} attentionLabel `attention`, in words

@@ -182,7 +182,8 @@ reason the header dot does.
 ## Requirements
 
 - Node 22.13 or newer (`node:sqlite` is used, and it is built in - **there are no runtime dependencies**). 22.13 is where `node:sqlite` stopped needing a command-line flag; earlier 22.x will not run it
-- Claude Code, for the "waiting for you" half. pi is supported too, with the caveat below
+- Claude Code, for the "waiting for you" half. [Codex](#codex-sessions) is supported too and has
+  a real approval gate; [pi](#pi-sessions) is supported with the caveat that it has none
 - macOS for window focusing. Monitoring itself works anywhere.
 
 Optional, and independently so - Raise runs with neither, and says nothing about the ones you
@@ -583,7 +584,7 @@ supported no-no-mistakes setup rather than a fault. `NM_HOME` moves where it loo
 ## Development
 
 ```sh
-npm test          # no network, no build step, ~2s
+npm test          # no network, no build step
 npm run lint
 npm run typecheck
 ```

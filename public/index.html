@@ -1078,8 +1078,8 @@
           const who = document.createElement('span');
           who.className = 'event-who ' + event.kind;
           // An `agent` line is named after the agent that actually wrote it.
-          // The record cannot say - it is parsed from a file, and both agents
-          // write the same shape - so the row is what knows.
+          // The record cannot say - it is parsed from a file, and every agent
+          // writes the same shape - so the row is what knows.
           who.textContent =
             event.kind === 'tool'
               ? event.label || 'tool'
