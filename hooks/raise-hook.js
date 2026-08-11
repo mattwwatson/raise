@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * The Claude Code hook that tells Raise about this session.
+ * The hook that tells Raise about this session.
  *
  * Two hard rules, because this runs inside somebody's editing loop:
  *
- *   1. Never fail. A monitor that can break Claude Code is worse than no
+ *   1. Never fail. A monitor that can break the agent is worse than no
  *      monitor, so every path exits 0 and stays quiet.
  *   2. Never block. The whole thing is bounded by a short timeout; if the
  *      server is not running we simply do nothing.
@@ -13,6 +13,14 @@
  * possible. Note that `tty` cannot be used here: hooks receive their payload on
  * stdin, so stdin is a pipe, not a terminal. The controlling terminal is read
  * from the process table instead.
+ *
+ * **One reporter for Claude Code and Codex, not two.** Codex hands a hook the
+ * same payload shape on the same stdin - measured field for field against
+ * 0.147.0 - so a second script would be a fork of the two rules above, which
+ * are the most load-bearing lines in the repo. What differs is only which agent
+ * sent it, and Codex has no field to say so: the hook *command* is ours to
+ * write, so it is declared there as `--agent codex`. Claude Code stays the
+ * silent default and its installed command is unchanged.
  */
 
 import { readFileSync } from 'node:fs';
@@ -21,7 +29,7 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 import { parsePsLine, inspectHost } from '../src/process-tree.js';
-import { reportablePayload } from '../src/hook-payload.js';
+import { reportablePayload, declaredAgent } from '../src/hook-payload.js';
 
 const TIMEOUT_MS = 2000;
 
@@ -97,10 +105,18 @@ async function main() {
   }
   if (!payload?.session_id) quietExit();
 
-  // Never the payload itself. What Claude Code hands a hook includes prompt
-  // text, assistant messages and, on a PermissionRequest, the contents of the
-  // file it wants to write - see `src/hook-payload.js`.
+  // Never the payload itself. What an agent hands a hook includes prompt text,
+  // assistant messages and, on a PermissionRequest, the contents of the file it
+  // wants to write - Codex's payloads carry all three too, which is the
+  // allowlist doing its job for an agent it was not written for. See
+  // `src/hook-payload.js`.
+  const agent = declaredAgent(process.argv.slice(2));
+  /** @type {Record<string, unknown>} */
   const body = { ...reportablePayload(payload), host: collectHost() };
+  // Applied after the allowlist rather than through it. `agent` is what the
+  // installation says it is, not what a payload claims, so ours overwrites a
+  // field an agent had no business setting about itself.
+  if (agent) body.agent = agent;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);

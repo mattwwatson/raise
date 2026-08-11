@@ -4,7 +4,12 @@ import { mkdtempSync, rmSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { SessionRegistry, stateForEvent, isSafeSessionId } from '../src/registry.js';
+import {
+  SessionRegistry,
+  stateForEvent,
+  isSafeSessionId,
+  isTerminalEvent,
+} from '../src/registry.js';
 
 function scratch() {
   const dir = mkdtempSync(join(tmpdir(), 'raise-test-'));
@@ -454,6 +459,75 @@ test('list returns most recently updated first', () => {
       registry.list({ isAlive: alwaysAlive, now: 3000 }).map((r) => r.sessionId),
       ['new', 'old'],
     );
+  } finally {
+    cleanup();
+  }
+});
+
+// ---------------------------------------------------------------------- codex
+
+test('Codex maps its own event names, and PermissionRequest is a real block', () => {
+  // Codex's event names are Claude Code's, so the table looks like a subset -
+  // but it is separate because two of Claude Code's describe events Codex does
+  // not have. `PermissionRequest` is a genuine approval gate, which is what
+  // makes a red Codex row honest where a red pi row would be a guess.
+  assert.equal(stateForEvent('SessionStart', 'codex'), 'idle');
+  assert.equal(stateForEvent('UserPromptSubmit', 'codex'), 'working');
+  assert.equal(stateForEvent('PermissionRequest', 'codex'), 'blocked');
+  assert.equal(stateForEvent('Stop', 'codex'), 'idle');
+  assert.equal(isTerminalEvent('SessionEnd', 'codex'), true);
+});
+
+test('Codex has no Notification, so nothing can escalate a finished turn', () => {
+  // The pi rule applied to a second agent. `Stop` means the turn ended and
+  // nothing turns that into a block a minute later - red that sometimes means
+  // nothing is wrong is how a page stops being believed. `SessionEnd` fires on
+  // close *or* after thirty minutes idle, and both mean the session is gone.
+  assert.notEqual(stateForEvent('Stop', 'codex'), 'blocked');
+  assert.equal(stateForEvent('SessionEnd', 'codex'), 'ended');
+});
+
+test('an agent nobody declared is Claude Code, and so is an agent we invented', () => {
+  // The value arrives over a socket and picks a state table, so it is checked
+  // against a list rather than compared per agent. A typo in an installed hook
+  // command degrades to Claude Code rather than to no table at all.
+  const { dir, cleanup } = scratch();
+  try {
+    const registry = new SessionRegistry({ dir });
+    const declared = registry.record(
+      { session_id: 'a', hook_event_name: 'SessionStart', agent: 'codex' },
+      1000,
+    );
+    assert.equal(declared.agent, 'codex');
+
+    const bogus = registry.record(
+      { session_id: 'b', hook_event_name: 'SessionStart', agent: 'kodex' },
+      1000,
+    );
+    assert.equal(bogus.agent, 'claude');
+
+    const silent = registry.record({ session_id: 'c', hook_event_name: 'SessionStart' }, 1000);
+    assert.equal(silent.agent, 'claude');
+  } finally {
+    cleanup();
+  }
+});
+
+test('a Codex permission prompt is stored as a block with no reason to give', () => {
+  // Codex has no notification of any kind, so nothing ever supplies a message.
+  // The row says a human is needed and stops there, which is RAI-11's answer
+  // applied to a second agent: say what is known, do not guess the rest.
+  const { dir, cleanup } = scratch();
+  try {
+    const registry = new SessionRegistry({ dir });
+    const record = registry.record(
+      { session_id: 'x', hook_event_name: 'PermissionRequest', agent: 'codex' },
+      5000,
+    );
+    assert.equal(record.state, 'blocked');
+    assert.equal(record.message, null);
+    assert.equal(record.notificationType, null);
+    assert.equal(record.blockAnnouncedAt, 5000);
   } finally {
     cleanup();
   }

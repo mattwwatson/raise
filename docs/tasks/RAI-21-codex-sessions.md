@@ -1,6 +1,8 @@
 ---
 ticket: RAI-21
-status: backlog
+status: shipped
+branch: RAI-21-codex-sessions
+shipped: 2026-08-11
 size: L
 depends: -
 ---
@@ -208,19 +210,156 @@ goes empty.
 
 ---
 
-## Before any code: the capture
+## The capture
 
-Codex is installed but not logged in, and every remaining unknown needs one real session.
-`codex login`, then a throwaway session under a scratch `CODEX_HOME` with a hook that appends
-its stdin to a file, doing one thing that needs approval. What that has to yield, and what goes
-in this file the way RAI-11's capture did:
+Done 11/08/2026 against **codex-cli 0.147.0**, five throwaway `codex exec` sessions under a
+scratch `CODEX_HOME` (`auth.json` copied in, the captain's own `~/.codex` untouched), with a
+capture hook registered on all seven events that wrote its stdin and walked its own ancestry.
+Everything below is measured. Where it contradicts the sections above, it wins, and the
+paragraph it corrects says so.
 
-- a real payload for each of `SessionStart`, `UserPromptSubmit`, `PermissionRequest`, `Stop`,
-  `SessionEnd`, field for field
-- the ancestor chain from the hook process up to the agent, so the pid rule is written against
-  a walk rather than a guess
-- ten or twenty lines of a real rollout file, including a tool call and its result, and the
-  record that carries the session title
+### The hook payloads, field for field
+
+Handed on **stdin**, as JSON, exactly as Claude Code does - so item 2's "to be confirmed" is
+confirmed and `raise-hook.js` needs no change to how it reads or how long it waits.
+
+```json
+SessionStart      {"session_id","transcript_path","cwd","hook_event_name","model",
+                   "permission_mode","source":"startup"}
+UserPromptSubmit  {…,"turn_id","prompt":"<the user's words>"}
+PermissionRequest {…,"turn_id","tool_name":"Bash",
+                   "tool_input":{"command":"touch …","description":"Do you want to allow …"}}
+PreToolUse        {…,"turn_id","tool_name","tool_input","tool_use_id"}
+PostToolUse       {…,"turn_id","tool_name","tool_input","tool_response","tool_use_id"}
+Stop              {…,"turn_id","stop_hook_active":false,"last_assistant_message":"DONE"}
+SessionEnd        {"session_id","transcript_path","cwd","hook_event_name","reason":"other"}
+```
+
+`permission_mode` was `default` interactively and `bypassPermissions` under plain `codex exec`.
+`SessionEnd` carries neither `model` nor `permission_mode`.
+
+**`PermissionRequest` does carry a reason, and we still cannot show it.** The section above says
+a Codex block "cannot say what it is for"; the truth is narrower and the outcome is identical.
+Codex writes a human-sentence `description` - *"Do you want to allow creating
+/Users/…/x outside the workspace?"* - but it writes it **inside `tool_input`**, which is the one
+field `REPORTABLE_FIELDS` exists to drop, because for a `Write` the same field is the contents
+of the file. RAI-11's test asks whether the page can do its job without it, and it can: the row
+says a human is needed, which is the signal. So the boundary does not move, and the reason
+stays on the machine that produced it. Also worth recording: Codex already reports its shell
+tool to a hook as `tool_name: "Bash"`, so the two agents' payloads agree even there.
+
+### The ancestry, and therefore the pid rule
+
+```
+/bin/sh <hook script>                                   ← the hook
+  └── …/@openai/codex-darwin-arm64/vendor/…/bin/codex exec …   ← the agent, basename `codex`
+        └── node /opt/homebrew/bin/codex exec …               ← the npm launcher
+              └── the user's shell
+```
+
+The hook is a **direct child of the native binary**, not the grandchild `process-tree.js`
+assumes for Claude Code - the extra `/bin/sh` here is only because our capture hook was a shell
+script, and `isWrapper` already skips it either way. Both codex processes are long-lived, and
+the native one is the nearer, so a nearest-ancestor-first walk reaches the right one.
+
+`pickAgentPid` would in fact already answer correctly *by accident*, through its
+`proc.tty` fallback - the native binary owns the controlling terminal in a real session. That
+is exactly the incidental answer this module's own comment warns about, so `looksLikeCodex`
+is added beside `looksLikeClaude` and the answer becomes positive evidence. Matched on the
+basename `codex` and on the `@openai/codex` package path, never on the word appearing in argv,
+for the same reason `isRunOwnerCommand` matches an executable: the session most likely to be
+wrongly claimed is one working *on* Codex.
+
+### Hooks are trust-gated, and nothing above knew it
+
+**This is the one finding that changes a build item.** Writing `hooks.json` is not enough.
+Codex 0.147.0 records a hash per hook entry in `config.toml`:
+
+```toml
+[hooks.state."/Users/mattw/.codex/hooks.json:session_start:0:0"]
+trusted_hash = "sha256:93fbfa…"
+```
+
+and an entry with no matching hash is **parsed and then silently not run**. Measured directly:
+with our capture hooks installed and untrusted, Codex still read the file (it printed a warning
+about one of our timeouts) and fired nothing at all; the same run with
+`--dangerously-bypass-hook-trust` fired all seven. The TUI is where a hook is trusted -
+`TrustHook` / `SetHookTrusted` are its own operations, and it writes the hash itself.
+
+So `raise install-codex` **writes `hooks.json` and says out loud that Codex will ask to trust
+the hook the next time it starts**. It must not write `config.toml`, which the section above
+already forbids for the feature flag and which now has a second and much sharper reason: that
+file is where Codex records what the user has agreed to run, and a monitor that forges a
+consent hash is a monitor that has installed a silent executable on somebody's behalf. The
+`--dangerously-bypass-hook-trust` flag is the user's to pass, never ours to suggest.
+
+The practical consequence for the user is the same shape as the existing "restart your open
+sessions" note, and it goes in the same place: install, then start Codex, then approve.
+
+### The SessionEnd timeout is clamped to 3s
+
+`warning: clamping SessionEnd hook timeout to 3s in <path>` is printed on **every session
+start** while an entry asks for more. Our own reporter is bounded at 2s, so our `SessionEnd`
+entry is written with `timeout: 3` and the rest with `5`: causing a warning in somebody's
+editing loop, once per session, forever, to ask for time we never use is the sort of noise
+`raise-hook.js`'s rules exist to prevent.
+
+### The rollout dialect
+
+Every line is `{"type","timestamp","ordinal","payload"}` and **every line carries a
+timestamp**, session metadata included - the `away_summary` trap in a third dialect, exactly as
+predicted. The conversation is `type: "response_item"` and nothing else:
+
+| `payload.type` | Shape |
+| --- | --- |
+| `message` | `{role: user\|assistant\|developer, content: [{type: input_text\|output_text, text}], phase?}` |
+| `custom_tool_call` | `{name: "exec", call_id, input: "<a JS snippet>", status}` |
+| `custom_tool_call_output` | `{call_id, output: [{type: "input_text", text}]}` |
+| `function_call` | `{name: "wait", call_id, arguments: "<JSON string>"}` |
+| `function_call_output` | `{call_id, output: [...]}` |
+| `reasoning` | `{summary: [], encrypted_content}` - dropped, and unreadable anyway |
+
+Everything else is dropped: `session_meta`, `turn_context`, `world_state`, and every
+`event_msg`. `event_msg` is the sharp one - it **restates the conversation** (`user_message`,
+`agent_message`, `item_completed`) with its own timestamps, so admitting it would double every
+turn. `response_item` is the whitelist, and `event_msg` is why it is a whitelist.
+
+Four more things, each of which decides a line of code:
+
+- **`role: "developer"` is not the conversation.** Codex injects `<skills_instructions>`, a
+  multi-agent preamble and `<plugins_instructions>` under that role, mid-turn as well as at
+  startup. Dropped wholesale. One injection arrives under `role: "user"` instead -
+  `<recommended_plugins>` - and is indistinguishable from a typed prompt by any structural
+  field, so it is dropped by its wrapper tag, the same way Claude Code's `<system-reminder>`
+  is. Codex will grow more of these; this one is what was observed, and it is named as such.
+- **A tool call record is written when the call is issued, not when it returns.** Measured on a
+  25-second command: the `custom_tool_call` landed at T+1s and its output at T+12s, with the
+  file untouched in between. That is what makes the in-flight rule work on Codex at all -
+  without it there would be no "what is it doing right now" and, far worse, nothing to disprove
+  a stale block with.
+- **`status` on that record says `completed` from the moment it is written**, while the tool is
+  still running. It is a lie about progress and must never be read. The id match against the
+  output record is the only truth, which is the rule everywhere else here.
+- **Every tool goes through one `exec` tool.** 0.147.0 is in "code mode": `input` is a JS
+  snippet calling `tools.exec_command({cmd: …})`, `tools.update_plan({…})` and so on, several
+  per call. So the shell command has to be lifted out of the snippet, or a Codex session
+  sitting in a `lavish-axi poll` is invisible and every card reads "Running exec". The
+  `function_call` shape is the other half and is a plain name plus JSON arguments.
+
+### There is no title, anywhere
+
+`threads.title` in `state_5.sqlite` is the **first user message, verbatim** - identical to the
+`first_user_message` column on all three sessions checked, including one whose title is a
+340-word approval-review prompt. Codex generates nothing like Claude Code's `ai-title`, and no
+rollout record carries one.
+
+So `Row.summary` is null for a Codex session, exactly as it is for pi, and the card is carried
+by its activity line. This also retires the last reason anyone might reopen the
+`state_5.sqlite` question: the one field that looked like a reward for reading it is raw prompt
+text, which is above the altitude a card is allowed to show and is precisely what
+`REPORTABLE_FIELDS` keeps off the wire. A `threads.name` column and a `SetThreadName` operation
+both exist, so Codex may have an equivalent of `/rename`; nothing was observed writing one, and
+nothing is built on the guess.
 
 ---
 
@@ -237,3 +376,97 @@ in this file the way RAI-11's capture did:
 - On a machine with no Codex installed: no doctor line, no warning, no subprocess. The
   `server.test.js` guard that asserts an unconfigured Raise runs nothing still passes.
 - `npm test`, `npm run lint`, `npm run typecheck`.
+
+---
+
+## Implementation notes
+
+Built in the order above. The capture came first and changed three things, all recorded in
+[The capture](#the-capture) rather than only here: hooks are trust-gated, `SessionEnd` is
+clamped to three seconds, and Codex writes no title. Everything else landed as specified, and
+the **deliberately not built** list is intact - nothing on it was quietly included.
+
+### What was added
+
+| | |
+| --- | --- |
+| `src/codex-transcript.js` | the normaliser, and the only genuinely new module |
+| `src/registry.js` | `CODEX_EVENT_STATES`, `AgentKind` widened, `DECLARED_AGENTS` |
+| `src/hooks.js` | `CODEX_HOOK_EVENTS`, `CODEX_HOOK_TIMEOUTS`, per-event timeouts, `hookCommand(…, agent)` |
+| `src/process-tree.js` | `looksLikeCodex`, consulted by `pickAgentPid` |
+| `src/hook-payload.js` | `declaredAgent`, which is argv rather than payload |
+| `src/config.js` | `codexHome`, `codexHooksPath`, honouring `CODEX_HOME` |
+| `bin/raise.js` | `install-codex`, `uninstall-codex`, and a doctor line only when Codex is there |
+| `public/index.html` | `AGENT_LABELS.codex`, `AGENT_NAMES.codex` |
+
+`mergeHooks` was generalised rather than copied, as item 5 asked: it already took an event
+list, and it now takes per-event timeout overrides too. `removeHooks` and `hookInstallState`
+needed nothing but their existing `events` argument.
+
+### Decisions taken during the build
+
+**`declaredAgent` lives in `hook-payload.js`, not in the hook.** Same reason
+`reportablePayload` does: the hook exits the process by design and cannot be imported by a
+test. It is applied *after* the allowlist rather than through it - the agent is what the
+installation says it is, never something a payload may claim about itself.
+
+**`DECLARED_AGENTS` is an allowlist in `registry.js`.** The value arrives over a socket and
+picks a state table, so an unrecognised one is treated as silence and reads as Claude Code. A
+typo in an installed hook command degrades to the default rather than to no table at all.
+
+**Only `exec_command` is mapped to a page verb.** Any other code-mode tool keeps its own name
+with the underscores spaced out - `update_plan` renders as `Update plan`. Guessing a verb for
+a tool nobody has seen would put a wrong word on a card, which is worse than a plain one.
+
+**The doctor line is gated on Codex's home directory existing**, which is one `stat` and never
+a subprocess - the same silence no-mistakes and Lavish are held to. It reports what Raise
+wrote and deliberately says nothing about trust: that lives in a hash Raise does not compute
+and must not write, so any line about it would be a guess at somebody else's consent record.
+
+### Two places the Definition of done needed qualifying
+
+Both were settled by the capture and neither changed what was built.
+
+**"…with its repo, branch and title".** There is no title: Codex writes none anywhere, and the
+one in its own database is the first user message verbatim. A Codex card therefore carries no
+summary line and is read by its activity line, exactly as a pi card is. Verified live - the row
+showed `raise`, `RAI-21-codex-sessions`, and `Running touch` / `Running sleep` / `Wait` as the
+session moved.
+
+**"…clears within three seconds, from the transcript".** It clears as soon as the approved tool
+writes anything, which for a fast command is inside one poll and was measured at four seconds
+end to end. For a *slow* approved command there is nothing written until it returns, so the row
+stays red for longer. That is not new and not specific to Codex: Claude Code behaves identically
+for the same reason - neither agent has an event for an approval being answered - and
+`blockDisproved` is the shared mechanism. Worth knowing rather than worth fixing, since the fix
+is the `PostToolUse` hook both agents' sections rule out on cost.
+
+### Verified live
+
+One `raise serve` on an ephemeral port with a scratch `RAISE_HOME`, and a real `codex exec`
+session under a scratch `CODEX_HOME`, polling `/state` every four seconds:
+
+```
+t= 4s  working  raise  RAI-21-codex-sessions  act:null           focusable, host tmux
+t= 8s  blocked  raise  RAI-21-codex-sessions  act:Running touch  msg:null  dismissible:false
+t=12s  working  raise  RAI-21-codex-sessions  act:null
+t=16s  working  raise  RAI-21-codex-sessions  act:Running sleep
+t=28s  working  raise  RAI-21-codex-sessions  act:Wait
+t=48s  (row gone - SessionEnd)
+```
+
+Red within a poll of the approval, back to working four seconds later off the transcript alone,
+no reason text, no `Not for me` control, and both tool shapes rendering - `Running sleep` from a
+code-mode `exec` snippet and `Wait` from a `function_call`.
+
+`install-codex` / `uninstall-codex` were exercised against a **copy** of the real
+`~/.codex/hooks.json` and its three foreign hooks, never against the live file, which was
+confirmed untouched afterwards. `test/cli-codex.test.js` runs the same three steps through the
+real CLI against a temp `CODEX_HOME`, so it is a regression test rather than a one-off.
+
+### Tests
+
+756 total, up 60. No Codex installation is needed to run any of them: the rollout fixtures are
+literal lines copied out of the capture, the installer fixture is the three-foreign-hooks file
+as text, and the pid rule is fed a fake process table. `server.test.js`'s guards that an
+unconfigured Raise runs no command and makes no request are untouched and still pass.

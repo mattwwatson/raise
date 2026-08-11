@@ -9,15 +9,20 @@
  * Records are files rather than memory so the dashboard survives a restart of
  * the server without losing track of which window is which.
  *
- * **The two agents do not report the same states, and the difference is real
- * rather than a gap to paper over.** Claude Code asks permission before running
- * a tool, so it can say "a human is needed right now". pi ships no sandbox and
- * no approval gate - its tools simply run - so nothing inside it corresponds to
- * that, and `PI_EVENT_STATES` therefore contains no `blocked` at all. Inferring
- * one from "the turn ended a while ago" would put pi rows in competition with
- * real permission prompts on the strength of a guess, which is precisely how a
- * page stops being believed. A pi session still reaches the top of the list the
- * honest way, through its pipeline: parked, failed, or waiting on a review.
+ * **The three agents do not report the same states, and the differences are
+ * real rather than gaps to paper over.** Claude Code asks permission before
+ * running a tool, so it can say "a human is needed right now". pi ships no
+ * sandbox and no approval gate - its tools simply run - so nothing inside it
+ * corresponds to that, and `PI_EVENT_STATES` therefore contains no `blocked` at
+ * all. Inferring one from "the turn ended a while ago" would put pi rows in
+ * competition with real permission prompts on the strength of a guess, which is
+ * precisely how a page stops being believed. A pi session still reaches the top
+ * of the list the honest way, through its pipeline: parked, failed, or waiting
+ * on a review.
+ *
+ * Codex sits between them: it has a real approval gate, so `blocked` is honest,
+ * and it has no notification of any kind, so a Codex block can never say what it
+ * is for and can never be an idle nudge. See `CODEX_EVENT_STATES`.
  */
 
 import {
@@ -54,8 +59,18 @@ import { join } from 'node:path';
 /**
  * Which agent is running a session.
  *
- * @typedef {'claude'|'pi'} AgentKind
+ * @typedef {'claude'|'pi'|'codex'} AgentKind
  */
+
+/**
+ * The agents that say so on the wire.
+ *
+ * Claude Code is deliberately absent: it has no way to declare itself, so
+ * silence means Claude Code and an unrecognised value means the same. An
+ * allowlist rather than a comparison per agent, because the thing that must not
+ * happen is an unknown string reaching `stateForEvent` and picking a table.
+ */
+const DECLARED_AGENTS = new Set(['pi', 'codex']);
 
 /**
  * A hook payload, with the `host` the reporter adds before posting.
@@ -151,6 +166,7 @@ const EVENT_STATES = {
  * There is no `blocked` here, and that is the design rather than an omission.
  * See the module comment.
  */
+/** @type {Record<string, SessionState>} */
 const PI_EVENT_STATES = {
   session_start: 'idle',
   before_agent_start: 'working',
@@ -161,12 +177,50 @@ const PI_EVENT_STATES = {
 };
 
 /**
+ * How a Codex hook event maps to a session state.
+ *
+ * Codex's event *names* are Claude Code's, which is why this table looks like a
+ * subset of `EVENT_STATES` - but it is a separate table because two entries in
+ * that one describe events Codex does not have, and a shared table would be a
+ * standing invitation to add a third.
+ *
+ * `PermissionRequest` is a genuine approval gate, so a Codex row may go red on
+ * positive evidence - the difference from pi, in the direction that matters.
+ *
+ * There is **no `Notification`**, and that costs two things. A Codex block
+ * carries no reason, because nothing ever catches up to supply one. And there is
+ * no idle nudge to escalate a finished turn into a block, which is left exactly
+ * as it is: `SessionEnd` fires on close *or* after thirty minutes idle, which is
+ * not a nudge and must not be read as one. Inventing one was rejected for pi and
+ * is rejected here for the same reason - red that sometimes means nothing is
+ * wrong is how a page stops being believed.
+ *
+ * `PreToolUse` / `PostToolUse` would map to `working` and are deliberately not
+ * installed: a hook process per tool call, inside the user's editing loop, to
+ * learn something the transcript already holds. See `CODEX_HOOK_EVENTS`.
+ */
+/** @type {Record<string, SessionState>} */
+const CODEX_EVENT_STATES = {
+  SessionStart: 'idle',
+  UserPromptSubmit: 'working',
+  PermissionRequest: 'blocked',
+  Stop: 'idle',
+  SessionEnd: 'ended',
+};
+
+/** @type {Record<string, Record<string, SessionState>>} */
+const AGENT_EVENT_STATES = {
+  pi: PI_EVENT_STATES,
+  codex: CODEX_EVENT_STATES,
+};
+
+/**
  * @param {string} event
  * @param {AgentKind} [agent]
  * @returns {SessionState}
  */
 export function stateForEvent(event, agent = 'claude') {
-  const states = agent === 'pi' ? PI_EVENT_STATES : EVENT_STATES;
+  const states = AGENT_EVENT_STATES[agent] || EVENT_STATES;
   return states[event] || 'working';
 }
 
@@ -218,8 +272,13 @@ export class SessionRegistry {
     }
     const event = payload.hook_event_name;
     // Claude Code's hook has no field to say which agent it is, so silence
-    // means Claude Code. Only pi announces itself, and only pi needs to.
-    const agent = /** @type {AgentKind} */ (payload.agent === 'pi' ? 'pi' : 'claude');
+    // means Claude Code. pi's extension sets it in the body; Codex's hook
+    // command carries `--agent codex`, which is the one place Codex gives us to
+    // declare it. An unrecognised value is treated as silence rather than
+    // trusted, because it arrives over a socket and picks a state table.
+    const agent = /** @type {AgentKind} */ (
+      DECLARED_AGENTS.has(/** @type {string} */ (payload.agent)) ? payload.agent : 'claude'
+    );
     if (isTerminalEvent(event, agent)) {
       this.remove(sessionId);
       return null;

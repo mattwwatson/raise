@@ -821,14 +821,16 @@
        * Which agent, named only when it is worth naming. Claude Code has no
        * entry on purpose: it is most of the rows, and a chip on every card
        * saying so is noise on a page whose whole job is to be scannable - the
-       * same reason `mode` hides 'normal'. A pi row is the exception worth
-       * marking, because what its state can and cannot mean differs: pi has no
-       * permission prompt, so a pi row never turns red for one.
+       * same reason `mode` hides 'normal'. The other two are the exceptions
+       * worth marking, because what a state can and cannot mean differs by
+       * agent: pi has no permission prompt, so a pi row never turns red for
+       * one, and a Codex row that does turn red carries no reason, because
+       * Codex has no notification to supply one and never invents it.
        *
        * No fallback, exactly as with HOST_LABELS. An agent we do not recognise
        * gets no chip rather than a confident wrong name.
        */
-      const AGENT_LABELS = { pi: 'pi' };
+      const AGENT_LABELS = { pi: 'pi', codex: 'codex' };
 
       /*
        * Which tool started this window, named on the same terms as the agent:
@@ -848,7 +850,7 @@
        * on a line is required and a chip on a card is not. An agent neither
        * map knows falls back to the neutral word rather than to a name.
        */
-      const AGENT_NAMES = { claude: 'claude', pi: 'pi' };
+      const AGENT_NAMES = { claude: 'claude', pi: 'pi', codex: 'codex' };
 
       /*
        * The favicon carries the one thing worth knowing from a background tab:
@@ -1076,8 +1078,8 @@
           const who = document.createElement('span');
           who.className = 'event-who ' + event.kind;
           // An `agent` line is named after the agent that actually wrote it.
-          // The record cannot say - it is parsed from a file, and both agents
-          // write the same shape - so the row is what knows.
+          // The record cannot say - it is parsed from a file, and every agent
+          // writes the same shape - so the row is what knows.
           who.textContent =
             event.kind === 'tool'
               ? event.label || 'tool'

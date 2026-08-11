@@ -1,8 +1,8 @@
 # Raise (`raise`)
 
-One page that shows every agent session on your machine - Claude Code, Claude Desktop and pi -
-tells you which one is waiting for you, and jumps to that window when you click it. If you use
-`no-mistakes`, each session also shows what its pipeline is doing.
+One page that shows every agent session on your machine - Claude Code, Claude Desktop, pi and
+Codex - tells you which one is waiting for you, and jumps to that window when you click it. If
+you use `no-mistakes`, each session also shows what its pipeline is doing.
 
 If you run several agent sessions across several repos, the problem is not knowing that work
 is happening. It is noticing the one that stopped and wants an answer, and then finding which
@@ -25,7 +25,7 @@ Three different things, because they answer three different questions.
 
 | Signal | Where it comes from | What it means |
 | --- | --- | --- |
-| **Waiting for you** | Claude Code hooks | Claude hit a permission prompt or is idle waiting for input. This is the one worth interrupting yourself for. **Claude Code only** - see [pi sessions](#pi-sessions). |
+| **Waiting for you** | the agent's own hooks | The agent hit a permission prompt, or Claude Code has been idle waiting for input. This is the one worth interrupting yourself for. **Not pi**, which has no permission prompt - see [pi sessions](#pi-sessions); a [Codex](#codex-sessions) row can say it but cannot say why. |
 | **Waiting on your review** | the running `lavish-axi poll` | The agent is sitting in a `lavish-axi poll`, waiting for you to open a review page and respond. It looks busy from the outside; it is not. |
 | **Pipeline parked** | the no-mistakes database | A run stopped at a gate. Usually the agent answers it itself within seconds, so it is informational. |
 
@@ -182,7 +182,8 @@ reason the header dot does.
 ## Requirements
 
 - Node 22.13 or newer (`node:sqlite` is used, and it is built in - **there are no runtime dependencies**). 22.13 is where `node:sqlite` stopped needing a command-line flag; earlier 22.x will not run it
-- Claude Code, for the "waiting for you" half. pi is supported too, with the caveat below
+- Claude Code, for the "waiting for you" half. [Codex](#codex-sessions) is supported too and has
+  a real approval gate; [pi](#pi-sessions) is supported with the caveat that it has none
 - macOS for window focusing. Monitoring itself works anywhere.
 
 Optional, and independently so - Raise runs with neither, and says nothing about the ones you
@@ -296,6 +297,41 @@ pi generates none, so a pi row shows no summary line. Naming the session with `/
 auth` still works and still shows - it appears next to the repo, the same place Claude Code's
 `/rename` does.
 
+### Codex sessions
+
+[Codex CLI](https://developers.openai.com/codex/cli) sessions are watched too, marked with a
+`codex` chip:
+
+```sh
+raise install-codex
+```
+
+That merges five hooks into `~/.codex/hooks.json` with the same manners as `install-hooks` - it
+shows the change, asks first, keeps a `.raise-backup`, leaves your other hooks alone and in
+order, and is safe to run twice. Undo it with `raise uninstall-codex`. Set `CODEX_HOME` and
+both follow it, as Codex itself does.
+
+**Then start Codex and approve the hook when it asks.** This is the one step that has no
+equivalent for the other two agents, and skipping it looks exactly like a broken install:
+Codex records a hash of each hook in its own `config.toml` and **silently runs nothing it has
+no hash for**, so until you approve it, Raise sees no Codex sessions at all and says nothing
+about why. Raise deliberately does not write that hash - `config.toml` is the record of what
+*you* have agreed to let Codex run, and it is not a monitor's to forge.
+
+Everything on a Codex row works the way it does on a Claude Code row - the repo, the branch,
+the pull request, the pipeline step, what it is doing right now, the review gate, and clicking
+to focus the window.
+
+**A Codex row does turn red, and it will not tell you why.** Codex has a real approval gate, so
+unlike pi it can genuinely say a human is needed - but it has no notification of any kind, so
+there is nothing to carry the reason and Raise does not guess one. A red Codex row means go and
+look; the window itself will say what it is asking. Codex writes no session title either, so a
+Codex row shows no summary line, the same as pi.
+
+**A finished Codex turn reads idle and stays that way.** There is no sixty-second nudge to
+escalate it, because Codex has no event for one and inventing one would put a Codex row in
+competition with real approval prompts on the strength of a guess.
+
 ## Commands
 
 | Command | Does |
@@ -307,6 +343,7 @@ auth` still works and still shows - it appears next to the repo, the same place 
 | `raise focus <session>` | Bring a session's window to the front from the terminal |
 | `raise install-hooks` / `uninstall-hooks` | Manage the Claude Code hooks |
 | `raise install-pi` / `uninstall-pi` | Manage the pi extension |
+| `raise install-codex` / `uninstall-codex` | Manage the Codex hooks |
 
 Useful flags: `--port`, `--settings <path>`, `--dry-run`, `--yes`. `RAISE_PORT` sets the
 default port when `--port` is absent; if it holds something that is not a port, `serve`
@@ -547,7 +584,7 @@ supported no-no-mistakes setup rather than a fault. `NM_HOME` moves where it loo
 ## Development
 
 ```sh
-npm test          # no network, no build step, ~2s
+npm test          # no network, no build step
 npm run lint
 npm run typecheck
 ```

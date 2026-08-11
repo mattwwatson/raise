@@ -7,6 +7,7 @@ import {
   resolveTty,
   pickAgentPid,
   looksLikeClaude,
+  looksLikeCodex,
   hostApp,
   inspectHost,
 } from '../src/process-tree.js';
@@ -190,4 +191,51 @@ test('the walk is bounded and never reaches init', () => {
   const chain = readAncestors(5, { readProcess, maxDepth: 3 });
   assert.equal(chain.length, 3);
   assert.equal(resolveTty(chain), null);
+});
+
+// ---------------------------------------------------------------------- codex
+
+test('a Codex hook is a direct child of the agent, and the native binary wins', () => {
+  // The real ancestry, captured from codex-cli 0.147.0: the native binary with
+  // the npm launcher above it, both long-lived. Nearest-first reaches the
+  // native one, which is the process a session should be pinned to.
+  const readProcess = fakeTable({
+    900: '800 s004 /bin/sh /Users/me/.codex/hook.sh',
+    800: '700 s004 /opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex exec --skip-git-repo-check',
+    700: '600 s004 node /opt/homebrew/bin/codex exec --skip-git-repo-check',
+    600: '1 s004 -zsh',
+  });
+  const chain = readAncestors(900, { readProcess });
+  assert.equal(pickAgentPid(chain), 800);
+  assert.equal(resolveTty(chain), '/dev/s004');
+});
+
+test('Codex is recognised positively, not by owning a terminal', () => {
+  // `pickAgentPid` would answer correctly here through its tty fallback, which
+  // is the incidental answer this module exists to avoid: it holds only while
+  // Codex is in a terminal, and looks identical to a lucky guess when it stops.
+  const withoutTty = fakeTable({
+    900: '800 ?? /bin/sh hook.sh',
+    800: '700 ?? /opt/homebrew/lib/node_modules/@openai/codex-darwin-arm64/vendor/x/bin/codex exec',
+    700: '1 ?? node /opt/homebrew/bin/codex exec',
+  });
+  assert.equal(pickAgentPid(readAncestors(900, { readProcess: withoutTty })), 800);
+});
+
+test('a bare `codex` on the path is the agent too', () => {
+  const readProcess = fakeTable({
+    900: '800 s001 /bin/sh hook.sh',
+    800: '1 s001 codex exec',
+  });
+  assert.equal(pickAgentPid(readAncestors(900, { readProcess })), 800);
+});
+
+test('a session merely working on Codex is not claimed as one', () => {
+  // The failure this match is shaped against. Someone editing a file called
+  // codex.js, or grepping for the word, must not have their Claude session
+  // pinned to whatever the word appeared in.
+  assert.equal(looksLikeCodex(parsePsLine('1 s001 vim src/codex-transcript.js')), false);
+  assert.equal(looksLikeCodex(parsePsLine('1 s001 rg codex src/')), false);
+  assert.equal(looksLikeCodex(parsePsLine('1 s001 node /opt/tools/codex-helper.js')), false);
+  assert.equal(looksLikeCodex(null), false);
 });

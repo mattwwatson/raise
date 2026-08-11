@@ -24,17 +24,20 @@ import {
   EMPTY_SUMMARY,
 } from './transcript.js';
 import { parsePiTranscriptTail } from './pi-transcript.js';
+import { parseCodexTranscriptTail } from './codex-transcript.js';
 
 /**
  * Which parser reads which agent's file.
  *
- * The only place the two formats differ, by design: pi's entries are normalised
- * into the same records, so everything past this line is shared. See
- * `pi-transcript.js` for why that is a normaliser and not a second summariser.
+ * The only place the three formats differ, by design: pi's and Codex's entries
+ * are normalised into the same records, so everything past this line is shared.
+ * See `pi-transcript.js` and `codex-transcript.js` for why those are normalisers
+ * and not summarisers of their own.
  */
 const PARSERS = {
   claude: parseTranscriptTail,
   pi: parsePiTranscriptTail,
+  codex: parseCodexTranscriptTail,
 };
 
 /**

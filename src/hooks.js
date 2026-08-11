@@ -1,5 +1,5 @@
 /**
- * Installing the Claude Code hooks.
+ * Installing the agent hooks.
  *
  * Asking every colleague to hand-edit settings.json is how this ends up broken
  * on four machines, so Raise merges the entries itself - idempotently, showing
@@ -7,10 +7,31 @@
  *
  * The merge is a pure function so it can be tested without a real settings
  * file, and so the CLI can show a truthful preview before writing anything.
+ *
+ * **Two agents, one merge.** Codex keeps its hooks in `~/.codex/hooks.json`
+ * rather than in Claude Code's settings file, but the structure under `hooks` is
+ * the same object of events to groups of entries - so this is generalised over
+ * the event list and the timeouts rather than copied. A second copy would be a
+ * second set of the obligations in AGENTS.md's safe-change rules (show a diff,
+ * ask first, back up, leave foreign entries alone, be safe to run twice), and
+ * the copy that missed the next fix would be the one writing to somebody's
+ * config.
  */
 
 import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+
+/**
+ * A settings file, as much of it as this module touches.
+ *
+ * Everything else in there is somebody else's and is carried through untouched,
+ * which is why this deliberately does not claim to describe the whole file -
+ * the same rule `pi-extension.js` states about pi's. Claude Code's
+ * `settings.json` and Codex's `hooks.json` are both this shape at the level
+ * that matters.
+ *
+ * @typedef {{hooks?: Record<string, any[]>, [key: string]: any}} HookSettings
+ */
 
 /**
  * Which events we listen to, and why.
@@ -33,19 +54,56 @@ export const HOOK_EVENTS = [
   'SessionEnd', // deregister
 ];
 
+/**
+ * Which Codex events we listen to.
+ *
+ * The same names Claude Code uses, because Codex's hook system is the same
+ * shape - but a shorter list, because Codex has no `Notification` at all and
+ * `Stop` is the only thing that ends a turn. `PreToolUse` / `PostToolUse` are
+ * left out on the rule above.
+ *
+ * `SessionEnd` is what deregisters a session, and `SessionEnd` on Codex also
+ * fires after thirty minutes idle. That is a session going away, not a nudge,
+ * and `CODEX_EVENT_STATES` reads it as exactly that.
+ */
+export const CODEX_HOOK_EVENTS = [
+  'SessionStart',
+  'UserPromptSubmit',
+  'PermissionRequest',
+  'Stop',
+  'SessionEnd',
+];
+
 /** Anything containing this is one of ours and may be replaced on reinstall. */
 export const HOOK_MARKER = 'raise-hook.js';
 
-export function hookCommand(nodePath, scriptPath) {
-  return `${quoteIfNeeded(nodePath)} ${quoteIfNeeded(scriptPath)}`;
+/** How long each side gives our hook, in seconds. */
+const DEFAULT_TIMEOUT = 5;
+
+/**
+ * Codex clamps a `SessionEnd` hook to three seconds and prints a warning on
+ * every session start while an entry asks for more. Our reporter is bounded at
+ * two seconds internally, so the extra two were never used - and causing a
+ * warning in somebody's editing loop, once per session, forever, to ask for time
+ * we do not want is exactly what `raise-hook.js`'s rules exist to prevent.
+ */
+export const CODEX_HOOK_TIMEOUTS = { SessionEnd: 3 };
+
+export function hookCommand(nodePath, scriptPath, agent = null) {
+  const base = `${quoteIfNeeded(nodePath)} ${quoteIfNeeded(scriptPath)}`;
+  // Codex has no field on the payload to say which agent sent it, and the hook
+  // command is the one place it lets us put anything of our own. Claude Code
+  // stays the silent default, so it gets no flag at all and every installation
+  // out there keeps the command it already has.
+  return agent ? `${base} --agent ${agent}` : base;
 }
 
 function quoteIfNeeded(value) {
   return /[\s"']/.test(value) ? `"${value}"` : value;
 }
 
-function hookEntry(command) {
-  return { hooks: [{ type: 'command', command, timeout: 5 }] };
+function hookEntry(command, timeout) {
+  return { hooks: [{ type: 'command', command, timeout }] };
 }
 
 function containsOurHook(group) {
@@ -86,9 +144,14 @@ export function hookInstallState(settings, events = HOOK_EVENTS) {
  * Never touches anybody else's hooks, and replaces our own previous entry
  * rather than stacking duplicates when the install is run twice.
  *
- * @returns {{settings: object, changes: string[]}}
+ * @param {HookSettings|null|undefined} existingSettings
+ * @param {string} command
+ * @param {string[]} [events]
+ * @param {Record<string, number>} [timeouts] per-event overrides, for an agent
+ *   that will not honour the default
+ * @returns {{settings: HookSettings, changes: string[]}}
  */
-export function mergeHooks(existingSettings, command, events = HOOK_EVENTS) {
+export function mergeHooks(existingSettings, command, events = HOOK_EVENTS, timeouts = {}) {
   const settings = structuredClone(existingSettings || {});
   settings.hooks = settings.hooks || {};
   const changes = [];
@@ -96,7 +159,7 @@ export function mergeHooks(existingSettings, command, events = HOOK_EVENTS) {
   for (const event of events) {
     const groups = Array.isArray(settings.hooks[event]) ? [...settings.hooks[event]] : [];
     const ourIndex = groups.findIndex(containsOurHook);
-    const entry = hookEntry(command);
+    const entry = hookEntry(command, timeouts[event] ?? DEFAULT_TIMEOUT);
 
     if (ourIndex === -1) {
       groups.push(entry);

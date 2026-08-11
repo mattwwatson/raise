@@ -35,6 +35,26 @@ export function piSettingsPath() {
   return join(piHome(), 'settings.json');
 }
 
+/**
+ * Where Codex keeps its config, which is where its hook list lives.
+ *
+ * `CODEX_HOME` is Codex's own variable, exactly as `PI_CODING_AGENT_DIR` is
+ * pi's, so following it is correct behaviour rather than a hook for the tests -
+ * a user who has moved Codex's home expects its hooks to be found there.
+ */
+export function codexHome() {
+  return process.env.CODEX_HOME || join(homedir(), '.codex');
+}
+
+/**
+ * Codex's hooks live in a file of their own rather than in a settings file, but
+ * the structure inside it is the same `{hooks: {Event: [group]}}` Claude Code
+ * uses - which is why `mergeHooks` serves both.
+ */
+export function codexHooksPath() {
+  return join(codexHome(), 'hooks.json');
+}
+
 export function statePath() {
   return join(noMistakesHome(), 'state.sqlite');
 }

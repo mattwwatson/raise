@@ -55,3 +55,33 @@ export function reportablePayload(payload) {
   }
   return reportable;
 }
+
+/**
+ * Which agent the reporter was installed for, from `--agent <kind>`.
+ *
+ * The one thing a hook payload cannot tell us. Claude Code has no field for it
+ * and never will; Codex has none either, and its hook *command* is the only
+ * place it lets us put anything of our own - so the installation states it and
+ * the payload is not consulted. Claude Code is the silent default, so an absent
+ * flag returns null and the field is left off the body entirely, which keeps the
+ * wire shape unchanged for every installation that predates this.
+ *
+ * Not validated here. `registry.js` holds the list of agents that may declare
+ * themselves, because that is where the value picks a state table, and one
+ * allowlist is better than two that can disagree.
+ *
+ * Here rather than in the hook for the same reason as everything else in this
+ * module: the hook exits the process by design and so cannot be imported by a
+ * test.
+ *
+ * @param {string[]} argv
+ * @returns {string|null}
+ */
+export function declaredAgent(argv) {
+  const at = (argv || []).indexOf('--agent');
+  if (at === -1) return null;
+  const value = argv[at + 1];
+  // A flag with no value is a broken install, not a declaration of an agent
+  // called `--dry-run`.
+  return typeof value === 'string' && value && !value.startsWith('-') ? value : null;
+}

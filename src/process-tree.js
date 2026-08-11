@@ -1,9 +1,10 @@
 /**
  * Working out which window a hook is running in, and which process owns it.
  *
- * Hooks run as a grandchild of Claude Code: Claude spawns a shell, the shell
- * runs the hook. Neither the controlling terminal nor the agent process is
- * visible without walking up the process tree.
+ * A hook runs below the agent - Claude Code spawns a shell and the shell runs
+ * the hook, Codex spawns the hook itself - so the depth varies and neither the
+ * controlling terminal nor the agent process is visible without walking up.
+ * Nothing here counts levels; it walks until it recognises something.
  *
  * Two things are read from that walk, and they are not the same thing:
  *
@@ -80,6 +81,28 @@ const CLAUDE_COMMAND = /^claude(-code)?$/;
  * an unrelated path such as `~/.claude/settings.json` from matching.
  */
 const CLAUDE_ARGS = /@anthropic-ai\/claude-code|claude-code\/cli\.js|(^|\/)claude(-code)?(\s|$)/;
+
+/**
+ * Codex CLI, matched the same two ways and for a sharper reason than Claude
+ * Code needs.
+ *
+ * A Codex hook is a *direct* child of the agent, and the agent is two processes:
+ * an npm launcher (`node …/bin/codex`) with the native binary beneath it. Both
+ * are long-lived, so either would survive being recorded - but the native one is
+ * nearer, and a nearest-first walk reaches it first.
+ *
+ * Without this, `pickAgentPid` would still answer correctly, by falling through
+ * to the process that owns the controlling terminal. That is the incidental
+ * answer this module exists to avoid: it holds only while Codex is in a
+ * terminal, and it is indistinguishable from a lucky guess when it stops.
+ *
+ * Matched on the basename and on the npm package path, never on the word
+ * appearing anywhere in argv. The session most likely to be wrongly claimed is
+ * one working *on* Codex - editing a file called `codex.js`, grepping for the
+ * string - and a rule that reads argv loosely claims all of them.
+ */
+const CODEX_COMMAND = /^codex$/;
+const CODEX_ARGS = /@openai\/codex[\w.@-]*\/|(^|\s)\S*\/bin\/codex(\s|$)/;
 
 /**
  * Claude Desktop hosting a session, matched two independent ways.
@@ -184,14 +207,21 @@ export function looksLikeClaude(proc) {
   return CLAUDE_ARGS.test(proc.args || '');
 }
 
+/** @param {PsRecord|ProcessRecord|null} proc */
+export function looksLikeCodex(proc) {
+  if (!proc) return false;
+  if (CODEX_COMMAND.test(basename(proc.command || ''))) return true;
+  return CODEX_ARGS.test(proc.args || '');
+}
+
 /**
  * The pid of the long-lived agent process, or null if we cannot tell.
  *
  * Wrappers are skipped outright. Of what remains, the agent is either something
- * recognisably Claude Code, or - when it has been renamed or repackaged - the
- * nearest ancestor that owns the controlling terminal, since the shell that ran
- * the hook has already been excluded and everything above the agent is a shell
- * too.
+ * recognisably one of the agents we watch, or - when it has been renamed or
+ * repackaged - the nearest ancestor that owns the controlling terminal, since
+ * the shell that ran the hook has already been excluded and everything above the
+ * agent is a shell too.
  *
  * @param {ProcessRecord[]} chain nearest ancestor first
  * @returns {number|null}
@@ -199,7 +229,7 @@ export function looksLikeClaude(proc) {
 export function pickAgentPid(chain = []) {
   for (const proc of chain) {
     if (isWrapper(proc.command)) continue;
-    if (looksLikeClaude(proc)) return proc.pid;
+    if (looksLikeClaude(proc) || looksLikeCodex(proc)) return proc.pid;
     if (proc.tty) return proc.pid;
   }
   return null;
