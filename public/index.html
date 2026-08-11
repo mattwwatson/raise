@@ -467,6 +467,14 @@
       .bar.working {
         background: var(--working);
       }
+      /*
+       * Fainter than idle, because it is not a state at all. A session nothing
+       * has reported has no state that can honestly be read, so the card is
+       * drawn to be legible and to compete with nothing on the page above it.
+       */
+      .bar.untracked {
+        background: color-mix(in srgb, var(--faint) 40%, transparent);
+      }
       .body {
         flex: 1;
         min-width: 0;
@@ -568,6 +576,15 @@
       }
       .state.working {
         color: var(--working);
+      }
+      /*
+       * The one word in this slot that is not a state, so it is the one that
+       * does not wear the weight of one: "Not tracked" describes what we know
+       * about the session rather than what the session is doing.
+       */
+      .state.untracked {
+        font-weight: 500;
+        color: var(--faint);
       }
       .msg {
         overflow: hidden;
@@ -1228,6 +1245,19 @@
               : '');
           body.appendChild(why);
         }
+        // Why this card says nothing about what the session is doing, and the
+        // one thing that fixes it. Without this the row is a mystery: it looks
+        // like a session with the status missing, when in fact the status is
+        // the thing that was never knowable. The remedy is the same whatever
+        // the cause - hooks installed after the session started, an agent whose
+        // hooks are not installed at all, or Codex's hook still waiting to be
+        // trusted - so the line names the remedy rather than guessing at which.
+        if (row.kind === 'untracked') {
+          const why = document.createElement('div');
+          why.className = 'summary';
+          why.textContent = 'Never reported to Raise - restart this session to track it';
+          body.appendChild(why);
+        }
         // What no-mistakes is doing, on the row of the session it is doing it
         // for rather than as a second card nobody can act on.
         //
@@ -1459,8 +1489,14 @@
         // gate" and sat above every working session. A card with no window
         // behind it must never outrank one you can act on - it cannot take you
         // anywhere, and this page ranks by who you can go and help.
-        const placed = rows.filter((r) => r.attributable !== false);
-        const unattributed = rows.filter((r) => r.attributable === false);
+        //
+        // Sessions nothing has reported get the same treatment, one section
+        // further down: `untracked` is not in GROUPS at all, because it is not
+        // an attention level - it is the absence of one - and a card that
+        // cannot say what it is doing must not sit among the ones that can.
+        const untracked = rows.filter((r) => r.kind === 'untracked');
+        const placed = rows.filter((r) => r.kind !== 'untracked' && r.attributable !== false);
+        const unattributed = rows.filter((r) => r.kind !== 'untracked' && r.attributable === false);
 
         for (const [key, label] of GROUPS) {
           const group = placed.filter((r) => r.attention === key);
@@ -1478,6 +1514,14 @@
           title.textContent = 'Pipelines we cannot place';
           rowsEl.appendChild(title);
           for (const row of unattributed) rowsEl.appendChild(card(row));
+        }
+
+        if (untracked.length > 0) {
+          const title = document.createElement('div');
+          title.className = 'group-title';
+          title.textContent = 'Not reporting to Raise';
+          rowsEl.appendChild(title);
+          for (const row of untracked) rowsEl.appendChild(card(row));
         }
 
         notifyOnNewlyBlocked(rows);

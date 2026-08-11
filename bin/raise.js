@@ -6,8 +6,7 @@
  * or to explain why you are not there yet.
  */
 
-import { homedir } from 'node:os';
-import { join, dirname, resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
@@ -33,6 +32,7 @@ import { ForgeState } from '../src/forge.js';
 import { readForgeConfig } from '../src/forge-config.js';
 import { PollWatch } from '../src/poll-watch.js';
 import { FirstmateWatch } from '../src/firstmate.js';
+import { UntrackedScan } from '../src/untracked.js';
 import { focusSession } from '../src/focus/index.js';
 import { ALL_TERMINALS } from '../src/focus/terminals.js';
 import { exec, execAsync, tryExec, tryExecAsync } from '../src/exec.js';
@@ -47,6 +47,7 @@ import {
   ensureDirs,
   piSettingsPath,
   codexHooksPath,
+  claudeSettingsPath,
   forgeConfigPath,
 } from '../src/config.js';
 import { buildRows } from '../src/dashboard.js';
@@ -57,7 +58,9 @@ import { probeHealth } from '../src/health.js';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HOOK_SCRIPT = resolve(HERE, '..', 'hooks', 'raise-hook.js');
 const PI_EXTENSION = resolve(HERE, '..', 'hooks', 'raise-pi-extension.js');
-const DEFAULT_SETTINGS = join(homedir(), '.claude', 'settings.json');
+// Through `config.js` so `CLAUDE_CONFIG_DIR` is honoured here as well as by the
+// scan for untracked sessions - one answer to where Claude Code's home is.
+const DEFAULT_SETTINGS = claudeSettingsPath();
 
 const bold = (s) => `[1m${s}[0m`;
 const dim = (s) => `[2m${s}[0m`;
@@ -356,6 +359,18 @@ async function cmdStatus() {
     }
   }
 
+  // Sessions nothing has reported. One shot, so the walk happens inline rather
+  // than on an interval - it measured 9ms across 1,396 transcripts.
+  const untracked = new UntrackedScan().list({
+    registeredPaths: new Set(sessions.map((s) => s.transcriptPath).filter(Boolean)),
+  });
+  for (const found of untracked) {
+    const { branch, mainCheckout } = gitBranches.checkoutFor(found.cwd);
+    branches.set(found.key, branch);
+    mainCheckouts.set(found.key, mainCheckout);
+    summaries.set(found.key, transcripts.read(found.transcriptPath, branch, found.agent));
+  }
+
   // Reuse the dashboard projection so the CLI and the page can never disagree.
   const projection = {
     sessions,
@@ -367,6 +382,7 @@ async function cmdStatus() {
     pullRequests,
     pipelines,
     runOwners: runOwners.owners,
+    untracked,
     spawnedBy,
   };
   let rows = buildRows(projection);
@@ -430,6 +446,14 @@ async function cmdStatus() {
     // the session about vanished off the row. They are concurrent, and the
     // pipeline has a line of its own below.
     if (row.summary) console.log(`  ${dim(row.summary)}`);
+    // Why this row says nothing about what the session is doing, and what to do
+    // about it. Said here in the same words as the page, for the same reason
+    // every other explanation is: the two renderers are one protocol, and a row
+    // that reads as bare on one and explained on the other is the page and the
+    // CLI disagreeing about the same session.
+    if (row.kind === 'untracked') {
+      console.log(`  ${dim('Never reported to Raise - restart this session to track it')}`);
+    }
     // Why an unplaceable run is here at all, in the same words as the page.
     if (row.attributable === false) {
       const guess = row.candidateSessions
