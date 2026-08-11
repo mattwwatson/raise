@@ -1,7 +1,8 @@
 ---
 ticket: RAI-21
-status: in-progress
+status: shipped
 branch: RAI-21-codex-sessions
+shipped: 2026-08-11
 size: L
 depends: -
 ---
@@ -375,3 +376,97 @@ nothing is built on the guess.
 - On a machine with no Codex installed: no doctor line, no warning, no subprocess. The
   `server.test.js` guard that asserts an unconfigured Raise runs nothing still passes.
 - `npm test`, `npm run lint`, `npm run typecheck`.
+
+---
+
+## Implementation notes
+
+Built in the order above. The capture came first and changed three things, all recorded in
+[The capture](#the-capture) rather than only here: hooks are trust-gated, `SessionEnd` is
+clamped to three seconds, and Codex writes no title. Everything else landed as specified, and
+the **deliberately not built** list is intact - nothing on it was quietly included.
+
+### What was added
+
+| | |
+| --- | --- |
+| `src/codex-transcript.js` | the normaliser, and the only genuinely new module |
+| `src/registry.js` | `CODEX_EVENT_STATES`, `AgentKind` widened, `DECLARED_AGENTS` |
+| `src/hooks.js` | `CODEX_HOOK_EVENTS`, `CODEX_HOOK_TIMEOUTS`, per-event timeouts, `hookCommand(…, agent)` |
+| `src/process-tree.js` | `looksLikeCodex`, consulted by `pickAgentPid` |
+| `src/hook-payload.js` | `declaredAgent`, which is argv rather than payload |
+| `src/config.js` | `codexHome`, `codexHooksPath`, honouring `CODEX_HOME` |
+| `bin/raise.js` | `install-codex`, `uninstall-codex`, and a doctor line only when Codex is there |
+| `public/index.html` | `AGENT_LABELS.codex`, `AGENT_NAMES.codex` |
+
+`mergeHooks` was generalised rather than copied, as item 5 asked: it already took an event
+list, and it now takes per-event timeout overrides too. `removeHooks` and `hookInstallState`
+needed nothing but their existing `events` argument.
+
+### Decisions taken during the build
+
+**`declaredAgent` lives in `hook-payload.js`, not in the hook.** Same reason
+`reportablePayload` does: the hook exits the process by design and cannot be imported by a
+test. It is applied *after* the allowlist rather than through it - the agent is what the
+installation says it is, never something a payload may claim about itself.
+
+**`DECLARED_AGENTS` is an allowlist in `registry.js`.** The value arrives over a socket and
+picks a state table, so an unrecognised one is treated as silence and reads as Claude Code. A
+typo in an installed hook command degrades to the default rather than to no table at all.
+
+**Only `exec_command` is mapped to a page verb.** Any other code-mode tool keeps its own name
+with the underscores spaced out - `update_plan` renders as `Update plan`. Guessing a verb for
+a tool nobody has seen would put a wrong word on a card, which is worse than a plain one.
+
+**The doctor line is gated on Codex's home directory existing**, which is one `stat` and never
+a subprocess - the same silence no-mistakes and Lavish are held to. It reports what Raise
+wrote and deliberately says nothing about trust: that lives in a hash Raise does not compute
+and must not write, so any line about it would be a guess at somebody else's consent record.
+
+### Two places the Definition of done needed qualifying
+
+Both were settled by the capture and neither changed what was built.
+
+**"…with its repo, branch and title".** There is no title: Codex writes none anywhere, and the
+one in its own database is the first user message verbatim. A Codex card therefore carries no
+summary line and is read by its activity line, exactly as a pi card is. Verified live - the row
+showed `raise`, `RAI-21-codex-sessions`, and `Running touch` / `Running sleep` / `Wait` as the
+session moved.
+
+**"…clears within three seconds, from the transcript".** It clears as soon as the approved tool
+writes anything, which for a fast command is inside one poll and was measured at four seconds
+end to end. For a *slow* approved command there is nothing written until it returns, so the row
+stays red for longer. That is not new and not specific to Codex: Claude Code behaves identically
+for the same reason - neither agent has an event for an approval being answered - and
+`blockDisproved` is the shared mechanism. Worth knowing rather than worth fixing, since the fix
+is the `PostToolUse` hook both agents' sections rule out on cost.
+
+### Verified live
+
+One `raise serve` on an ephemeral port with a scratch `RAISE_HOME`, and a real `codex exec`
+session under a scratch `CODEX_HOME`, polling `/state` every four seconds:
+
+```
+t= 4s  working  raise  RAI-21-codex-sessions  act:null           focusable, host tmux
+t= 8s  blocked  raise  RAI-21-codex-sessions  act:Running touch  msg:null  dismissible:false
+t=12s  working  raise  RAI-21-codex-sessions  act:null
+t=16s  working  raise  RAI-21-codex-sessions  act:Running sleep
+t=28s  working  raise  RAI-21-codex-sessions  act:Wait
+t=48s  (row gone - SessionEnd)
+```
+
+Red within a poll of the approval, back to working four seconds later off the transcript alone,
+no reason text, no `Not for me` control, and both tool shapes rendering - `Running sleep` from a
+code-mode `exec` snippet and `Wait` from a `function_call`.
+
+`install-codex` / `uninstall-codex` were exercised against a **copy** of the real
+`~/.codex/hooks.json` and its three foreign hooks, never against the live file, which was
+confirmed untouched afterwards. `test/cli-codex.test.js` runs the same three steps through the
+real CLI against a temp `CODEX_HOME`, so it is a regression test rather than a one-off.
+
+### Tests
+
+756 total, up 60. No Codex installation is needed to run any of them: the rollout fixtures are
+literal lines copied out of the capture, the installer fixture is the three-foreign-hooks file
+as text, and the pid rule is fed a fake process table. `server.test.js`'s guards that an
+unconfigured Raise runs no command and makes no request are untouched and still pass.
