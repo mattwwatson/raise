@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { reportablePayload, REPORTABLE_FIELDS } from '../src/hook-payload.js';
+import { reportablePayload, declaredAgent, REPORTABLE_FIELDS } from '../src/hook-payload.js';
 
 test('the fields Raise reads are carried through', () => {
   const payload = {
@@ -73,4 +73,25 @@ test('the allowlist has no field carrying conversation text', () => {
   for (const field of ['prompt', 'tool_input', 'last_assistant_message', 'transcript']) {
     assert.equal(REPORTABLE_FIELDS.includes(field), false, `${field} must not be reportable`);
   }
+});
+
+test('the agent is declared by the installed command, not by the payload', () => {
+  // Codex has no field on its payload to say which agent it is, and Claude Code
+  // never will - so the hook command is the one place it can be stated, and
+  // that is what `--agent codex` in the installed command is for.
+  assert.equal(declaredAgent(['--agent', 'codex']), 'codex');
+  assert.equal(declaredAgent(['--agent', 'pi', '--other']), 'pi');
+});
+
+test('no flag means Claude Code, and says so by saying nothing', () => {
+  // The body keeps the shape it has had since before this existed, so nothing
+  // about an installation that predates it changes.
+  assert.equal(declaredAgent([]), null);
+  assert.equal(declaredAgent(undefined), null);
+});
+
+test('a flag with no value is a broken install, not an agent called --yes', () => {
+  assert.equal(declaredAgent(['--agent']), null);
+  assert.equal(declaredAgent(['--agent', '--yes']), null);
+  assert.equal(declaredAgent(['--agent', '']), null);
 });

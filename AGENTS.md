@@ -9,7 +9,7 @@ that are easy to undo by accident.
 ## Project Overview
 
 Raise is a single-page monitor for the machine it runs on. It shows every agent session -
-Claude Code in a terminal, Claude Desktop, or pi - across every repo, ranks them by who needs
+Claude Code in a terminal, Claude Desktop, pi or Codex - across every repo, ranks them by who needs
 a human, and focuses the window when you click a row.
 
 The product is one sentence: **tell me which session is waiting for me, and take me there.**
@@ -129,10 +129,11 @@ one, so it comes last. Do not reorder them back.
 | `src/server.js` | HTTP, server-sent events, the poll loop |
 | `src/hooks.js` | merging our hooks into the user's `~/.claude/settings.json` |
 | `src/hook-payload.js` | which fields may leave an agent and reach us (pure) |
-| `hooks/raise-hook.js` | the Claude Code hook |
+| `hooks/raise-hook.js` | the Claude Code and Codex hook - one reporter, `--agent` apart |
 | `hooks/raise-pi-extension.js` | the pi extension, which is the same reporter in-process |
 | `src/pi-transcript.js` | pi transcripts, normalised into the records `transcript.js` reads |
 | `src/pi-extension.js` | merging our extension into pi's `settings.json` |
+| `src/codex-transcript.js` | Codex rollouts, normalised into those same records |
 | `public/index.html` | the page, self-contained |
 | `public/connection.js` | the liveness rule (pure, no DOM, injected clock) |
 
@@ -1163,6 +1164,76 @@ Auto-discovery would work and is shorter, but a copied file is a fork: it goes s
 time the repo is pulled, and the stale half is the one running inside the agent.
 `raise-hook.js` is registered the same way for the same reason.
 
+**Codex is a third agent and needed one new module, because its hooks are Claude Code's.**
+Uncannily so: the same event names, the same nested `{hooks: {Event: [group]}}` structure, and
+the same JSON payload on stdin, field for field - `session_id`, `transcript_path`, `cwd`,
+`hook_event_name`. So `raise-hook.js` reports for both and `mergeHooks` installs for both, each
+generalised rather than copied: a second reporter would fork the never-fail, exit-0, bounded
+rules that are the most load-bearing lines here, and a second merge would fork every obligation
+in the safe-change rules. The whole capture is in
+`docs/tasks/RAI-21-codex-sessions.md`; what follows is what a future change has to not undo.
+
+**Which agent it is comes from the installed command, not from the payload.** Codex has no
+field to say so and Claude Code never will, so `install-codex` writes
+`… raise-hook.js --agent codex` and Claude Code stays the silent default - its installed command
+is unchanged, so no existing installation reports an update it does not need. `registry.js`
+holds the list of agents that may declare themselves and treats anything else as silence,
+because the value picks a state table and it arrives over a socket.
+
+**A Codex row may go red, and it will never say why.** `PermissionRequest` is a genuine
+approval gate, so the block is positive evidence - the difference from pi, in the direction that
+matters. But Codex has **no `Notification` of any kind**, which costs two things. There is no
+reason text: `PermissionRequest` does carry a human sentence, and it carries it inside
+`tool_input`, which is the one field `REPORTABLE_FIELDS` exists to drop because for a `Write` it
+is the contents of the file. RAI-11's test is whether the page can do its job without it, and it
+can, so the boundary does not move. And there is no idle nudge, which is not reintroduced:
+`SessionEnd` fires on close *or* after thirty minutes idle, which is a session going away rather
+than a session asking for you. A Codex block is therefore never dismissible either - `isIdleNudge`
+fails closed, so the `Not for me` control correctly never appears on one.
+
+**A stale Codex block is cleared by the transcript and by nothing else**, which makes
+`codex-transcript.js` load-bearing for correctness rather than only for the summary line. Codex
+has no event for an approval being answered, exactly as Claude Code has none, and
+`blockDisproved` already handles that. What makes it work at all is that **Codex writes a tool
+call record when the call is issued, not when it returns** - measured on a 25-second command, the
+call at T+1s and its output at T+12s. The `status` field on that record says `completed` from the
+moment it is written and is a lie about progress; the id match against the output is the only
+truth, which is the rule everywhere else here.
+
+**Codex's own hooks are trust-gated, and writing the file is only half an install.** Codex
+records a hash per hook entry in its `config.toml` and **silently runs a hook it has no hash
+for** - measured: the file is parsed, warnings about it are printed, and nothing fires. Raise
+writes `hooks.json` and says out loud that Codex will ask. It must never write `config.toml`:
+that file is the record of what the *user* agreed to run, and a monitor that forges a consent
+hash has installed a silent executable on somebody's behalf. `--dangerously-bypass-hook-trust`
+is the user's flag, never ours to suggest. `doctor` reports what Raise wrote and says nothing
+about trust, which it cannot see without guessing at somebody else's consent record.
+
+**`SessionEnd` is installed asking for three seconds**, because Codex clamps it to that and
+prints a warning on *every session start* while an entry asks for more. Our reporter is bounded
+at two seconds internally, so the rest was never used - and causing a warning in somebody's
+editing loop, forever, to ask for time we do not want is what `raise-hook.js`'s rules exist to
+prevent.
+
+**Codex writes no title of any kind.** `threads.title` in its own `state_5.sqlite` is the first
+user message verbatim - identical to `first_user_message` on every session checked - and no
+rollout record carries one. So a Codex card shows no summary line and is carried by its activity
+line, exactly as a pi card is. This is also the last word on reading that database: the one
+field that looked like a reward for it is raw prompt text, which is above the altitude a card
+may show.
+
+**`codex-transcript.js` is a normaliser, and its whitelist is one outer type.** Every rollout
+line carries a timestamp, session metadata included - the `away_summary` trap in a third
+dialect - and `event_msg` is the sharp edge, because it *restates* the conversation with
+timestamps of its own. Admitting it would count every turn twice. Only `response_item` is the
+conversation; `role: "developer"` inside it is Codex talking to itself and goes too.
+
+**Every Codex tool goes through one `exec` tool**, whose `input` is a JavaScript snippet calling
+`tools.exec_command({cmd})` and friends - 0.147.0 runs in "code mode". The shell command is
+lifted out of the snippet, or a Codex session sitting in a `lavish-axi poll` is invisible and
+every card reads the same bare word. `function_call` is the other shape and is a plain name with
+JSON arguments.
+
 **The host terminal for a tmux session is deliberately not stored.** A tmux session can be
 detached and reattached in a different terminal entirely, so it is resolved fresh on every
 click.
@@ -1325,7 +1396,7 @@ Keep it that way - it has no build step and must open as a file.
   reaching the page: positive evidence, never absence.
 - **The expanded panel names the agent that wrote each line**, through `AGENT_NAMES`, which
   *does* carry Claude Code - a label on a line is required where a chip on a card is not. The
-  record itself cannot say, because both agents write the same parsed shape, so the row is
+  record itself cannot say, because every agent writes the same parsed shape, so the row is
   what knows. An agent neither map recognises falls back to the neutral word `agent`, never
   to a name.
 - Focusing succeeds silently: the window arriving in front of you is the feedback. A
@@ -1338,7 +1409,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 696 tests, no network, no dependencies, ~2s
+npm test          # 756 tests, no network, no dependencies, ~9s
 npm run lint      # oxlint over src, bin, hooks, public, test, scripts
 npm run typecheck # tsc --noEmit over src, bin, hooks, public, scripts
 ```
@@ -1375,7 +1446,7 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 - **`src/hooks.js` writes to the user's `~/.claude/settings.json`.** It must keep showing a
   diff, asking first, backing up to `.raise-backup`, leaving foreign hooks untouched, and
   being safe to run twice. Never make it write without confirmation.
-- **`hooks/raise-hook.js` runs inside someone's live Claude session.** It must never fail and
+- **`hooks/raise-hook.js` runs inside someone's live Claude Code or Codex session.** It must never fail and
   never block: every path exits 0, quietly, within `TIMEOUT_MS`. A monitor that can break
   Claude Code is worse than no monitor.
 - **`hooks/raise-pi-extension.js` runs in-process inside someone's live pi session**, which
@@ -1389,9 +1460,13 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
   transcript *path*, event name, Claude's own notification message and type, and window
   identity - the list is `REPORTABLE_FIELDS` in `src/hook-payload.js`, and the reporter sends
   those fields rather than the payload it was handed. Never prompt text, transcript content or
-  file contents. Do not widen it.
+  file contents. Do not widen it. Which agent sent an event is added *after* the allowlist
+  rather than through it, because it is what the installation says it is and not something a
+  payload may claim about itself - see `declaredAgent`.
 
-  It has to be an allowlist because Claude Code's payloads carry all three of those already:
+  It has to be an allowlist because Claude Code's payloads carry all three of those already,
+  and Codex's carry them too - which is the allowlist doing its job for an agent it was not
+  written for, and the reason a third agent needed no privacy review of its own:
   `UserPromptSubmit` carries `prompt`, `Stop` carries `last_assistant_message`, and
   `PermissionRequest` carries `tool_input`, which for `Write` and `Edit` is the contents of the
   file. Until 04/08/2026 the hook forwarded the payload verbatim, so the first two crossed the
@@ -1481,7 +1556,7 @@ before creating a ticket or touching anything under `docs/tasks/`.**
 ## Commands
 
 ```sh
-npm test                       # 696 tests, ~2s
+npm test                       # 756 tests, ~9s
 npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above

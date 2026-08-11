@@ -2446,3 +2446,63 @@ test('an unattributable run sorts below every session, whatever its state', () =
     ['session', 'run'],
   );
 });
+
+// ---------------------------------------------------------------------- codex
+
+test('a Codex session reaches the page as itself, with no title to show', () => {
+  // Codex writes no title of any kind - its own database stores the first user
+  // message as one - so a Codex card is carried by its activity line, exactly
+  // as a pi card is. The chip is what tells a reader which agent's rules apply.
+  const [row] = build({
+    sessions: [session({ agent: 'codex', state: 'working' })],
+    runs: [],
+    summaries: new Map([['s1', { activity: 'Running npm', title: null }]]),
+  });
+  assert.equal(row.agentKind, 'codex');
+  assert.equal(row.summary, null);
+  assert.equal(row.activity, 'Running npm');
+  assert.equal(row.attention, 'working');
+});
+
+test('a Codex approval prompt turns the row red and says nothing more', () => {
+  // Codex has a real approval gate, so this is honest where the same red on a
+  // pi row would be a guess. It has no notification of any kind, so nothing
+  // ever supplies a reason and none is invented.
+  const [row] = build({
+    sessions: [
+      session({ agent: 'codex', state: 'blocked', message: null, blockAnnouncedAt: 5000 }),
+    ],
+    runs: [],
+    now: 6000,
+  });
+  assert.equal(row.attention, 'blocked');
+  assert.equal(row.message, null);
+});
+
+test('a Codex block offers no Not for me, because it is never a nudge', () => {
+  // `isDismissibleBlock` holds a dismissal to Claude Code's idle nudge and fails
+  // closed. A Codex block is always a genuine approval request, so the control
+  // whose *working* would be the wrong outcome correctly never appears.
+  const [row] = build({
+    sessions: [
+      session({ agent: 'codex', state: 'blocked', message: null, blockAnnouncedAt: 5000 }),
+    ],
+    runs: [],
+    now: 6000,
+  });
+  assert.equal(row.dismissible, false);
+});
+
+test('a Codex block is disproved by its own transcript, the only thing that can', () => {
+  // Codex has no event for an approval being answered - `PostToolUse` would say
+  // so and is not installed - so this is the whole mechanism, not a backstop.
+  const [row] = build({
+    sessions: [
+      session({ agent: 'codex', state: 'blocked', message: null, blockAnnouncedAt: 5000 }),
+    ],
+    runs: [],
+    summaries: new Map([['s1', { lastActivityAt: 9000, activity: 'Running npm' }]]),
+    now: 10000,
+  });
+  assert.equal(row.attention, 'working');
+});

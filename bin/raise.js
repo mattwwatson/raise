@@ -20,6 +20,8 @@ import {
   writeSettings,
   hookCommand,
   hookInstallState,
+  CODEX_HOOK_EVENTS,
+  CODEX_HOOK_TIMEOUTS,
 } from '../src/hooks.js';
 import { mergeExtension, removeExtension, EXTENSION_MARKER } from '../src/pi-extension.js';
 import { NoMistakesState } from '../src/nm-state.js';
@@ -44,6 +46,7 @@ import {
   portFromFlag,
   ensureDirs,
   piSettingsPath,
+  codexHooksPath,
   forgeConfigPath,
 } from '../src/config.js';
 import { buildRows } from '../src/dashboard.js';
@@ -128,12 +131,15 @@ ${bold('Usage')}
   raise uninstall-hooks    remove them again
   raise install-pi         add the pi extension to pi's settings.json
   raise uninstall-pi       remove it again
+  raise install-codex      add the Codex hooks to ~/.codex/hooks.json
+  raise uninstall-codex    remove them again
   raise doctor             check the setup and explain anything missing
 
 ${bold('Options')}
   --port <n>               listen on a different port (default ${describedDefaultPort()})
   --settings <path>        settings file for install/uninstall (defaults to the
-                           agent's own: ~/.claude/settings.json, ~/.pi/agent/settings.json)
+                           agent's own: ~/.claude/settings.json,
+                           ~/.pi/agent/settings.json, ~/.codex/hooks.json)
   --dry-run                show what would change, write nothing
   --yes                    do not ask for confirmation
 `;
@@ -602,6 +608,77 @@ async function cmdUninstallPiExtension(flags) {
   console.log(green('Removed.'));
 }
 
+async function cmdInstallCodexHooks(flags) {
+  const settingsPath = flags.settings || codexHooksPath();
+  const command = hookCommand(process.execPath, HOOK_SCRIPT, 'codex');
+  let existing;
+  try {
+    existing = readSettings(settingsPath);
+  } catch (err) {
+    console.error(red(err.message));
+    process.exitCode = 1;
+    return;
+  }
+  const { settings, changes } = mergeHooks(
+    existing,
+    command,
+    CODEX_HOOK_EVENTS,
+    CODEX_HOOK_TIMEOUTS,
+  );
+
+  if (changes.length === 0) {
+    console.log(`${green('Already installed')} - hooks in ${settingsPath} are up to date.`);
+    return;
+  }
+
+  console.log(`${bold('Changes to')} ${settingsPath}`);
+  for (const change of changes) console.log(`  ${change}`);
+  console.log(`\n${bold('Hook command')}\n  ${command}\n`);
+
+  if (flags['dry-run']) {
+    console.log(dim('Dry run; nothing written.'));
+    return;
+  }
+  if (!flags.yes && !(await confirm('Write these changes?'))) {
+    console.log('Nothing written.');
+    return;
+  }
+  const backupPath = writeSettings(settingsPath, settings);
+  console.log(green(`Installed. ${backupPath ? `Backup at ${backupPath}` : ''}`));
+  // The half of this that is not like Claude Code, and the half people will
+  // otherwise report as a bug. Codex records a hash per hook entry in its own
+  // config.toml and silently runs nothing it has no hash for - so writing the
+  // file is only half an install, and the other half is the user's to give.
+  // Raise does not write that hash: config.toml is where Codex records what its
+  // user has agreed to run, and a monitor that forges consent has installed a
+  // silent executable on somebody's behalf.
+  console.log(
+    dim('Codex will ask you to trust this hook the next time it starts. Until you do, it\n') +
+      dim('is read and not run - and hooks are read at session start, so restart any Codex\n') +
+      dim('sessions you already have open.'),
+  );
+}
+
+async function cmdUninstallCodexHooks(flags) {
+  const settingsPath = flags.settings || codexHooksPath();
+  const existing = readSettings(settingsPath);
+  const { settings, changes } = removeHooks(existing, CODEX_HOOK_EVENTS);
+  if (changes.length === 0) {
+    console.log('No Raise hooks found.');
+    return;
+  }
+  if (flags['dry-run']) {
+    console.log(changes.join('\n'));
+    return;
+  }
+  if (!flags.yes && !(await confirm(`Remove ${changes.length} hook entries from ${settingsPath}?`))) {
+    console.log('Nothing written.');
+    return;
+  }
+  writeSettings(settingsPath, settings);
+  console.log(green('Removed.'));
+}
+
 async function cmdDoctor() {
   const checks = [];
   const ok = (name, detail) => checks.push({ state: 'ok', name, detail });
@@ -689,6 +766,30 @@ async function cmdDoctor() {
       ok('pi extension', `installed in ${piSettings}`);
     } else {
       warn('pi extension', `not installed - run ${bold('raise install-pi')}`);
+    }
+  }
+
+  // On the same terms as pi, and decided the same way: the presence of the
+  // agent's own home, which costs one `stat` and never a subprocess. A machine
+  // with no Codex on it gets no line at all - not an `off` one, which would
+  // still be a sentence about something the user never chose to install.
+  //
+  // Trust is deliberately not reported. It lives in Codex's `config.toml`,
+  // keyed by a hash Raise does not compute and must not write, so anything said
+  // here would be a guess at somebody else's consent record - and the install
+  // command has already said what to expect. This reports what Raise wrote.
+  const codexHooks = codexHooksPath();
+  if (existsSync(dirname(codexHooks))) {
+    const state = hookInstallState(readSettingsQuietly(codexHooks), CODEX_HOOK_EVENTS);
+    if (state.state === 'installed') {
+      ok('Codex hooks', `installed in ${codexHooks}`);
+    } else if (state.state === 'partial') {
+      warn(
+        'Codex hooks',
+        `out of date - missing ${state.missing.join(', ')}. Run ${bold('raise install-codex')}`,
+      );
+    } else {
+      warn('Codex hooks', `not installed - run ${bold('raise install-codex')}`);
     }
   }
 
@@ -786,6 +887,12 @@ async function main() {
       break;
     case 'uninstall-pi':
       await cmdUninstallPiExtension(flags);
+      break;
+    case 'install-codex':
+      await cmdInstallCodexHooks(flags);
+      break;
+    case 'uninstall-codex':
+      await cmdUninstallCodexHooks(flags);
       break;
     case 'doctor':
       await cmdDoctor();

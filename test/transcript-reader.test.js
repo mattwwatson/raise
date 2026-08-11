@@ -207,3 +207,28 @@ test('an agent that was never named is read as Claude Code', () => {
   assert.equal(reader.read('/t.jsonl').title, 'a title');
   assert.equal(reader.read('/t.jsonl', null, undefined).title, 'a title');
 });
+
+test('a Codex rollout is read with its own parser and no other', () => {
+  const files = fakeFiles();
+  files.set(
+    '/codex.jsonl',
+    line({
+      type: 'response_item',
+      timestamp: '2026-08-11T01:00:00.000Z',
+      payload: {
+        type: 'custom_tool_call',
+        call_id: 'call_1',
+        name: 'exec',
+        input: 'const r = await tools.exec_command({cmd:"npm test",workdir:"/repo"});',
+      },
+    }),
+    100,
+  );
+  const reader = new TranscriptReader({ files: files.access });
+
+  assert.equal(reader.read('/codex.jsonl', null, 'codex').activity, 'Running npm');
+  // Read as either of the other two formats the same file says nothing, which
+  // is the silent wrong answer the agent key on the cache exists to prevent.
+  assert.equal(reader.read('/codex.jsonl', null, 'claude').activity, null);
+  assert.equal(reader.read('/codex.jsonl', null, 'pi').activity, null);
+});
