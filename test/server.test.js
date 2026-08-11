@@ -1417,3 +1417,87 @@ test('a session that predates the hooks is on the page, and a restart replaces i
     cleanup();
   }
 });
+
+test('closing a session does not bring it back as one nothing ever reported', async () => {
+  /*
+   * The same walk, from the other end. On a machine where Raise is installed
+   * this is the ordinary case rather than an edge one: every window closed today
+   * has a transcript minutes old and no live record, which is exactly what the
+   * scan is looking for. So a feature built to stop a stranger's first page
+   * being empty would have filled an established one with a ghost of every
+   * session the user had deliberately finished, each saying it had never
+   * reported and each advising a restart.
+   *
+   * The second assertion is the one worth keeping: with the last session closed
+   * the page must be able to say nothing is running, which is a true and useful
+   * answer that ghosts take away for two hours.
+   */
+  const { dir, cleanup } = scratch();
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = dir;
+  try {
+    const transcript = join(dir, 'projects', '-a-repo', 'ending.jsonl');
+    mkdirSync(join(dir, 'projects', '-a-repo'), { recursive: true });
+    writeFileSync(
+      transcript,
+      JSON.stringify({
+        type: 'assistant',
+        cwd: dir,
+        timestamp: new Date().toISOString(),
+        message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] },
+      }),
+    );
+
+    const port = await freePort();
+    const monitor = createMonitorServer({
+      port,
+      token: 'test-token',
+      dbPath: join(dir, 'no-such.sqlite'),
+      sessionsPath: join(dir, 'sessions'),
+      exec: () => assert.fail('no blocking commands from the server'),
+      fetch: () => assert.fail('no outbound requests from the server'),
+      execAsync: async () => '',
+    });
+    await monitor.start();
+    const state = () => fetch(`http://127.0.0.1:${port}/state?t=test-token`).then((r) => r.json());
+    const post = (body) =>
+      fetch(`http://127.0.0.1:${port}/event`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-raise-token': 'test-token' },
+        body: JSON.stringify(body),
+      });
+
+    await post({
+      session_id: 'closing',
+      hook_event_name: 'SessionStart',
+      cwd: dir,
+      transcript_path: transcript,
+      host: { pid: process.pid, tty: '/dev/ttys004', term_program: 'iTerm.app' },
+    });
+
+    const open = await state();
+    assert.equal(open.rows.length, 1);
+    assert.equal(open.rows[0].kind, 'session', 'an ordinary row while the session is open');
+
+    await post({
+      session_id: 'closing',
+      hook_event_name: 'SessionEnd',
+      cwd: dir,
+      transcript_path: transcript,
+    });
+
+    const closed = await state();
+    assert.equal(
+      closed.rows.find((r) => r.kind === 'untracked'),
+      undefined,
+      'the session we watched end is not offered back as one that never reported',
+    );
+    assert.deepEqual(closed.rows, [], 'and "Nothing running" is reachable again');
+
+    await monitor.stop();
+  } finally {
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
+    cleanup();
+  }
+});

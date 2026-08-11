@@ -371,9 +371,12 @@ async function cmdStatus() {
   }
 
   // Sessions nothing has reported. One shot, so the walk happens inline rather
-  // than on an interval - it measured 9ms across 1,396 transcripts.
+  // than on an interval - it measured 9ms across 1,396 transcripts. The set of
+  // transcripts it must not offer comes from the registry rather than being
+  // assembled here, so this renderer and the page cannot come to disagree about
+  // which of them belongs to a session that has already ended.
   const untracked = new UntrackedScan().list({
-    registeredPaths: new Set(sessions.map((s) => s.transcriptPath).filter(Boolean)),
+    registeredPaths: registry.reportedPaths(sessions),
   });
   for (const found of untracked) {
     const { branch, mainCheckout } = gitBranches.checkoutFor(found.cwd);

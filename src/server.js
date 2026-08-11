@@ -213,7 +213,9 @@ export function createMonitorServer({
 
     // Sessions nothing has ever reported, so the first page a stranger sees is
     // not blank. Deduped against the registry on every tick rather than at scan
-    // time, so a session that restarts loses its untracked row on the next poll.
+    // time, so a session that restarts loses its untracked row on the next poll
+    // - and against the sessions we watched end, which are not unreported and
+    // have nothing to restart.
     //
     // They ride the same three maps as a registered session, keyed by transcript
     // path instead of session id, which is what lets the `.git` cache, the
@@ -222,7 +224,7 @@ export function createMonitorServer({
     // `axi status` path spawns a process per entry for, and these rows carry no
     // run at all.
     const untracked = untrackedScan.list({
-      registeredPaths: new Set(sessions.map((s) => s.transcriptPath).filter(Boolean)),
+      registeredPaths: registry.reportedPaths(sessions),
     });
     for (const found of untracked) {
       const { branch, mainCheckout } = branches.checkoutFor(found.cwd);

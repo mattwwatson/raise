@@ -111,7 +111,7 @@ otherwise unchanged.
 
 ## Bounding the scan
 
-It is a blunt instrument and 1.4 says to bound it deliberately. Five bounds:
+It is a blunt instrument and 1.4 says to bound it deliberately. Six bounds:
 
 **1. Recent only - two hours.** Measured on the author's machine: 16 unregistered transcripts
 inside eight hours, of which 14 were no-mistakes pipeline agents (excluded, below), one was a
@@ -150,6 +150,13 @@ does not cover. So the scan skips any cwd inside `noMistakesHome()`. It is a `st
 against a string from `config.js`: no database, no subprocess, and on a machine without
 no-mistakes nothing is ever under that path, so the test simply never fires. That keeps the
 rule that an absent integration costs nothing and says nothing.
+
+**6. A session Raise watched end is suppressed for as long as the window lasts.** Added by the
+review rather than foreseen here - see *A closed session came back as one that never reported*
+below. The registry keeps the transcript path of every removed session as an on-disk tombstone
+and hands the scan the live paths and the unexpired tombstones as one set, so neither renderer
+assembles the rule for itself. Retention is `UNTRACKED_WINDOW_MS`, the scan's own window, because
+a tombstone is worth keeping exactly as long as the path could otherwise be resurfaced.
 
 **The walk itself** covers all files, with no cap, and is re-run every 30 s rather than on the
 1 s poll. Measured at **9.3 ms for 1,396 transcripts across 261 project directories** on a
@@ -257,8 +264,8 @@ untracked row is waiting on nothing we can name, so it goes last.
 
 Built as specified. Nothing on the **deliberately absent** list was quietly included, and the
 open question was settled the way the evidence pointed, which was also the way the ticket
-leaned - no state word, no colour. Two things the build found that the spec above did not
-predict, both recorded in place rather than only here.
+leaned - no state word, no colour. Three things found after the spec was written that it did not
+predict - two by the build, one by the review - all recorded in place rather than only here.
 
 ### A deleted working directory names the wrong branch
 
@@ -289,6 +296,41 @@ the rule under *Testing and Quality*. Worth knowing that the failure was loud he
 had the developer's machine been quiet, the tests would have passed and gone on passing until
 somebody ran them with sessions open.
 
+### A closed session came back as one that never reported
+
+Caught by the review, and by neither the spec nor the manual pass - the manual pass ran on a
+scratch `RAISE_HOME` where nothing had ever ended, which is exactly the machine this cannot
+happen on.
+
+`registry.record` deletes a session's record on a terminal event and `registry.list` deletes it
+when its pid stops answering, but its transcript is untouched and stays minutes old. So within
+thirty seconds of closing a window, a card appeared under **Not reporting to Raise** reading
+`Not tracked` and *"Found on disk, never reported - restart the session and Raise will follow
+it"* - about a session Raise had watched from `SessionStart` to `SessionEnd`, and that the user
+had deliberately closed. On an installed machine this is not an edge case but the scan's largest
+population: a feature added to stop a stranger's first page being empty would have put a ghost of
+every window finished today on an established one. It also cost the honest empty state, since
+closing everything no longer reached "Nothing running" for two hours.
+
+The severity is in *which* rule it breaks. Everywhere else this page refuses to state what it
+cannot know; here the opposite applied - Raise saw the session end, so the row was not an
+unknowable state guessed at but a known fact contradicted.
+
+Softening the wording until it was true of both cases was considered and rejected: it keeps the
+ghosts, keeps advising a restart of something deliberately closed, and still loses the empty
+state. A distinct *ended* row was rejected too - a closed session is nowhere anyone can be taken,
+so giving it a row reopens the affordance problem the untracked card was careful to avoid. The
+tombstone is the only option that leaves README.md's *"nothing has ever reported that session"*
+and this spec's own framing true as written, and both were re-read and left alone.
+
+Three properties are load-bearing. It is **on disk**, because a restarted server is the moment a
+stranger opens the page and in-memory tombstones would let every ghost return. It is written
+inside `remove`, the one place a terminal event and a dead pid both pass through, so neither
+route can drift from the other. And it is **one file per transcript** rather than one list:
+`raise status` builds its own registry and its `list` prunes dead sessions too, so two processes
+end sessions concurrently and a read-modify-write over a shared file would lose whichever entry
+lost the race - which is the ghost this exists to prevent, reintroduced by its own fix.
+
 ### Two smaller decisions taken during the build
 
 **The explanation moved onto the state line.** It started as a third line under the card, which
@@ -318,9 +360,11 @@ a machine that has moved it.
 
 ### Tests
 
-781 total, up 25: `test/untracked.test.js` (17), seven in `dashboard.test.js` and one end-to-end
-in `server.test.js` that watches an untracked row become a real one when a hook arrives. Two of
-the seventeen are the evidence for the design rather than tests of it - *a quiet transcript cannot
+786 total, up 30: `test/untracked.test.js` (17), seven in `dashboard.test.js`, four in
+`registry.test.js` for the tombstone, and two end-to-end in `server.test.js` - one watching an
+untracked row become a real one when a hook arrives, and one watching a closed session *not* come
+back as one that never reported. Two of the seventeen are the evidence for the design rather than
+tests of it - *a quiet transcript cannot
 tell a finished turn from a session waiting on a human* and *a dangling tool call is not evidence
 of a session that is still alive*.
 

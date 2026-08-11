@@ -1051,11 +1051,25 @@ forbids.
 attention level but the absence of one. It exists because every row needs a value there; it
 sorts last, renders `--faint`, and is excluded from the coloured groups.
 
-Five bounds keep the scan from becoming a second, worse source:
+Six bounds keep the scan from becoming a second, worse source:
 
 - **two hours**, erring long on purpose - an over-inclusive window costs a grey row saying
   "2h ago" at the bottom of the page, and an under-inclusive one costs the empty page this
   exists to fix.
+- **a session we watched end is not a session nothing reported.** Its transcript stays recent for
+  hours after the window closes, so on an installed machine the scan's largest population is not
+  sessions that predate the hooks at all - it is every window the user finished today, each
+  arriving as a card saying it had never reported and advising a restart of something deliberately
+  closed. **The honesty rule cuts both ways**: it forbids asserting what we cannot know, and it
+  equally forbids contradicting what we do. So `SessionRegistry.remove` - the one place a terminal
+  event and a dead pid both pass through - keeps the transcript path as a tombstone, and
+  `reportedPaths` hands the scan the live paths and the unexpired tombstones together, as one
+  answer neither renderer assembles for itself. It is **on disk**, because a restarted server is
+  precisely when a stranger opens the page and in-memory ghosts would all come back. Retention is
+  `UNTRACKED_WINDOW_MS` itself rather than a second number, since a tombstone is worth exactly as
+  long as the scan could otherwise resurface the path. It is a suppression list and nothing more:
+  `get` and `list` do not consult it, nothing in it can become a `Session`, and no field of it
+  reaches `Row` or the frame.
 - **superseded on every tick**, matched on the transcript path rather than a derived session id,
   so restarting a session replaces its row on the next poll and not on the next walk.
 - **no `sessionId`**, because `/focus`, `/dismiss` and `/recent` all read the registry. Null is
@@ -1499,7 +1513,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 781 tests, no network, no dependencies, ~9s
+npm test          # 786 tests, no network, no dependencies, ~9s
 npm run lint      # oxlint over src, bin, hooks, public, test, scripts
 npm run typecheck # tsc --noEmit over src, bin, hooks, public, scripts
 ```
@@ -1652,7 +1666,7 @@ before creating a ticket or touching anything under `docs/tasks/`.**
 ## Commands
 
 ```sh
-npm test                       # 781 tests, ~9s
+npm test                       # 786 tests, ~9s
 npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
