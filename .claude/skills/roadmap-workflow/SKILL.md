@@ -199,9 +199,10 @@ loose document.
 6. **Put `Closes #23` in the pull request description.** It is what *links* the pull request to
    the issue, and that link is what the rest of the automation runs on: the item moves itself
    to In Review when the pull request is linked and to Done when it merges, and the issue
-   closes with it. A plain `#23` with no keyword is not a link - it reads the same to a person
-   and does nothing. (Linking the issue from the pull request's Development panel works too,
-   but the keyword is the one that survives being written down.)
+   closes with it. A plain `#23` with no keyword is not the link the board reads - it
+   cross-references the issue on its timeline, which looks the same to a person and is nothing
+   the automation acts on. (Linking the issue from the pull request's Development panel works
+   too, but the keyword is the one that survives being written down.)
 
    > **The pipeline composes the pull request body, and it keeps a closing keyword you gave
    > it.** Pull request 18 carries both a standalone `Closes #5` and the pipeline's own
@@ -225,13 +226,20 @@ the issue's own timeline already holds every commit and pull request that touche
 and whatever the branch is called. Unlike Jira's branch-anchored rules, **there is no guard**:
 GitHub reads the keyword and acts on it.
 
+**The close is the later half of it, and the board moves first.** The link exists as soon as
+the pull request is *opened*, so the `Pull request linked to issue` workflow puts that item
+into In Review there and then - issue 5 sits there now off pull request 18, which has not
+merged. A stray keyword therefore announces that somebody is reviewing an item nobody has
+started, and it does so long before the close that would eventually explain it.
+
 - **Only your own issue gets a closing keyword.**
 - **To reference another item without closing it, write it as a plain link or as `#21`
   without a keyword** - `see #21` links and closes nothing. The keywords that close are
   `close`, `closes`, `closed`, `fix`, `fixes`, `fixed`, `resolve`, `resolves`, `resolved`.
 - **Naming another item's spec file is always safe** - a path is not an issue reference.
 
-If an item unexpectedly closes, a keyword in a pull request body is the first thing to check.
+If an item unexpectedly moves to In Review or closes, a keyword in a pull request body is the
+first thing to check.
 
 ## Tooling
 
