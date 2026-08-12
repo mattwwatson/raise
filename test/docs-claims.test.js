@@ -28,8 +28,8 @@
  * no-synchronous-child-process rule, the terminal-adapter conditions. **That
  * duplication is deliberate and stays**: the document exists to state a
  * self-contained bar for somebody who has *not* read `AGENTS.md`, and replacing
- * a bullet with a pointer into a 120KB file would send them there to find out
- * whether their patch will land. See
+ * a bullet with a pointer would send them into a file written for somebody
+ * changing the code to find out whether their patch will land. See
  * [docs/tasks/6-contributing-drift.md](../docs/tasks/6-contributing-drift.md).
  *
  * The risk it carries is one-sided: when one side moves, the copy that goes

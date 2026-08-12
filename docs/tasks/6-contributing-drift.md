@@ -19,9 +19,10 @@ positioned to notice the contradiction is the one reader who never sees both.
 ## The duplication stays
 
 Turning those bullets into pointers would solve the drift by deleting what made them useful:
-sending a first-time contributor into a 120KB architecture file to find out whether their patch
-will land is the opposite of what a contribution policy is for. `CONTRIBUTING.md` states a
-self-contained bar on purpose.
+sending a first-time contributor into the architecture file to find out whether their patch will
+land is the opposite of what a contribution policy is for, and the size of that file is not the
+point - it is written for somebody changing the code, and they are not that yet.
+`CONTRIBUTING.md` states a self-contained bar on purpose.
 
 **So the goal is to make drift detectable, not impossible.**
 
