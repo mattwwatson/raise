@@ -103,7 +103,7 @@ with no maintenance, and `npm install -g raise-cli` fetches one package with not
 so the install is the tarball and there is no tree of somebody else's code to audit or to break.
 
 **`npx` is not an install and the README says so.** `install-hooks` writes the absolute path of
-`hooks/raise-hook.js` into the user's agent settings, and `bin/raise.js` resolves that path
+`hooks/raise-hook.js` into the user's agent settings, and `src/cli.js` resolves that path
 relative to the package - correct for a global install, and pointing into npm's temporary cache
 under `npx`. When that cache is cleaned the hooks reference nothing, every session stops
 reporting, and the page stays up looking healthy. Do not offer `npx` as a shortcut anywhere.
@@ -132,7 +132,9 @@ of its design - it is what stops the first page a stranger sees being blank. See
 
 | Path | What |
 | --- | --- |
-| `bin/raise.js` | CLI |
+| `bin/raise.js` | the entry point: the Node version guard, and nothing that could fail before it |
+| `src/cli.js` | the CLI itself, reached only through the guard |
+| `src/node-support.js` | the Node floor and its one sentence; imports nothing, on purpose |
 | `src/cli-args.js` | argument parsing (pure) |
 | `src/config.js` | paths, ports, the shared token; all env-overridable |
 | `src/nm-state.js` | reads the no-mistakes database, with schema probe and fallback |
@@ -177,7 +179,7 @@ Rules:
   Keep them that way - if a new rule needs the clock, the filesystem or a subprocess, inject
   it as a parameter rather than importing it.
 - **Never import `src/exec.js` from a module that needs to shell out.** Take a runner as a
-  parameter and default it at the edge (`bin/raise.js`, `server.js`). This is what lets the
+  parameter and default it at the edge (`src/cli.js`, `server.js`). This is what lets the
   suite assert on the AppleScript that *would* have run without stealing your focus mid-test.
 - **Nothing reachable from the server may run a synchronous child process.** Use `execAsync`
   / `tryExecAsync`. The server polls on a 1s timer, pushes a stream and answers hook posts
@@ -335,7 +337,9 @@ stratified on purpose, so read the whole file rather than one section.
 | the pi reporter runs in-process, so "never fail" is stricter than for the hook | `hooks/raise-pi-extension.js` |
 | the extension is registered by path, never copied | `src/pi-extension.js` |
 | one reporter for Claude Code and Codex; the agent is declared by the installed command | `hooks/raise-hook.js`, `src/hook-payload.js` |
-| Codex's hooks are trust-gated; Raise never writes `config.toml` | `bin/raise.js` (`install-codex`), `src/hooks.js` |
+| Codex's hooks are trust-gated; Raise never writes `config.toml` | `src/cli.js` (`install-codex`), `src/hooks.js` |
+| the entry point checks Node before importing the CLI, because a link-time throw beats any guard | `bin/raise.js`, `src/node-support.js` |
+| reproducing a version bug on a version CI cannot run, and the control that keeps it honest | `test/fixtures/old-node.mjs`, `docs/tasks/5-doctor-node-guard.md` |
 | Codex writes no title of any kind, and its `state_5.sqlite` is raw prompt text | `src/codex-transcript.js` |
 | `codex-transcript.js` whitelists one outer type; `event_msg` would double-count | `src/codex-transcript.js` |
 | a Codex tool call is written when issued; `status: completed` is a lie about progress | `src/codex-transcript.js` |
@@ -480,7 +484,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 806 tests, no network, no dependencies, ~9s
+npm test          # 819 tests, no network, no dependencies, ~9s
 npm run lint      # oxlint over src, bin, hooks, public, test, scripts
 npm run typecheck # tsc --noEmit over src, bin, hooks, public, scripts
 ```
@@ -617,6 +621,12 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
   syntax would execute. Same rule `src/exec.js` follows for argv. It is also not redundant with
   `ci.yml` and must not be folded into it: `ci.yml` asks whether the code is good, this asks how
   the change got here, and only this one needs the `edited` trigger.
+- **`bin/raise.js` reaches `src/cli.js` through `await import()`, and that is not a style
+  choice.** An unresolvable `node:` specifier - `node:sqlite` on Node 22.5 to 22.12 - throws
+  while the module graph is *linked*, before any module body runs, so no static arrangement can
+  put the version guard in front of it. Making that import static, or giving
+  `src/node-support.js` an import of its own, restores the stack trace in full on exactly the
+  versions nobody testing the change is running. It looks like a tidy-up and reads as one.
 - **Do not weaken `src/security.js`.** Token, `Host` allowlist and `Origin` allowlist are all
   three load-bearing - this server ends up running `osascript` and `tmux`, and localhost is
   not a boundary. `/health` is the only unauthenticated route and returns liveness only.
@@ -659,7 +669,7 @@ the [roadmap-workflow skill](.claude/skills/roadmap-workflow/SKILL.md).
 ## Commands
 
 ```sh
-npm test                       # 806 tests, ~9s
+npm test                       # 819 tests, ~9s
 npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
