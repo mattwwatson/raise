@@ -127,7 +127,8 @@ to start.
 - `SECURITY.md` gives a private route and describes the trust boundary honestly.
 - `AGENTS.md` no longer reads as refusing a real contribution, and points at `CONTRIBUTING.md`.
 - No link in any of the three, or in the README, lands a reader on something they cannot open -
-  except the GitHub repository itself, which is [RAI-5]'s to create.
+  except the GitHub repository itself, which exists and is public but stays empty until [RAI-5]
+  pushes the code there, publishes to npm and retires Bitbucket.
 - `npm test`, `npm run lint`, `npm run typecheck` and `npm run tasks:links` all pass, and the
   first three are untouched, this being documentation only.
 
