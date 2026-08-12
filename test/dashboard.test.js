@@ -821,7 +821,7 @@ test("a bystander keeps the branch's pull request, which is not the run's to len
 test("the pipeline's own agent is folded into the owner's row alone", () => {
   const agentSession = session({
     sessionId: 'agent',
-    cwd: '/Users/mattw/.no-mistakes/worktrees/ab12/r1',
+    cwd: '/Users/x/.no-mistakes/worktrees/ab12/r1',
     state: 'blocked',
     message: 'Claude needs your permission to use Bash',
   });
@@ -919,15 +919,15 @@ test('two checkouts of the same repo are told apart by their parent directory', 
   // render as one word, and the page becomes a guessing game.
   const rows = build({
     sessions: [
-      session({ sessionId: 's1', cwd: '/Users/x/work/hexbattle' }),
-      session({ sessionId: 's2', cwd: '/Users/x/.treehouse/hexbattle-04b649/2/hexbattle' }),
+      session({ sessionId: 's1', cwd: '/Users/x/work/tidepool' }),
+      session({ sessionId: 's2', cwd: '/Users/x/.treehouse/tidepool-04b649/2/tidepool' }),
     ],
     runs: [],
     now: 5000,
   });
   assert.deepEqual(
     rows.map((r) => r.title).sort(),
-    ['2/hexbattle', 'work/hexbattle'],
+    ['2/tidepool', 'work/tidepool'],
   );
 });
 
@@ -1380,7 +1380,7 @@ test('a run with no session behind it reports its own clock', () => {
 
 const seen = (over = {}) => ({
   pullRequest: {
-    url: 'https://bitbucket.org/mattw_watson/repo/pull-requests/40',
+    url: 'https://bitbucket.org/x/repo/pull-requests/40',
     number: 40,
     slug: 'repo',
     state: 'open',
@@ -1457,7 +1457,7 @@ test('a pull request the database records on another branch is not ours', () => 
   // knows, because it opened it, so a sighting it recognises elsewhere is
   // rejected rather than rendered.
   const known = pr({
-    url: 'https://bitbucket.org/mattw_watson/repo/pull-requests/40',
+    url: 'https://bitbucket.org/x/repo/pull-requests/40',
     number: 40,
     branch: 'feat/other',
   });
@@ -1471,7 +1471,7 @@ test('a pull request the database records on another branch is not ours', () => 
 
 test('a trailing slash or a capital in the host does not smuggle a rejected one back', () => {
   const known = pr({
-    url: 'https://Bitbucket.org/mattw_watson/repo/pull-requests/40/',
+    url: 'https://Bitbucket.org/x/repo/pull-requests/40/',
     number: 40,
     branch: 'feat/other',
   });
@@ -1485,7 +1485,7 @@ test('the run table no-mistakes injects does not put its first PR on the card', 
   // line naming our branch has no URL on it, so nothing ties the one URL to us.
   const home = [
     'runs[2]{id,branch,status,head,pr}:',
-    '  01KZ31SSP3F8GV2AH86S135JFW,feat/monitor-runs-and-sessions,completed,fab1881,"https://bitbucket.org/mattw_watson/repo/pull-requests/1"',
+    '  01KZ31SSP3F8GV2AH86S135JFW,feat/monitor-runs-and-sessions,completed,fab1881,"https://bitbucket.org/x/repo/pull-requests/1"',
     '  01KZ36ZR0MA0BDQ6DK12H6PSC8,feat/session-summaries-and-typecheck,running,d80b1c3,""',
   ].join('\n');
   const record = {
@@ -1496,7 +1496,7 @@ test('the run table no-mistakes injects does not put its first PR on the card', 
   assert.equal(sighting.number, 1, 'the transcript alone still reports it');
 
   const known = pr({
-    url: 'https://bitbucket.org/mattw_watson/repo/pull-requests/1',
+    url: 'https://bitbucket.org/x/repo/pull-requests/1',
     number: 1,
     branch: 'feat/monitor-runs-and-sessions',
   });
@@ -1513,7 +1513,7 @@ test('the run table no-mistakes injects does not put its first PR on the card', 
 // ------------------------------------------------- the pipeline's own agent
 
 /** Where no-mistakes actually puts a run's worktree, verbatim in shape. */
-const AGENT_CWD = '/Users/mattw/.no-mistakes/worktrees/aa033f35a573/01KZ31SSP3F8GV2AH86S135JFW';
+const AGENT_CWD = '/Users/x/.no-mistakes/worktrees/aa033f35a573/01KZ31SSP3F8GV2AH86S135JFW';
 const agentRun = (over = {}) =>
   run({ runId: '01KZ31SSP3F8GV2AH86S135JFW', repoPath: '/Users/x/work/repo', ...over });
 

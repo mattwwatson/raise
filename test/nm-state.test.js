@@ -179,7 +179,7 @@ test('the degraded parser returns null for output it does not understand', () =>
 
 test('pullRequestNumber reads the number off both hosts', () => {
   assert.equal(
-    pullRequestNumber('https://bitbucket.org/mattw_watson/hexbattle/pull-requests/39'),
+    pullRequestNumber('https://bitbucket.org/x/tidepool/pull-requests/39'),
     39,
   );
   assert.equal(pullRequestNumber('https://github.com/mattwwatson/firstmate/pull/22'), 22);

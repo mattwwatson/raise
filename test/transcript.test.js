@@ -101,7 +101,7 @@ test('describeToolUse prefers the description Bash was given', () => {
 test('describeToolUse skips leading environment assignments', () => {
   // `FOO=1 npm test` is running npm, not running FOO.
   assert.equal(
-    describeToolUse({ name: 'Bash', input: { command: 'MOROKU_ENV=test npm run ci' } }),
+    describeToolUse({ name: 'Bash', input: { command: 'APP_ENV=test npm run ci' } }),
     'Running npm',
   );
 });
@@ -335,15 +335,15 @@ test('a PR the session opened is found, with the state printed beside it', () =>
           {
             type: 'tool_result',
             content:
-              'PR #40: https://bitbucket.org/mattw_watson/hexbattle/pull-requests/40\nstate=OPEN title=HXB-63',
+              'PR #40: https://bitbucket.org/x/tidepool/pull-requests/40\nstate=OPEN title=TDP-63',
           },
         ],
       },
     },
   ]);
-  assert.equal(found.url, 'https://bitbucket.org/mattw_watson/hexbattle/pull-requests/40');
+  assert.equal(found.url, 'https://bitbucket.org/x/tidepool/pull-requests/40');
   assert.equal(found.number, 40);
-  assert.equal(found.slug, 'hexbattle');
+  assert.equal(found.slug, 'tidepool');
   assert.equal(found.state, 'open');
   assert.equal(found.observedAt, Date.parse('2026-08-03T03:27:57.000Z'));
 });
@@ -402,11 +402,11 @@ test('a table of past runs is a listing, not a sighting', () => {
   // URL out of that put an unrelated PR from another branch on the card - the
   // exact "confident link to the wrong review" this must never do.
   const table = [
-    'repo: /Users/mattw/work/hexbattle',
-    'current_branch: HXB-63-front-of-house',
+    'repo: /Users/x/work/tidepool',
+    'current_branch: TDP-63-front-of-house',
     'runs[10]{id,branch,status,head,pr}:',
-    '  "01KYS2X5M2TF78NE5DAQ6TXPRK",HXB-58-last-player-standing-wins,completed,6b37f6e1,"https://bitbucket.org/mattw_watson/hexbattle/pull-requests/36"',
-    '  "01KYRQTXT5K0CV7Q8N",HXB-57-netgame-fog-unwired,completed,aa11bb22,"https://bitbucket.org/mattw_watson/hexbattle/pull-requests/34"',
+    '  "01KYS2X5M2TF78NE5DAQ6TXPRK",TDP-58-last-player-standing-wins,completed,6b37f6e1,"https://bitbucket.org/x/tidepool/pull-requests/36"',
+    '  "01KYRQTXT5K0CV7Q8N",TDP-57-netgame-fog-unwired,completed,aa11bb22,"https://bitbucket.org/x/tidepool/pull-requests/34"',
   ].join('\n');
   const records = [
     {
@@ -415,18 +415,18 @@ test('a table of past runs is a listing, not a sighting', () => {
       message: { content: [{ type: 'text', text: table }] },
     },
   ];
-  assert.equal(pullRequestFromRecords(records, 'HXB-63-front-of-house'), null);
+  assert.equal(pullRequestFromRecords(records, 'TDP-63-front-of-house'), null);
 });
 
 test('but a row of that table for our own branch is exactly the answer', () => {
   const table = [
     'runs[2]{id,branch,status,head,pr}:',
-    '  "01A",HXB-58-last-player-standing-wins,completed,6b37f6e1,"https://bitbucket.org/x/hexbattle/pull-requests/36"',
-    '  "01B",HXB-63-front-of-house,completed,cc33dd44,"https://bitbucket.org/x/hexbattle/pull-requests/40"',
+    '  "01A",TDP-58-last-player-standing-wins,completed,6b37f6e1,"https://bitbucket.org/x/tidepool/pull-requests/36"',
+    '  "01B",TDP-63-front-of-house,completed,cc33dd44,"https://bitbucket.org/x/tidepool/pull-requests/40"',
   ].join('\n');
   const found = pullRequestFromRecords(
     [{ type: 'user', timestamp: '2026-08-03T05:27:47.000Z', message: { content: [{ type: 'text', text: table }] } }],
-    'HXB-63-front-of-house',
+    'TDP-63-front-of-house',
   );
   assert.equal(found.number, 40);
 });
@@ -442,13 +442,13 @@ test('a lone pull request in a record is taken even with no branch named', () =>
           content: [
             {
               type: 'tool_result',
-              content: 'PR #40: https://bitbucket.org/x/hexbattle/pull-requests/40\nstate=OPEN title=HXB-63',
+              content: 'PR #40: https://bitbucket.org/x/tidepool/pull-requests/40\nstate=OPEN title=TDP-63',
             },
           ],
         },
       },
     ],
-    'HXB-63-front-of-house',
+    'TDP-63-front-of-house',
   );
   assert.equal(found.number, 40);
   assert.equal(found.state, 'open');

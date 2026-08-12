@@ -133,8 +133,27 @@ function probablePort() {
   }
 }
 
+/**
+ * The installed package's version, for `raise --version`.
+ *
+ * Read from disk rather than baked in at build time, because there is no build
+ * step and a constant here would be a second place to remember on every release
+ * - which is exactly how a version string starts lying. npm always ships
+ * `package.json`, whatever `files` says, so this resolves in an installed
+ * package as well as in a checkout.
+ */
+function packageVersion() {
+  try {
+    return JSON.parse(readFileSync(resolve(HERE, '..', 'package.json'), 'utf8')).version;
+  } catch {
+    // Nothing is worth crashing over here, and a wrong number would be worse
+    // than an honest refusal to guess.
+    return 'unknown';
+  }
+}
+
 function usage() {
-  return `${bold('Raise')} - watch every no-mistakes run and agent session on this machine
+  return `${bold('Raise')} - every agent session on this machine, and which one is waiting for you
 
 ${bold('Usage')}
   raise serve              start the monitor and print the dashboard URL
@@ -156,6 +175,7 @@ ${bold('Options')}
                            ~/.pi/agent/settings.json, ~/.codex/hooks.json)
   --dry-run                show what would change, write nothing
   --yes                    do not ask for confirmation
+  --version, -V            print the version and exit
 `;
 }
 
@@ -726,11 +746,17 @@ async function cmdDoctor() {
   // nothing to act on. Distinct from `warn`, which always has a next step.
   const off = (name, detail) => checks.push({ state: 'off', name, detail });
 
+  // 22.13, not 22.5, and the gap between them is the whole reason this check exists.
+  // `node:sqlite` landed in 22.5 but stayed behind `--experimental-sqlite` until
+  // 22.13.0, and nothing here passes flags - so every version in between imports
+  // `src/nm-state.js` and dies. `engines` says 22.13; a doctor saying 22.5 reported
+  // green on a Node that `npm install` refuses and this tool cannot run on, which is
+  // the one thing it must never do. Keep this in step with `engines` in package.json.
   const [major, minor] = process.versions.node.split('.').map(Number);
-  if (major > 22 || (major === 22 && minor >= 5)) {
+  if (major > 22 || (major === 22 && minor >= 13)) {
     ok('Node', `v${process.versions.node}`);
   } else {
-    bad('Node', `v${process.versions.node} - Raise needs 22.5 or newer for the built-in SQLite support`);
+    bad('Node', `v${process.versions.node} - Raise needs 22.13 or newer, where the built-in SQLite support stopped needing a command-line flag`);
   }
 
   // no-mistakes is optional, so its absence is reported rather than failed. A
@@ -894,7 +920,14 @@ async function cmdDoctor() {
 // --------------------------------------------------------------------- entry
 
 async function main() {
-  const { command, flags, positional, wantsHelp } = parseArgv(process.argv.slice(2));
+  const { command, flags, positional, wantsHelp, wantsVersion } = parseArgv(process.argv.slice(2));
+
+  // Before help, because it is the narrower request: somebody typing both wants
+  // the number, and the help text is one flag away either way.
+  if (wantsVersion) {
+    console.log(packageVersion());
+    return;
+  }
 
   if (wantsHelp) {
     console.log(usage());

@@ -17,6 +17,12 @@ export function parseArgv(argv) {
     flags,
     positional,
     wantsHelp: Boolean(flags.help || flags.h) || rawCommand === 'help',
+    // The first thing a bug report has to establish is which version is running,
+    // and until this was published there was nobody to ask. `-V` rather than `-v`
+    // because a lowercase one reads as verbose to most people, and answering the
+    // wrong question quietly is the failure mode this whole codebase is built
+    // against - even here.
+    wantsVersion: Boolean(flags.version || flags.V) || rawCommand === 'version',
   };
 }
 

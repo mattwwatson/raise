@@ -93,8 +93,14 @@ genuinely stay closed.
 - Coverage via `node --test --experimental-test-coverage`.
 
 The constraint is deliberate: this has to keep working across Node and no-mistakes upgrades
-with no maintenance, and it installs by `git clone` + `npm link` with nothing to fetch at
-runtime.
+with no maintenance, and `npm install -g raise-cli` fetches one package with nothing under it -
+so the install is the tarball and there is no tree of somebody else's code to audit or to break.
+
+**`npx` is not an install and the README says so.** `install-hooks` writes the absolute path of
+`hooks/raise-hook.js` into the user's agent settings, and `bin/raise.js` resolves that path
+relative to the package - correct for a global install, and pointing into npm's temporary cache
+under `npx`. When that cache is cleaned the hooks reference nothing, every session stops
+reporting, and the page stays up looking healthy. Do not offer `npx` as a shortcut anywhere.
 
 ## Architecture
 

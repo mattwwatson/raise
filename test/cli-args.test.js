@@ -43,6 +43,26 @@ test('a leading flag is parsed as a flag, not eaten as the command', () => {
   assert.equal(parseArgv(['help']).wantsHelp, true);
 });
 
+test('the version is asked for by flag, short flag or bare word', () => {
+  for (const argv of [['--version'], ['-V'], ['version']]) {
+    assert.equal(parseArgv(argv).wantsVersion, true, `${argv} should ask for the version`);
+  }
+});
+
+test('a lowercase -v is not the version flag', () => {
+  // Deliberate: `-v` reads as verbose to most people, so it is left unclaimed
+  // rather than quietly answering a question that was not asked.
+  assert.equal(parseArgv(['-v']).wantsVersion, false);
+});
+
+test('nothing else asks for the version, help included', () => {
+  // `wantsVersion` short-circuits the whole CLI before any command runs, so a
+  // false positive here would make `raise serve` print a number and exit.
+  for (const argv of [[], ['serve'], ['--help'], ['status'], ['--port', '8080']]) {
+    assert.equal(parseArgv(argv).wantsVersion, false, `${argv} must not ask for the version`);
+  }
+});
+
 test('a leading option with a value still runs the default command', () => {
   const { command, flags } = parseArgv(['--port', '8080']);
   assert.equal(command, 'serve');

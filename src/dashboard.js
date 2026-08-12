@@ -888,7 +888,7 @@ export function buildRows({
   }
 
   // The pipeline's own sessions are folded into the row of the repo they are
-  // working on, never given one of their own: two `hexbattle` rows, one of
+  // working on, never given one of their own: two `tidepool` rows, one of
   // which you cannot act on, is worse than one row that says what the pipeline
   // is up to. They are pulled out first so the loop below never sees them.
   /** @type {Map<string, Agent>} */

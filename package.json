@@ -3,6 +3,24 @@
   "version": "0.1.0",
   "description": "One page that shows every agent session on your machine - Claude Code, Claude Desktop, pi and Codex - tells you which one is waiting for you, and jumps to that window when you click it.",
   "type": "module",
+  "keywords": [
+    "claude-code",
+    "codex",
+    "dashboard",
+    "agent",
+    "monitor",
+    "tmux",
+    "cli"
+  ],
+  "homepage": "https://github.com/mattwwatson/raise#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mattwwatson/raise.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mattwwatson/raise/issues"
+  },
+  "author": "Matthew Watson",
   "bin": {
     "raise": "bin/raise.js"
   },
@@ -17,7 +35,8 @@
     "tasks": "node scripts/tasks.js board",
     "tasks:links": "node scripts/tasks.js links",
     "tasks:gate": "node scripts/tasks.js gate",
-    "tasks:validate": "node scripts/tasks.js validate"
+    "tasks:validate": "node scripts/tasks.js validate",
+    "prepublishOnly": "npm run lint && npm test && npm run typecheck"
   },
   "files": [
     "bin/",

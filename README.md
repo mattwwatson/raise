@@ -37,9 +37,23 @@ below that names another tool is optional, and [says so](#optional-signals).
 ## Install
 
 ```sh
-git clone git@bitbucket.org:mattw_watson/raise.git
+npm install -g raise-cli
+raise install-hooks
+raise serve
+```
+
+**Install it globally rather than reaching for `npx`.** `install-hooks` writes the absolute
+path of Raise's hook script into your agent's settings, and under `npx` that path points into
+a temporary cache that npm later deletes. Your sessions then stop reporting while the page
+carries on looking healthy - which is the one failure this tool exists to prevent, caused by
+installing it. There is no warning when it happens, because nothing is left to warn you.
+
+Or from a checkout, which is what you want if you intend to change anything:
+
+```sh
+git clone https://github.com/mattwwatson/raise.git
 cd raise
-npm link          # optional, puts `raise` on your PATH
+npm link          # puts `raise` on your PATH, pointing at the checkout
 raise install-hooks
 raise serve
 ```

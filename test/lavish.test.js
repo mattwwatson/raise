@@ -7,8 +7,8 @@ import { parseLavishSessions, LavishState, REFRESH_MS } from '../src/lavish.js';
 // top-level key that has to terminate it.
 const OUTPUT = `bin: /opt/homebrew/bin/lavish-axi
 sessions[2]{file,status,url,pending_prompts}:
-  /Users/x/.treehouse/hexbattle/2/.lavish/terrain.html,open,"http://127.0.0.1:4387/session/9274f6d4",0
-  /Users/x/work/hexbattle/.lavish/profile.html,open,"http://127.0.0.1:4387/session/c2ce72dc",2
+  /Users/x/.treehouse/tidepool/2/.lavish/terrain.html,open,"http://127.0.0.1:4387/session/9274f6d4",0
+  /Users/x/work/tidepool/.lavish/profile.html,open,"http://127.0.0.1:4387/session/c2ce72dc",2
 playbooks[7]{id,use_when}:
   diagram,"Map relationships"
 `;
@@ -17,7 +17,7 @@ test('parseLavishSessions reads the sessions block and stops at the next key', (
   const sessions = parseLavishSessions(OUTPUT);
   assert.equal(sessions.length, 2);
   assert.deepEqual(sessions[0], {
-    file: '/Users/x/.treehouse/hexbattle/2/.lavish/terrain.html',
+    file: '/Users/x/.treehouse/tidepool/2/.lavish/terrain.html',
     status: 'open',
     url: 'http://127.0.0.1:4387/session/9274f6d4',
     pendingPrompts: 0,
@@ -67,11 +67,11 @@ test('urlFor returns null on the first ask and the link once the refresh lands',
   const calls = [];
   const lavish = new LavishState({ execAsync: execReturning(OUTPUT, calls) });
 
-  assert.equal(lavish.urlFor('/Users/x/work/hexbattle/.lavish/profile.html', 1000), null);
+  assert.equal(lavish.urlFor('/Users/x/work/tidepool/.lavish/profile.html', 1000), null);
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(calls, [['lavish-axi']]);
   assert.equal(
-    lavish.urlFor('/Users/x/work/hexbattle/.lavish/profile.html', 1000),
+    lavish.urlFor('/Users/x/work/tidepool/.lavish/profile.html', 1000),
     'http://127.0.0.1:4387/session/c2ce72dc',
   );
 });

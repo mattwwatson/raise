@@ -602,7 +602,7 @@ test('itermFocusByTitleScript matches on the tail and refuses to guess', () => {
 });
 
 test('focusSession finds a control mode pane by title, not by the client tty', async () => {
-  // The reported bug end to end: clicking a moroku-skills row focused the tab
+  // The reported bug end to end: clicking a tidepool row focused the tab
   // running `tmux -CC new -s firstmate` instead.
   const exec = fakeExec({
     'list-panes': '%289\t$0\t@0\t1\tfirstmate',
