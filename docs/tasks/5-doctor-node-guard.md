@@ -97,8 +97,9 @@ makes a modern Node behave like 22.9 in the two ways that matter:
 
 - `Object.defineProperty(process.versions, 'node', { value: '22.9.0' })`, so the guard sees an
   unsupported version.
-- A `module.register` resolve hook that throws `ERR_UNKNOWN_BUILTIN_MODULE` for `node:sqlite`,
-  which is what 22.5 through 22.12 do to that specifier.
+- A registered resolve hook that throws `ERR_UNKNOWN_BUILTIN_MODULE` for `node:sqlite`, which is
+  what 22.5 through 22.12 do to that specifier. Which of Node's two registration APIs it goes
+  through is a detail the fixture's own header owns - see the tidy-up note at the end of this file.
 
 **The harness proves itself before it proves anything else.** One test spawns
 `test/fixtures/imports-sqlite.mjs` under the same harness and asserts it dies with
@@ -172,11 +173,11 @@ AssertionError: the version guard has fallen back behind a static import of node
   actual: "Error: No such built-in module: node:sqlite ... ERR_UNKNOWN_BUILTIN_MODULE"
 ```
 
-The fourth test in that file is the other side of the control: `raise --version` on the Node
+The last test in that file is the other side of the control: `raise --version` on the Node
 actually running the suite must exit 0. Without it, a guard that refused *every* version would
 satisfy everything above it.
 
-Thirteen tests were added, 799 to 812.
+Thirteen tests were added, 806 to 819.
 
 ### Two findings from the pipeline review, both taken
 
@@ -200,7 +201,7 @@ comment beside each says which reasoning applies.
 **The reproduction spawned the entry point with no arguments** while being named for `raise
 doctor`, which is also what the acceptance criterion above says. The guard fires before argv is
 parsed, so it was not a false pass - but a test exercising something adjacent to its own title is
-one nobody can check. It now passes `doctor`, and a fifth test runs the guard through a real
+one nobody can check. It now passes `doctor`, and a further test runs the guard through a real
 shell pipeline, since `execFile` gives the child a pipe but `raise doctor | tee` is what a user
 types.
 
