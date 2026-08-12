@@ -165,10 +165,14 @@ loose document.
 
 ## Working on an item
 
-1. **Assign the issue to yourself when you pick it up.** That is the whole of "in progress" on
-   the tracker - there is no workflow state to move through, and inventing a label taxonomy to
-   simulate one would be two records of the same fact. The spec's `status: in-progress` is the
-   authoritative copy; the assignment is what makes it visible on the board.
+1. **Move the item to In Progress on the board when you pick it up** - before the branch,
+   before the spec edit, first thing. The board's Status field runs Todo → In Progress → In
+   Review → Done, and this is the **only** one of those transitions a human has to make: the
+   other two are project workflows keyed off a linked pull request (step 6). GitHub has no
+   signal for *somebody started*, so an item left in Todo is indistinguishable from one nobody
+   has touched. Assign the issue to yourself in the same pass - the status says the work is
+   live, the assignee says whose it is. The spec's `status: in-progress` is the authoritative
+   copy on disk; do not invent a label taxonomy on top of either.
 2. **Branch off `main` as `<ISSUE>-<short-name>`** - e.g. `23-stale-page-code`.
 
    GitHub links a branch to its issue from the **pull request**, not from the branch name, so
@@ -190,16 +194,20 @@ loose document.
    page loaded with`. The no-mistakes pipeline generates its own subjects
    (`no-mistakes(review): …`) which will not carry it - that is fine, because the pull request
    is what links the work to the issue.
-6. **Put `Closes #23` in the pull request description.** This is what closes the issue on
-   merge, and it is the one piece of automation in the whole workflow. Without it the issue
-   stays open over merged work, which is the tracker and `main` telling different stories.
+6. **Put `Closes #23` in the pull request description.** It is what *links* the pull request to
+   the issue, and that link is what the rest of the automation runs on: the item moves itself
+   to In Review when the pull request is linked and to Done when it merges, and the issue
+   closes with it. A plain `#23` with no keyword is not a link - it reads the same to a person
+   and does nothing. (Linking the issue from the pull request's Development panel works too,
+   but the keyword is the one that survives being written down.)
 
    > **The pipeline writes the pull request body itself, so this line does not survive
    > `git push no-mistakes`.** Issue 9 shipped in a merged pull request and stayed open,
-   > because nothing put a closing keyword in a body `no-mistakes` had authored. Either add it
-   > to the body afterwards with `gh pr edit --body`, or close the issue by hand and say which
-   > pull request shipped it. Check after merging; the failure is silent and looks exactly like
-   > an item nobody finished.
+   > because nothing put a closing keyword in a body `no-mistakes` had authored; issue 15 did
+   > the same and sat in Todo through its own shipping. Either add it to the body afterwards
+   > with `gh pr edit --body`, or close the issue by hand and say which pull request shipped
+   > it - closing by hand does land the item in Done. Check after merging; the failure is
+   > silent and looks exactly like an item nobody finished.
 7. **In the PR, set the spec's `status: shipped` and `shipped: <date>`**, and add the
    `## Implementation notes` section. Merging closes the issue; only the PR can set the file.
 
