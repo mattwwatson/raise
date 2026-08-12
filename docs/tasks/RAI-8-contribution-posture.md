@@ -21,7 +21,8 @@ which records the shape once for all three.
 ## The bar, and why it is that bar
 
 A new terminal is **one entry in `src/focus/terminals.js`** - a `name`, a `label`, an optional
-`termProgram`, an `isAvailable` and a `focus`. That is the whole `Terminal` interface. The
+`termProgram`, an `isAvailable`, a `focus`, and an optional `focusByTitle` that a terminal
+hosting tmux in control mode needs. That is the whole `Terminal` interface. The
 architecture was shaped for this, so the bar can afford to be specific:
 
 1. **The entry, and nothing else in the codebase moves.** If adding a terminal needs a change

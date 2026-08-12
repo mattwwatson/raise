@@ -263,11 +263,16 @@ with `bin: { raise: ... }`, because `raise` is squatted on npm.
 
 Outstanding:
 
-- Publish to npm so install is `npx raise-cli serve` rather than a Bitbucket clone. The clone
-  URL in the README is deliberately unchanged until then - the git repository is not being
-  renamed here, and guessing at a future URL is worse than an outdated one.
-- New public GitHub repo. Decide whether to carry the git history across - it is good history
-  and the commit messages are readable, but check it for anything repo-private first.
+- Publish to npm so install is `npx raise-cli serve` rather than a Bitbucket clone. The
+  Bitbucket repository has since been renamed and the README clones
+  `git@bitbucket.org:mattw_watson/raise.git`; RAI-6 found the old name broken rather than merely
+  stale. It stays on Bitbucket until the move, because an install command that does not work is
+  worse than one naming a host we are leaving.
+- The move itself. `github.com/mattwwatson/raise` already exists, is public and has private
+  vulnerability reporting enabled, so what remains is pushing the code there, publishing to npm
+  and retiring Bitbucket. Decide whether to carry the git history across - it is good history
+  and the commit messages are readable, but check it for anything repo-private first. RAI-5
+  carries the detail in two comments.
 
 ---
 
