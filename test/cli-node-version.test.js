@@ -31,6 +31,29 @@ const HARNESS = join(HERE, 'fixtures', 'old-node.mjs');
 const IMPORTS_SQLITE = join(HERE, 'fixtures', 'imports-sqlite.mjs');
 
 /**
+ * The environment every spawn in this file gets, and it belongs to the file
+ * rather than to one helper.
+ *
+ * The CLI must not read the developer's own installation, and `doctor` reaches
+ * for every one of these. A directory that does not exist is the honest answer
+ * for all of them - nothing is installed on a machine this old, which is the
+ * situation being reported on. It is shared because the isolation is needed
+ * exactly when the guard has regressed: a spawn that reaches `cmdDoctor` for
+ * real probes `lavish-axi`, `tmux`, every terminal's `isAvailable`, the default
+ * port and the real pi and Codex settings paths. So the one test that would
+ * catch the regression is the one test that must not be pointed at the machine,
+ * and two copies of that reasoning is how one of them loses it.
+ */
+const SCRATCH_ENV = {
+  ...process.env,
+  RAISE_HOME: join(HERE, 'no-such-raise-home'),
+  NM_HOME: join(HERE, 'no-such-nm-home'),
+  CLAUDE_CONFIG_DIR: join(HERE, 'no-such-claude-home'),
+  PI_CODING_AGENT_DIR: join(HERE, 'no-such-pi-home'),
+  CODEX_HOME: join(HERE, 'no-such-codex-home'),
+};
+
+/**
  * Run a script under the old-Node harness and report what the user would see.
  *
  * Deliberately not `promisify(execFile)`: a non-zero exit is the expected result
@@ -46,20 +69,7 @@ function runOnOldNode(script, args = []) {
     execFile(
       process.execPath,
       ['--import', HARNESS, script, ...args],
-      // The CLI must not read the developer's own installation, and `doctor`
-      // reaches for every one of these. A directory that does not exist is the
-      // honest answer for all of them - nothing is installed on a machine this
-      // old, which is the situation being reported on.
-      {
-        env: {
-          ...process.env,
-          RAISE_HOME: join(HERE, 'no-such-raise-home'),
-          NM_HOME: join(HERE, 'no-such-nm-home'),
-          CLAUDE_CONFIG_DIR: join(HERE, 'no-such-claude-home'),
-          PI_CODING_AGENT_DIR: join(HERE, 'no-such-pi-home'),
-          CODEX_HOME: join(HERE, 'no-such-codex-home'),
-        },
-      },
+      { env: SCRATCH_ENV },
       (error, stdout, stderr) => resolve({ code: error?.code ?? 0, stdout, stderr }),
     );
   });
@@ -110,10 +120,16 @@ test('the refusal survives a piped stdout, which is where process.exit() loses i
   // bytes fit, so this passes either way today and is not a reproduction - it
   // pins the guarantee at the boundary that matters, since `execFile` above
   // gives the child a pipe but a shell pipeline is what a user actually types.
+  //
+  // The three paths are positional arguments to `sh`, never interpolated into
+  // the script: inside double quotes a `$`, a backtick or a backslash is still
+  // the shell's, so a checkout under such a path would fail with a shell error
+  // dressed as a Raise one.
   const { stdout } = await new Promise((resolve) => {
     execFile(
       'sh',
-      ['-c', `"${process.execPath}" --import "${HARNESS}" "${CLI}" doctor | cat`],
+      ['-c', '"$0" --import "$1" "$2" doctor | cat', process.execPath, HARNESS, CLI],
+      { env: SCRATCH_ENV },
       (error, out) => resolve({ stdout: out }),
     );
   });
@@ -125,7 +141,7 @@ test('a supported Node reaches the CLI, so the guard is not simply refusing ever
   // this proves it does not fire on the Node actually running the suite. Without
   // it a guard that refused every version would pass everything above.
   const { code, stdout } = await new Promise((resolve) => {
-    execFile(process.execPath, [CLI, '--version'], (error, out) =>
+    execFile(process.execPath, [CLI, '--version'], { env: SCRATCH_ENV }, (error, out) =>
       resolve({ code: error?.code ?? 0, stdout: out }),
     );
   });
