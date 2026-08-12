@@ -503,6 +503,15 @@
        * told apart from the branch beside it. It gives before the repo does:
        * `.repo` is nowrap with no `min-width`, so a long name ellipsises itself
        * rather than squeezing the thing you scan by.
+       *
+       * `.meta` was never an option for it, on layout as well as on meaning:
+       * that side is `flex: none` with no ellipsis, so a long name put there
+       * would take the width it wanted and squeeze line 1 instead of giving.
+       *
+       * It never replaces `.summary`, which stays on its own line beneath. The
+       * two answer different questions - what you meant the session for, and
+       * what it turned out to be doing - and on a long session they drift apart,
+       * which is itself worth seeing.
        */
       .name {
         font-size: 12.5px;

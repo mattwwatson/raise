@@ -196,7 +196,7 @@ The issue body's "1743 lines / ~103 headlines" is from an earlier draft and is t
 distrust. Result: **1793 lines to 714**, a 60% cut, and roughly 33k tokens to ~13k.
 
 **714 rather than the ~620 the brief estimated, and the difference is all index.** The estimate
-assumed ~45 index rows; there are 85. Rows were split wherever one row would have covered two
+assumed ~45 index rows; there are 83. Rows were split wherever one row would have covered two
 headlines, because the acceptance test is that a reviewer can pick any headline and find where
 it went - a coarser index passes the line count and fails the walk. Nothing was retained for
 length: every section the brief said to keep whole is byte-identical, and the assembly was done
@@ -221,7 +221,8 @@ is what the acceptance criterion about reading it cold actually tests.
 
 ### What the modules gained
 
-Nine edits, each a rule that was demonstrably in `AGENTS.md` and nowhere else:
+Ten edits, each a rule that was demonstrably in `AGENTS.md` and nowhere else. The last of them
+was found in review rather than on the first pass, which is the walk doing its job:
 
 | File | Gained |
 | --- | --- |
@@ -234,6 +235,7 @@ Nine edits, each a rule that was demonstrably in `AGENTS.md` and nowhere else:
 | `src/pi-transcript.js` | pi's `/name` normalises onto `custom-title`, and why the `ai-title` rewrite was wrong |
 | `src/codex-transcript.js` | Codex writes no title of any kind, and `state_5.sqlite` is raw prompt text |
 | `src/focus/tmux.js` | control mode matched on pane title, the `missing value` tty, the intermittency, and no `-t` target ever being a session name |
+| `public/index.html` (`.name`) | why the name cannot go in `.meta` on layout as well as on meaning - that side is `flex: none` with no ellipsis - and that it never replaces `.summary`, because the two answer different questions and drift apart on a long session |
 
 ### The rule walk
 
@@ -255,7 +257,7 @@ line in the old file. "kept" means the section survived byte-identical.
 | 11 (250) | the keepalive is an SSE `event` | `src/server.js` header **(added)**, call site, `public/connection.js` |
 | 12 (257) | `server.json` is not the source of truth | `src/health.js` header |
 | 13 (262) | summary read from the transcript | `src/transcript.js` header |
-| 14 (268) | the name is identity, so line 1 | `AGENTS.md` § UI Rules (kept) |
+| 14 (268) | the name is identity, so line 1 | `public/index.html` (`.name`) + `src/dashboard.js` (`sessionName` in `buildRows`) |
 | 15 (281) | both names normalise onto `custom-title` | `src/pi-transcript.js` **(added)** |
 | 16 (286) | the name survives the 128KB tail | `src/transcript.js` `TAIL_BYTES` |
 | 17 (299) | the tool with no result yet | `src/transcript.js` header |
@@ -375,7 +377,13 @@ The compression alone would leave the file 1793 lines again by November, so:
 ### References corrected
 
 `CONTRIBUTING.md:7` said the reasoning was *in* *Design decisions worth knowing*; it now says
-that section is an index and the reasoning is in the headers. `scripts/task-github.js:31`
+that section is an index and the reasoning is in the headers. **`CONTRIBUTING.md:147` and
+`:153` in the old numbering are the same pointer gone false twice more**, and were missed on
+the first pass: one told a contributor the reasoning behind a ranking or state-frame decision
+is "written down in `AGENTS.md`", the other that `docs/tasks/` and `AGENTS.md` are "the two
+places to look". Both now name the owning module's header as where the reasoning is, with
+`AGENTS.md` as the index that says which module. What `CONTRIBUTING.md` *duplicates* from
+`AGENTS.md` is untouched - issue #6 owns that. `scripts/task-github.js:31`
 pointed at "the note in AGENTS.md" about there being no GitHub token path, which now lives in
 `src/forge-config.js`. `README.md:678` claimed `AGENTS.md` says what each `tasks*` command
 reports, which is the skill's job now. `src/registry.js` no longer cites `AGENTS.md` for a rule

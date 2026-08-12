@@ -33,9 +33,27 @@ const DOCS = ['AGENTS.md', 'CONTRIBUTING.md'];
  * The directories a path has to start with to be a claim about this repo.
  *
  * An allowlist, so prose mentioning `~/.claude/settings.json` or somebody
- * else's `state/.lock` is not read as a promise about our own tree.
+ * else's `state/.lock` is not read as a promise about our own tree. A `~/` path
+ * cannot reach it whatever the prefix says: `~` is outside the character class
+ * the extractor matches on, so the user's own settings files never become a
+ * claim about this repo.
+ *
+ * `.claude/` is in it for one pointer that matters more than most - the
+ * roadmap-workflow skill, which now owns everything cut from *Roadmap and task
+ * tracking* and which `AGENTS.md` tells every agent to load before touching
+ * `docs/tasks/`.
  */
-const OWNED = ['src/', 'bin/', 'hooks/', 'public/', 'test/', 'scripts/', 'docs/', '.github/'];
+const OWNED = [
+  'src/',
+  'bin/',
+  'hooks/',
+  'public/',
+  'test/',
+  'scripts/',
+  'docs/',
+  '.github/',
+  '.claude/',
+];
 
 /**
  * Every repo-relative path a document names.
