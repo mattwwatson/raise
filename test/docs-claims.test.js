@@ -1,5 +1,10 @@
 /**
- * Every source path the documentation names has to exist.
+ * Every claim the documentation makes about this repository has to be true.
+ *
+ * Two kinds of claim live here, both about the same three documents: a path
+ * that must exist, and an inventory that must match the thing it inventories.
+ *
+ * ## Paths
  *
  * `AGENTS.md` is now mostly an *index*: one row per decision, naming the file
  * whose own header carries the reasoning. That is only worth having if a
@@ -15,6 +20,30 @@
  * `README.md` is covered for the same reason and not as an afterthought: it is
  * the document a stranger reads first, and the split left it naming a file
  * nothing else does - the roadmap-workflow skill.
+ *
+ * ## Inventories
+ *
+ * `CONTRIBUTING.md` restates several bars that `AGENTS.md` owns - the three
+ * devDependencies, the `REPORTABLE_FIELDS` boundary, the
+ * no-synchronous-child-process rule, the terminal-adapter conditions. **That
+ * duplication is deliberate and stays**: the document exists to state a
+ * self-contained bar for somebody who has *not* read `AGENTS.md`, and replacing
+ * a bullet with a pointer into a 120KB file would send them there to find out
+ * whether their patch will land. See
+ * [docs/tasks/6-contributing-drift.md](../docs/tasks/6-contributing-drift.md).
+ *
+ * The risk it carries is one-sided: when one side moves, the copy that goes
+ * stale is the one whose only reader is the person who never sees both. So the
+ * goal is drift that is **detectable**, not drift that is impossible - and only
+ * one of those four items can honestly be pinned, the devDependency list, which
+ * is enumerable. The other three are prose that is allowed to be reworded, and a
+ * string match on a paragraph would fail when somebody improves a sentence,
+ * which is how a check gets learned-around rather than fixed.
+ *
+ * `REPORTABLE_FIELDS` is the one worth re-checking if that copy changes: its
+ * contents *are* enumerable from `src/hook-payload.js`, so the moment
+ * `CONTRIBUTING.md` names the fields rather than describing the rule, this same
+ * test shape applies to it. Today it names only the constant.
  *
  * Deliberately real files rather than a fake tree, unlike most tests here. The
  * claim under test is about this repository's actual contents, so a fake
@@ -116,6 +145,102 @@ for (const doc of DOCS) {
     );
   });
 }
+
+/**
+ * An npm package name, and nothing that merely sits in backticks beside one.
+ *
+ * `npm run typecheck` shares the sentence and contains spaces, so it fails this
+ * without needing an exemption list - which is the point: an exemption list is a
+ * second inventory to keep in step, and this file exists because inventories
+ * drift.
+ */
+const PACKAGE_NAME = /^(?:@[a-z0-9-][a-z0-9-._]*\/)?[a-z0-9-][a-z0-9-._]*$/;
+
+/**
+ * The devDependencies a document names, from the bullet that enumerates them.
+ *
+ * Written to fail when the lists genuinely disagree and not when somebody
+ * rewords the paragraph around them, because a check that fires on an improved
+ * sentence is one the next person learns to ignore. Three things do that
+ * separating:
+ *
+ * 1. The bullet is found by its **bold lead-in mentioning devDependency**,
+ *    never by position and never by matching the sentence itself.
+ * 2. Only the **enumerating sentence** is read - the bullet up to its first
+ *    sentence end. What follows is about formatters and bundlers and may say
+ *    anything, including naming a package as an example.
+ * 3. Only **package-shaped backticked tokens** count, per `PACKAGE_NAME`.
+ *
+ * Returns null when the anchor is not there, which the caller must fail on:
+ * a parser that quietly finds nothing is a green tick over an unread document,
+ * which is this project's own failure mode wearing a passing test.
+ *
+ * @param {string} text
+ * @returns {string[]|null} names as written, or null if the bullet is gone
+ */
+export function devDependenciesNamedIn(text) {
+  const lines = text.split('\n');
+  const start = lines.findIndex((line) => /^[-*] \*\*[^*]*devDependenc[^*]*\*\*/i.test(line));
+  if (start === -1) return null;
+  // A bullet runs to the next list item or the next blank line; its
+  // continuation lines are indented, which is what this repo's markdown does.
+  const bullet = [lines[start]];
+  for (const line of lines.slice(start + 1)) {
+    if (!/^\s+\S/.test(line)) break;
+    bullet.push(line.trim());
+  }
+  const body = bullet.join(' ').replace(/^[-*] \*\*[^*]*\*\*/, '');
+  // The lead-in ends in a full stop of its own, so it is stripped before the
+  // sentence split rather than counted as the first sentence.
+  const sentence = body.split(/(?<=\.)\s+(?=[A-Z])/)[0];
+  return [...sentence.matchAll(/`([^`]+)`/g)]
+    .map((match) => match[1])
+    .filter((token) => PACKAGE_NAME.test(token));
+}
+
+test('devDependenciesNamedIn reads the enumerating sentence and nothing after it', () => {
+  const text = [
+    '- **A runtime dependency.** `dependencies` stays empty.',
+    '- **A fourth devDependency.** They are `typescript`, `@types/node` and `oxlint`, for',
+    '  `npm run typecheck` and `npm run lint`. A formatter such as `prettier` needs raising',
+    '  in an issue first.',
+    '',
+    'Some later paragraph naming `oxlint` again.',
+  ].join('\n');
+  assert.deepEqual(devDependenciesNamedIn(text), ['typescript', '@types/node', 'oxlint']);
+});
+
+test('devDependenciesNamedIn survives the prose around the list being rewritten', () => {
+  const text = [
+    '- **We will not take a fourth devDependency, and here is why.** The list is',
+    '  `typescript`, `@types/node` and `oxlint` - nothing else, ever. Raise it in an issue.',
+  ].join('\n');
+  assert.deepEqual(devDependenciesNamedIn(text), ['typescript', '@types/node', 'oxlint']);
+});
+
+test('devDependenciesNamedIn returns null when the bullet it anchors on is gone', () => {
+  assert.equal(devDependenciesNamedIn('- **A runtime dependency.** `dependencies` is empty.'), null);
+});
+
+test('CONTRIBUTING.md names exactly the devDependencies package.json has', () => {
+  const named = devDependenciesNamedIn(readFileSync(join(ROOT, 'CONTRIBUTING.md'), 'utf8'));
+  assert.ok(
+    named,
+    'CONTRIBUTING.md has no bullet whose bold lead-in mentions devDependency - the check ' +
+      'above cannot find the list it is meant to be pinning, and needs re-anchoring rather ' +
+      'than deleting',
+  );
+  const actual = Object.keys(
+    JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).devDependencies,
+  );
+  assert.deepEqual(
+    [...named].sort(),
+    [...actual].sort(),
+    `CONTRIBUTING.md says the devDependencies are ${named.join(', ')}; package.json has ` +
+      `${actual.join(', ')}. Both are meant to be the whole list - fix the document, or if ` +
+      'the fourth dependency was agreed, say so there too.',
+  );
+});
 
 test('AGENTS.md names a real file for every row of the decision index', () => {
   const text = readFileSync(join(ROOT, 'AGENTS.md'), 'utf8');
