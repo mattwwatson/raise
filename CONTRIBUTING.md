@@ -120,11 +120,19 @@ The pipeline opens the pull request for you and writes a `## Pipeline` section i
 pull request without that section fails the *"PR body carries the no-mistakes signature"* check.
 
 Two things worth saying plainly about that check, because a rule whose limits are hidden is one
-people resent. It reads the pull request body, so it is a **convention check and not proof** -
-it exists to stop somebody arriving three days into a change having never heard of the pipeline,
-not to catch anyone determined to route around it. And **it applies to the maintainer too**: the
-branch protection on `main` enforces required checks for administrators, so there is no path
-around this that is not also open to you.
+people resent.
+
+**It reads the pull request body, so it is a convention check and not proof.** It exists to stop
+somebody arriving three days into a change having never heard of the pipeline, not to catch
+anyone determined to route around it.
+
+**It is not a required check, so it does not block a merge.** It runs on every pull request and
+its result is visible, and that is all it does. The alternative was tried for about ten minutes
+and abandoned: requiring it makes a full pipeline run the price of correcting one stale sentence,
+and a rule that expensive is one people route around - which costs more than the case it catches.
+So the expectation is stated, checked and visible, and it is not enforced. The same applies to
+the maintainer, who follows it by choice rather than because something stops them; if that ever
+stops being true in practice, this paragraph is the thing that should change first.
 
 - **Node 22.13 or newer.** 22.13 is where `node:sqlite` stopped needing a flag.
 - **Reproduce a bug as a test first**, then fix what the test exposes. Tests are `node:test`
