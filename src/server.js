@@ -5,6 +5,36 @@
  * second poll of the no-mistakes database on the server side. Polling a local
  * SQLite file is effectively free, and far more stable than the daemon's
  * private socket protocol, which is undocumented and would break on upgrade.
+ *
+ * Three rules here are load-bearing for the one failure this product cares
+ * about most - a confident indicator over state that stopped updating - and
+ * each of them looks like something a later tidy-up would undo.
+ *
+ * **The keepalive is a named SSE `event`, never a comment.** See the timer in
+ * `start`, and `public/connection.js` for the other half. `EventSource` reports
+ * an error only once the connection actually *breaks*, and a connection can
+ * stop carrying data long before that - a suspended laptop, a frozen server, a
+ * dropped NAT entry. A comment keepalive holds the socket open and the browser
+ * discards it without telling the page, so in every one of those cases the
+ * dashboard sat on a green "live" dot over a snapshot that had stopped moving.
+ * Liveness is positive evidence, never the absence of an error. `KEEPALIVE_MS`,
+ * `POLL_INTERVAL_MS` and the page's `STALE_AFTER_MS` are tuned against each
+ * other: changing one alone is a change to when the page decides it has gone
+ * blind.
+ *
+ * **Nothing here may run a synchronous child process.** The loop polls on a one
+ * second timer, pushes a stream and answers hook posts bounded at two seconds;
+ * one blocking `spawnSync` stalls all three, and the dropped signal is the one
+ * you cared about. `server.test.js` injects an `exec` that fails the test if it
+ * is ever called - do not weaken that guard, nor the `fetch` beside it that
+ * proves an unconfigured Raise makes no outbound request at all.
+ *
+ * **A reading we did not get is not evidence**, which is why the `release` and
+ * `prune` calls in the poll are each guarded on a non-empty list rather than
+ * run unconditionally. An empty reading is also what a transient failure
+ * returns, and acting on one would scatter a parked run back across its repo
+ * permanently - a parked run has no live process left to be re-observed from.
+ * The reasoning is at both call sites.
  */
 
 import { createServer } from 'node:http';

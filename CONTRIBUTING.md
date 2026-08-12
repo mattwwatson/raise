@@ -4,9 +4,11 @@ Yes, contributions are welcome, and the answer was decided before publishing rat
 pressure afterwards. What follows is the bar, stated specifically enough that you can tell
 before you start whether a change will land.
 
-Read [AGENTS.md](AGENTS.md) first. It is the architecture, the conventions, and - in *Design
-decisions worth knowing* - the reasoning behind the decisions that are easy to undo by
-accident. Most review comments here would be quotations from it.
+Read [AGENTS.md](AGENTS.md) first. It is the architecture, the conventions, the invariants that
+span several modules, and - in *Design decisions worth knowing* - an index naming the file that
+owns each decision that is easy to undo by accident. The reasoning itself lives in those files'
+own header comments, so open the one you are changing. Most review comments here would be
+quotations from one or the other.
 
 ## The one thing to understand before changing anything
 

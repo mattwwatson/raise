@@ -14,6 +14,34 @@
  * weigh every attached client against those, choose one, and speak to tmux in
  * that client's session by id from then on. See chooseTmuxClient.
  *
+ * **Which of the true answers tmux gives varies with time, which is why the
+ * symptom is intermittent.** It hands back whichever session was most recently
+ * active: four panes that resolved to a parent session one afternoon resolved
+ * to the per-worker viewer an hour later, with nothing changed but that. A bug
+ * report saying "sometimes" is the expected shape of this one rather than a
+ * sign of something else.
+ *
+ * **Control mode (`tmux -CC`, which is how iTerm2 hosts tmux) breaks every
+ * assumption above and is matched on pane title instead of tty.** Each tmux
+ * window becomes a native iTerm2 tab the tmux client knows nothing about,
+ * iTerm2 reports `tty` as `missing value` for all of them, and the client's own
+ * tty belongs to the idle tab where `tmux -CC` was typed - so focusing that tty,
+ * which is correct for ordinary tmux, raised that one tab every single time.
+ * The title is the one handle both sides share, since iTerm2 names each tab
+ * after the tmux pane title. See `paneTitle` here, and `titleNeedle` in
+ * ./index.js for why the leading status glyph is stripped first. On a title
+ * collision Raise says so rather than raising an arbitrary window, and nothing
+ * is selected inside tmux: iTerm2 does not follow tmux's selection in control
+ * mode, so doing it anyway would move the user's active window for no visible
+ * reason.
+ *
+ * **No `-t` target is ever a session name.** Names are user data - a bell
+ * plugin renames sessions to `hv-sls-86-fb9d 🔔` on this machine, and
+ * `-t hv-sls-7` really does prefix-match it. Targets are ids (`$204:@349`,
+ * which cannot mis-split because tmux forbids `:` and `.` in a name), and the
+ * one name that reaches a human - the `tmux attach` hint - goes through
+ * `shellQuote`.
+ *
  * Every exec here is awaited: focusing is reachable from an HTTP handler, and
  * the server must never run a child process synchronously. See execAsync in
  * ../exec.js for why.

@@ -300,6 +300,16 @@ const TABLE_COUNT_QUERY = `SELECT count(*) AS n FROM sqlite_master WHERE type = 
  * replaces the database on update or migration, and a path cannot tell you that
  * happened.
  *
+ * That difference is a whole third case, and it is the quiet one. A *deleted*
+ * database at least announces itself eventually; a *replaced* one raises no
+ * error at all, because the read-only handle goes on answering every query
+ * happily against the unlinked inode. So `existsSync` sees a database that is
+ * there, the mode stays `sqlite`, and the previous file's runs are served as
+ * current for as long as the monitor runs - the deletion case's staleness,
+ * reached by the path the deletion case does not cover. `dev` and `ino`
+ * captured when the handle is opened and compared on each read close both for
+ * the price of the one `stat` the mode check already costs.
+ *
  * @typedef {object} DbFile
  * @property {number} dev
  * @property {number} ino
