@@ -4,14 +4,14 @@
  *   npm run tasks            the board
  *   npm run tasks:links      every docs/tasks reference resolves
  *   npm run tasks:gate       CI: this branch's spec says shipped
- *   npm run tasks:validate   the board, plus a Jira reconciliation REPORT
+ *   npm run tasks:validate   the board, plus an issue reconciliation REPORT
  *
- * Jira owns the ordering - backlog rank, epics, explicitly-set blockers - and
- * the repository owns the specification and carries a copy of the status, which
- * is what lets three of these four run with no network and no credential.
- * `depends:` stays on disk because what can run in parallel is an
- * implementation fact, but an explicit `is blocked by` link in Jira overrides
- * it, that one having been set deliberately.
+ * The issue tracker owns the ordering - the backlog's order, and any blocker set
+ * on an issue deliberately - and the repository owns the specification and
+ * carries a copy of the status, which is what lets three of these four run with
+ * no network and no credential. `depends:` stays on disk because what can run in
+ * parallel is an implementation fact, but a blocker stated on the issue
+ * overrides it, that one having been set by hand.
  *
  * Everything above this file is pure and returns a result carrying its own
  * `exitCode`; this is the only file that reads a directory, makes a request,
@@ -20,13 +20,14 @@
  * subprocess.
  */
 
+import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 
 import { GitBranch } from '../src/git-branch.js';
 import { buildBoard, renderBoard } from './task-board.js';
 import { defaultTaskFiles, repoRoot } from './task-files.js';
 import { gateBranch, renderGate, renderGateFaults } from './task-gate.js';
-import { fetchJiraIssues, reconcile, renderJiraFailure, renderValidation } from './task-jira.js';
+import { fetchIssues, reconcile, renderFetchFailure, renderValidation } from './task-github.js';
 import { checkLinks, readTree, renderLinks } from './task-links.js';
 import { readSpecs, TASKS_DIR } from './task-specs.js';
 
@@ -49,7 +50,7 @@ function usage() {
   console.error('  board     what is ready, what is blocked, what shipped');
   console.error('  links     every docs/tasks reference resolves');
   console.error('  gate      CI: this branch\'s spec says shipped');
-  console.error('  validate  the board, plus how disk and Jira differ (a report)');
+  console.error('  validate  the board, plus how disk and the issues differ (a report)');
 }
 
 /**
@@ -77,6 +78,38 @@ function currentBranch() {
   if (process.env.GITHUB_HEAD_REF) return process.env.GITHUB_HEAD_REF;
   if (process.env.GITHUB_REF_NAME) return process.env.GITHUB_REF_NAME;
   return new GitBranch().checkoutFor(repoRoot()).branch;
+}
+
+/**
+ * Run a command and collect what it said.
+ *
+ * `spawnSync` is fine here and is not fine in `src/`: the rule in AGENTS.md
+ * against synchronous child processes protects the server's poll loop, its event
+ * stream and its 2s hook posts, none of which exist in a one-shot script that
+ * has nothing else to do while it waits.
+ *
+ * Never through a shell, so nothing in an argument can be read as one. A command
+ * that is not installed rejects as an ordinary failure rather than throwing -
+ * `validate` is the only command needing `gh`, and it has to say so rather than
+ * produce a stack trace.
+ *
+ * @param {string} command
+ * @param {string[]} args
+ * @returns {{ok: boolean, stdout: string, stderr: string}}
+ */
+function runCommand(command, args) {
+  const result = spawnSync(command, args, { encoding: 'utf8' });
+  if (result.error) {
+    const reason = /** @type {NodeJS.ErrnoException} */ (result.error).code === 'ENOENT'
+      ? `${command} is not installed, or not on PATH`
+      : result.error.message;
+    return { ok: false, stdout: '', stderr: reason };
+  }
+  return {
+    ok: result.status === 0,
+    stdout: String(result.stdout || ''),
+    stderr: String(result.stderr || ''),
+  };
 }
 
 async function main() {
@@ -117,9 +150,9 @@ async function main() {
 
   if (command !== 'validate') return;
 
-  const fetched = await fetchJiraIssues({ env: process.env });
+  const fetched = fetchIssues({ run: runCommand });
   if (!fetched.ok) {
-    write(renderJiraFailure(fetched, { colour }));
+    write(renderFetchFailure(fetched, { colour }));
     // A failure to *ask* is not a failure of the repository, so it gets its own
     // code rather than being folded into the structural 1.
     process.exitCode = fetched.exitCode;

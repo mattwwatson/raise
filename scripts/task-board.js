@@ -4,7 +4,7 @@
  * Two rules are worth stating before the code, because both were arrived at by
  * getting them wrong somewhere else.
  *
- * **The board says nothing about priority.** Jira owns the ordering and the
+ * **The board says nothing about priority.** The issue tracker owns the ordering and the
  * repository must not start encoding one; the skill is explicit that the board
  * *is* the roadmap. So sections are the row's state and rows within a section
  * are ordered by ticket number, which is arbitrary rather than ranked. The
@@ -25,7 +25,7 @@
  */
 
 import { ANSI, cell, pad, painter } from './task-format.js';
-import { ticketNumber } from './task-specs.js';
+import { compareTickets } from './task-specs.js';
 
 /** @typedef {import('./task-specs.js').Spec} Spec */
 /** @typedef {import('./task-specs.js').Fault} Fault */
@@ -110,8 +110,7 @@ export const SIZE_WIDTH = 2;
 export const TITLE_WIDTH = 58;
 
 /** Where the ordering actually lives, printed under every board. */
-export const BOARD_URL =
-  'https://mattwwatson.atlassian.net/jira/software/c/projects/RAI/boards/6';
+export const BOARD_URL = 'https://github.com/mattwwatson/raise/issues';
 
 /**
  * What stands between a spec and being ready.
@@ -162,7 +161,7 @@ export function buildBoard(specs) {
     });
   }
 
-  rows.sort((a, b) => ticketNumber(a.ticket) - ticketNumber(b.ticket));
+  rows.sort((a, b) => compareTickets(a.ticket, b.ticket));
 
   const of = (/** @type {RowState} */ state) => rows.filter((row) => row.state === state);
   const sections = SECTION_ORDER.map((state) => ({ state, rows: of(state) })).filter(
@@ -225,7 +224,7 @@ export function renderBoard(board, { colour = false } = {}) {
   out.push('');
   out.push(
     `${paint(ANSI.bold, 'roadmap')} ` +
-      paint(ANSI.dim, '- status from docs/tasks/, ordering lives in Jira'),
+      paint(ANSI.dim, '- status from docs/tasks/, ordering lives in the issues'),
   );
   out.push('');
 
@@ -253,7 +252,7 @@ export function renderBoard(board, { colour = false } = {}) {
     paint(
       ANSI.dim,
       '  READY means every dependency has shipped. Priority order, epics and\n' +
-        `  explicitly-set blockers live on the board, and a Jira blocker wins:\n  ${BOARD_URL}`,
+        `  explicitly-set blockers live on the tracker, and one set there wins:\n  ${BOARD_URL}`,
     ),
   );
   out.push('');

@@ -8,6 +8,8 @@ import {
   parseSpec,
   readSpecs,
   STATUSES,
+  compareTickets,
+  isIssueKey,
   ticketNumber,
   titleOf,
 } from '../scripts/task-specs.js';
@@ -273,4 +275,69 @@ test('a docs/tasks that is not there at all is a fault naming the directory', ()
   const set = readSpecs('/nowhere', fakeFiles());
   assert.deepEqual(codes(set), ['unreadable']);
   assert.ok(set.faults[0].message.includes('/nowhere'));
+});
+
+test('a spec keyed by its GitHub issue number is a work item', () => {
+  const { spec } = parseSpec('23-roadmap-tooling.md', [
+    '---',
+    'issue: 23',
+    'status: shipped',
+    'size: M',
+    'depends: -',
+    '---',
+    '# 23 - Roadmap tooling',
+  ].join('\n'));
+  assert.equal(spec.ticket, '23');
+  assert.equal(spec.status, 'shipped');
+  // The heading repeats the key, and the board column does not need it twice.
+  assert.equal(spec.title, 'Roadmap tooling');
+});
+
+test('a legacy Jira key still parses, because 21 shipped specs carry one', () => {
+  const { spec } = parseSpec('RAI-14-roadmap-tooling.md', [
+    '---',
+    'ticket: RAI-14',
+    'status: shipped',
+    '---',
+    '# RAI-14 - Roadmap tooling',
+  ].join('\n'));
+  assert.equal(spec.ticket, 'RAI-14');
+  assert.equal(spec.title, 'Roadmap tooling');
+});
+
+test('a spec carrying both keys is a fault, because an item has one identity', () => {
+  // Nothing downstream could say which of them a branch or a dependency meant.
+  const { spec, fault } = parseSpec('23-x.md', [
+    '---',
+    'issue: 23',
+    'ticket: RAI-14',
+    'status: shipped',
+    '---',
+  ].join('\n'));
+  assert.equal(spec, null);
+  assert.equal(fault.code, 'two-keys');
+});
+
+test('an issue key that is not a number is refused rather than taken literally', () => {
+  const { fault } = parseSpec('x.md', ['---', 'issue: RAI-14', 'status: shipped', '---'].join('\n'));
+  assert.equal(fault.code, 'no-ticket');
+});
+
+test('an issue key and a Jira key of the same number are different items', () => {
+  // This is what lets both namespaces live in one directory: RAI-12 and 12 are
+  // distinct strings and cannot collide in the index.
+  assert.equal(isIssueKey('12'), true);
+  assert.equal(isIssueKey('RAI-12'), false);
+  assert.notEqual('12', 'RAI-12');
+});
+
+test('a bare issue number orders numerically, as a Jira key does', () => {
+  assert.ok(ticketNumber('2') < ticketNumber('10'));
+});
+
+test('the two namespaces sort apart rather than interleaving', () => {
+  // Sorting on the number alone would put issue 12 next to RAI-12, which reads
+  // as one sequence when it is two unrelated ones.
+  const keys = ['23', 'RAI-14', '9', 'RAI-2'].sort(compareTickets);
+  assert.deepEqual(keys, ['RAI-2', 'RAI-14', '9', '23']);
 });

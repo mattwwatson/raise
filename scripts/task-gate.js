@@ -1,15 +1,15 @@
 /**
  * The CI gate, and deliberately a different question from `validate`.
  *
- * Before a pull request merges, the spec for **this branch's ticket** must say
- * `shipped` - because merging is what transitions the ticket to Done, and the
- * spec is the only copy of that fact a session can read without a network call.
- * Without this, `main` lands carrying a ticket marked Done and a file claiming
- * the work never started. The `roadmap-workflow` skill names it as the one
- * convention with no guard; this is the guard.
+ * Before a pull request merges, the spec for **this branch's item** must say
+ * `shipped` - because merging is what closes the issue, and the spec is the only
+ * copy of that fact a session can read without a network call. Without this,
+ * `main` lands carrying a closed issue and a file claiming the work never
+ * started. The `roadmap-workflow` skill names it as the one convention with no
+ * guard; this is the guard.
  *
  * Disk-only on purpose. The branch name is the input and the spec file is the
- * answer, so it cannot fail because a token expired or Jira was slow.
+ * answer, so it cannot fail because a token expired or the tracker was slow.
  *
  * The branch arrives as a string rather than being read here, so the whole gate
  * is asserted without a repository, a subprocess or an environment variable.
@@ -32,25 +32,30 @@ import { ANSI, painter } from './task-format.js';
  */
 
 /**
- * The ticket key, which must start the branch name **or a path segment of it**.
- * `RAI-14-roadmap-tooling` and `fix/RAI-14-roadmap-tooling` both name RAI-14.
+ * The item's key, which must start the branch name **or a path segment of it**.
+ * `23-roadmap-tooling` and `fix/23-roadmap-tooling` both name issue 23, as
+ * `RAI-14-roadmap-tooling` names the legacy Jira item RAI-14.
  *
  * **This is a convention, not a constraint, and that is the whole reason it is
- * checked here.** Jira finds the key anywhere in a branch name -
- * `wip-RAI-14-tooling` links and transitions perfectly well - so nothing
- * upstream will ever complain. The original's failure message claims otherwise,
- * that a prefixed branch transitions nothing because the automation is anchored
- * on the key; that is not true, and its own regex already disagreed with it.
+ * checked here.** GitHub links a branch to an issue from the pull request rather
+ * than from the branch name, so nothing upstream will ever complain about
+ * `wip-23-tooling`. Jira, before it, found the key anywhere in the name and was
+ * equally content.
  *
  * What we want is a branch list that can be scanned by key, so the key starts
  * the branch name or a path element of it. A key buried mid-segment has stopped
  * naming the branch and become a substring inside a word, and is refused.
  *
- * A bare `RAI-14` with no short name is accepted, so that branch gets the
- * honest "no spec" or "not shipped" answer rather than being told it carries no
- * key at all.
+ * **The bare-number alternative is anchored, and has to be.** A legacy key is
+ * self-announcing - `RAI-14` cannot be mistaken for anything else - but a plain
+ * number is not, and without `(?:^|\/)` in front and `(?:-|$)` behind, the `2`
+ * in `feat/v2-rewrite` would read as issue 2 and the gate would go looking for
+ * its spec. Both alternatives share those anchors for that reason.
+ *
+ * A bare `23` with no short name is accepted, so that branch gets the honest "no
+ * spec" or "not shipped" answer rather than being told it carries no key at all.
  */
-export const BRANCH_KEY_PATTERN = /(?:^|\/)([A-Z][A-Z0-9]+-\d+)(?:-|$)/;
+export const BRANCH_KEY_PATTERN = /(?:^|\/)([A-Z][A-Z0-9]+-\d+|\d+)(?:-|$)/;
 
 /**
  * @param {string|null} branch
@@ -118,26 +123,27 @@ export function renderGate(result, { colour = false, today = '' } = {}) {
     err.push('  branch. A detached HEAD has no ticket to check - which is what a');
     err.push('  pull-request build is, since it checks out the merge commit.');
   } else if (result.outcome === 'no-key') {
-    err.push(`${label} - ${paint(ANSI.red, `branch "${result.branch}" carries no ticket key.`)}`);
+    err.push(`${label} - ${paint(ANSI.red, `branch "${result.branch}" carries no issue number.`)}`);
     err.push('');
-    err.push('  Branches are named <KEY>-<short-name>, with the key starting the');
-    err.push('  branch name or a path element of it - RAI-14-roadmap-tooling and');
-    err.push('  fix/RAI-14-roadmap-tooling both work.');
+    err.push('  Branches are named <ISSUE>-<short-name>, with the number starting');
+    err.push('  the branch name or a path element of it - 23-roadmap-tooling and');
+    err.push('  fix/23-roadmap-tooling both work.');
     err.push('');
-    err.push('  Jira itself would find the key anywhere, wip-RAI-14-tooling');
-    err.push('  included. This is our convention, so that a branch list can be');
-    err.push('  scanned by key, and this check is what enforces it.');
+    err.push('  GitHub links the branch from the pull request rather than from its');
+    err.push('  name, so wip-23-tooling would upset nothing upstream. This is our');
+    err.push('  convention, so that a branch list can be scanned by issue, and this');
+    err.push('  check is what enforces it.');
   } else if (result.outcome === 'no-spec') {
-    err.push(`${label} - ${paint(ANSI.red, `no spec in docs/tasks/ has "ticket: ${result.ticket}".`)}`);
+    err.push(`${label} - ${paint(ANSI.red, `no spec in docs/tasks/ has "issue: ${result.ticket}".`)}`);
     err.push('');
     err.push('  Every item needs one, and no branch may exist without it. Create');
     err.push(`  docs/tasks/${result.ticket}-<short-name>.md.`);
   } else {
     err.push(`${label} - ${paint(ANSI.red, `${result.ticket} is "${result.spec?.status}" in ${result.spec?.file}.`)}`);
     err.push('');
-    err.push('  Merging this pull request transitions the ticket to Done, so the spec');
-    err.push('  has to say shipped before it lands - otherwise main claims the work');
-    err.push('  never started.');
+    err.push('  Merging this pull request closes the issue, so the spec has to say');
+    err.push('  shipped before it lands - otherwise main claims the work never');
+    err.push('  started.');
     err.push('');
     err.push(`  Set in docs/tasks/${result.spec?.file}:`);
     err.push('');

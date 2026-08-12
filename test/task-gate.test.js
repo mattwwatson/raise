@@ -58,6 +58,27 @@ test('a branch that merely starts with the letters of a key is not one', () => {
   assert.equal(ticketFromBranch('RAILWAY-station'), null);
 });
 
+test('a bare issue number is the key, which is how items are named now', () => {
+  assert.equal(ticketFromBranch('23-roadmap-tooling'), '23');
+  assert.equal(ticketFromBranch('23'), '23');
+  assert.equal(ticketFromBranch('fix/23-roadmap-tooling'), '23');
+});
+
+test('a number buried in a segment is not an issue key', () => {
+  // The anchors matter far more for a bare number than for RAI-14, which
+  // announces itself. Without them the "2" in v2-rewrite would read as issue 2
+  // and the gate would go looking for its spec.
+  assert.equal(ticketFromBranch('feat/v2-rewrite'), null);
+  assert.equal(ticketFromBranch('wip-23-tooling'), null);
+  assert.equal(ticketFromBranch('release-2026-08-12'), null);
+});
+
+test('a legacy Jira key still names its branch, because those specs still exist', () => {
+  // 21 items shipped under Jira keys and keep them. The gate has to go on
+  // reading a branch named for one, or the historical specs become unreachable.
+  assert.equal(ticketFromBranch('RAI-14-roadmap-tooling'), 'RAI-14');
+});
+
 test('a checkout with no branch fails as "no branch", not as a bad branch name', () => {
   // A detached HEAD is a different problem from a misnamed branch and deserves
   // a different instruction.
@@ -70,17 +91,19 @@ test('a branch with no key at all fails the gate and explains the naming rule', 
   const result = gateBranch('tidy-up', indexed([spec()]));
   assert.equal(result.outcome, 'no-key');
   const rendered = text(renderGate(result));
-  assert.ok(rendered.includes('RAI-14-roadmap-tooling'));
-  assert.ok(rendered.includes('fix/RAI-14-roadmap-tooling'));
+  assert.ok(rendered.includes('23-roadmap-tooling'));
+  assert.ok(rendered.includes('fix/23-roadmap-tooling'));
 });
 
-test('the naming failure says this is our convention rather than a Jira constraint', () => {
-  // Jira finds the key anywhere in a branch name, so nothing upstream enforces
-  // this. Saying otherwise - as the original does - sends somebody looking for
-  // an automation rule that was never the reason.
+test('the naming failure says this is our convention rather than the tracker\'s rule', () => {
+  // GitHub links a branch to its issue from the pull request rather than from
+  // the branch name, so nothing upstream enforces this - and Jira, before it,
+  // found the key anywhere in the name and was equally content. Saying otherwise
+  // sends somebody looking for an automation rule that was never the reason.
   const rendered = text(renderGate(gateBranch('tidy-up', indexed([spec()]))));
-  assert.ok(rendered.includes('our convention'));
-  assert.ok(rendered.includes('anywhere'));
+  assert.ok(rendered.includes('our'));
+  assert.ok(rendered.includes('convention'));
+  assert.ok(rendered.includes('pull request'));
 });
 
 test('a branch whose key has no spec fails and names the file to create', () => {

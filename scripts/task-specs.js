@@ -1,11 +1,23 @@
 /**
  * A file in `docs/tasks/`, read as a work item.
  *
- * The roadmap workflow keeps the *ordering* of work in Jira and the
+ * The roadmap workflow keeps the *ordering* of work in the issue tracker and the
  * *specification* on disk, with a copy of the status in each spec's
  * frontmatter. That copy is what lets the board, and the CI gate that matters,
  * work with no network and no credential - so this module is the floor
  * everything else here stands on.
+ *
+ * **Two key namespaces, and the split is historical rather than a design.** Work
+ * was tracked in Jira until 12/08/2026 and the 21 items from that period are
+ * keyed `RAI-12`; everything since is keyed by its GitHub issue number, `23`.
+ * They are not reconciled and must not be: renumbering the shipped specs onto
+ * issue numbers would rewrite the record of what those items were *called* while
+ * they were being built, and every cross-reference between specs with it. A key
+ * is an identifier, not a sort order.
+ *
+ * `Spec.ticket` holds whichever form the file declares, as a string, and is the
+ * identity everything else keys on. `RAI-12` and `12` are different keys and
+ * cannot collide, which is what lets both live in one directory.
  *
  * Frontmatter is a fixed `key: value` shape written by us, so it is parsed
  * directly rather than by pulling in a YAML library: `dependencies` in
@@ -27,14 +39,14 @@ import { join } from 'node:path';
 /** @typedef {'backlog'|'in-progress'|'shipped'|'wont-do'} TaskStatus */
 
 /**
- * @typedef {'no-ticket'|'unknown-status'|'duplicate-ticket'|'unknown-depends'
- *           |'depends-cycle'|'unreadable'|'no-jira-issue'} FaultCode
+ * @typedef {'no-ticket'|'two-keys'|'unknown-status'|'duplicate-ticket'|'unknown-depends'
+ *           |'depends-cycle'|'unreadable'|'no-tracker-issue'} FaultCode
  */
 
 /**
  * @typedef {object} Spec
  * @property {string} file the name inside `docs/tasks/`, not a path
- * @property {string} ticket
+ * @property {string} ticket the item's key: a GitHub issue number, or a legacy `RAI-12`
  * @property {string} title the H1, with its own leading `KEY - ` removed
  * @property {TaskStatus} status
  * @property {string} size `?` when the frontmatter omits it
@@ -92,11 +104,19 @@ const TRAILING_COMMENT = /\s+#.*$/;
 /** The first `# ` heading. `## ` cannot match, the second character not being whitespace. */
 const HEADING = /^#\s+(.+)$/m;
 
-/** A heading that repeats its own ticket key, which the board column does not need. */
-const OWN_KEY_PREFIX = /^[A-Z][A-Z0-9]*-\d+\s+-\s+/;
+/** A heading that repeats its own key, which the board column does not need. */
+const OWN_KEY_PREFIX = /^(?:[A-Z][A-Z0-9]*-)?\d+\s+-\s+/;
 
-/** The trailing number of a ticket key, for ordering. */
-const TICKET_NUMBER = /-(\d+)$/;
+/**
+ * The number in a key, for ordering: `RAI-12` and `12` both yield 12.
+ *
+ * Ordering alone is therefore ambiguous across the two namespaces, which is why
+ * `specOrder` exists and why nothing sorts on this directly.
+ */
+const TICKET_NUMBER = /(?:^|-)(\d+)$/;
+
+/** A key that is a bare GitHub issue number. */
+const ISSUE_KEY = /^\d+$/;
 
 /**
  * The frontmatter fields, or null when the file has no frontmatter block.
@@ -138,7 +158,7 @@ export function titleOf(text, file) {
 }
 
 /**
- * The number in a ticket key, so RAI-2 orders before RAI-10.
+ * The number in a key, so RAI-2 orders before RAI-10.
  *
  * @param {string} ticket
  * @returns {number}
@@ -146,6 +166,44 @@ export function titleOf(text, file) {
 export function ticketNumber(ticket) {
   const match = TICKET_NUMBER.exec(String(ticket || ''));
   return match ? Number(match[1]) : 0;
+}
+
+/**
+ * Is this key a GitHub issue number rather than a legacy Jira key?
+ *
+ * @param {string} ticket
+ * @returns {boolean}
+ */
+export function isIssueKey(ticket) {
+  return ISSUE_KEY.test(String(ticket || ''));
+}
+
+/**
+ * A sort key that keeps the two namespaces apart.
+ *
+ * Sorting on `ticketNumber` alone would interleave `RAI-12` with issue `12`, and
+ * the two have nothing to do with each other - so a board sorted that way reads
+ * as one sequence when it is two. The legacy Jira items come first because they
+ * are the older ones, and within each namespace it is numeric.
+ *
+ * @param {string} ticket
+ * @returns {[number, number]}
+ */
+export function specOrder(ticket) {
+  return [isIssueKey(ticket) ? 1 : 0, ticketNumber(ticket)];
+}
+
+/**
+ * Compare two keys by `specOrder`.
+ *
+ * @param {string} a
+ * @param {string} b
+ * @returns {number}
+ */
+export function compareTickets(a, b) {
+  const [namespaceA, numberA] = specOrder(a);
+  const [namespaceB, numberB] = specOrder(b);
+  return namespaceA - namespaceB || numberA - numberB;
 }
 
 /**
@@ -176,22 +234,35 @@ function fault(code, file, ticket, message) {
 export function parseSpec(file, text) {
   const fields = parseFrontmatter(text);
   if (!fields) return { spec: null, fault: null, skipped: true };
-  if (!fields.ticket && !fields.status) return { spec: null, fault: null, skipped: true };
 
-  if (!fields.ticket) {
-    const message = `${file}: no "ticket:" - every work item needs a Jira key`;
+  // `issue:` is the current form and `ticket:` the legacy Jira one. A file may
+  // not carry both: that would be one item with two identities, and nothing
+  // downstream could say which of them a branch or a dependency meant.
+  const key = fields.issue || fields.ticket || '';
+  if (fields.issue && fields.ticket) {
+    const message = `${file}: has both "issue: ${fields.issue}" and "ticket: ${fields.ticket}" - an item has one key`;
+    return { spec: null, fault: fault('two-keys', file, key, message), skipped: false };
+  }
+  if (!key && !fields.status) return { spec: null, fault: null, skipped: true };
+
+  if (!key) {
+    const message = `${file}: no "issue:" - every work item needs its GitHub issue number`;
+    return { spec: null, fault: fault('no-ticket', file, null, message), skipped: false };
+  }
+  if (fields.issue && !ISSUE_KEY.test(fields.issue)) {
+    const message = `${file}: "issue: ${fields.issue}" is not an issue number - write the number alone, as 23`;
     return { spec: null, fault: fault('no-ticket', file, null, message), skipped: false };
   }
   if (!STATUSES.includes(/** @type {TaskStatus} */ (fields.status))) {
     const message =
       `${file}: unknown status "${fields.status || ''}" (want ${STATUSES.join(' | ')})`;
-    return { spec: null, fault: fault('unknown-status', file, fields.ticket, message), skipped: false };
+    return { spec: null, fault: fault('unknown-status', file, key, message), skipped: false };
   }
 
   /** @type {Spec} */
   const spec = {
     file,
-    ticket: fields.ticket,
+    ticket: key,
     title: titleOf(text, file),
     status: /** @type {TaskStatus} */ (fields.status),
     size: fields.size || '?',
