@@ -4,7 +4,7 @@ status: shipped
 shipped: 2026-08-12
 size: S
 depends: RAI-6
-branch: RAI-6-readme-for-a-stranger
+branch: RAI-6-readme-RAI-7-tools-RAI-8-contribution
 ---
 # RAI-8 - Decide the contribution posture and write it down
 
@@ -13,9 +13,10 @@ taken before publishing rather than under pressure afterwards: **yes to contribu
 stated bar.** This ticket writes it down. Three files land - `CONTRIBUTING.md`, `SECURITY.md`,
 and the amendments to `AGENTS.md` that [RAI-2] deliberately left soft pending this decision.
 
-Third item on `RAI-6-readme-for-a-stranger`, at Matt's request. Same two costs as RAI-7 -
-nothing transitions this ticket, and `tasks:gate` checks the branch's key only - so it is moved
-by hand and its key goes in the PR title.
+Third item on `RAI-6-readme-RAI-7-tools-RAI-8-contribution`, at Matt's request. The branch names
+every key it carries, so Jira links and transitions all three; `tasks:gate` still reads only the
+first, so this file saying `shipped` is held by convention rather than by CI. See RAI-7's spec,
+which records the shape once for all three.
 
 ## The bar, and why it is that bar
 

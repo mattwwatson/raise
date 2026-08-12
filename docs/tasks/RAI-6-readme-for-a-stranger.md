@@ -4,7 +4,7 @@ status: shipped
 shipped: 2026-08-12
 size: M
 depends: RAI-2, RAI-3
-branch: RAI-6-readme-for-a-stranger
+branch: RAI-6-readme-RAI-7-tools-RAI-8-contribution
 ---
 # RAI-6 - Rewrite the README for someone who has never seen this
 

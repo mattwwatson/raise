@@ -4,7 +4,7 @@ status: shipped
 shipped: 2026-08-12
 size: S
 depends: RAI-6
-branch: RAI-6-readme-for-a-stranger
+branch: RAI-6-readme-RAI-7-tools-RAI-8-contribution
 ---
 # RAI-7 - Acknowledge the neighbouring tools
 
@@ -12,17 +12,25 @@ One README section. The draft shape and the three rules it has to follow are **P
 [`RAI-1-open-source-release.md`](RAI-1-open-source-release.md); this file records what checking
 the neighbours actually turned up, which is not what that draft assumed.
 
-## It shares RAI-6's branch, deliberately, and that has two costs
+## It shares a branch with RAI-6 and RAI-8, deliberately
 
 Both items rewrite `README.md`, and this section slots into the structure RAI-6 builds - written
-against the old layout it would simply conflict. Matt asked for them together on
-`RAI-6-readme-for-a-stranger`. The roadmap rule prefers one branch per item, so the two things
-that stop working are recorded here rather than discovered later:
+against the old layout it would simply conflict. Matt asked for them together.
 
-- **Jira's automation keys off the branch name**, so nothing transitions RAI-7. It was moved to
-  In Progress by hand and must be moved to Done by hand.
-- **`npm run tasks:gate` checks the branch's own key only**, so nothing enforces this file
-  saying `shipped`. Both keys go in the PR title so both link.
+The branch is **`RAI-6-readme-RAI-7-tools-RAI-8-contribution`**, renamed from RAI-6's own name
+once it was carrying three items. Naming every key is not decoration:
+
+- **Jira finds a key anywhere in a branch name**, so all three link and transition off this one
+  branch. That is the reason the earlier single-key name would have left RAI-7 and RAI-8 to be
+  moved by hand - a cost that the rename removes rather than mitigates.
+- **`npm run tasks:gate` still checks the first key only.** `BRANCH_KEY_PATTERN` requires a key
+  at the start of the name or of a path segment, so it reads `RAI-6` and stops; nothing enforces
+  this file saying `shipped`. It is set correctly, but on this branch that is a convention held
+  by hand rather than by CI.
+
+The roadmap rule prefers one branch per item and the skill's convention assumes one key per
+branch. A multi-key name is a case it did not anticipate - it satisfies what the convention is
+*for*, which is a branch list scannable by key, while sitting outside the letter of it.
 
 ## The rule that did the work
 
