@@ -76,7 +76,7 @@ be done. In order of weight:
   `absent` are load-bearing and carefully distinguished; "the builtin would not load" is a
   fourth condition that is not about no-mistakes at all.
 
-The cost of (1) is the one the issue flagged: `bin/raise.js` splits, and the CLI's 970 lines move
+The cost of (1) is the one the issue flagged: `bin/raise.js` splits, and the CLI's 981 lines move
 to `src/cli.js`. That is a move rather than a rewrite - the file is unchanged below its new
 `export` - and `src/` is where the product already lives, so the entry point becomes what the
 name suggests it is.
@@ -144,7 +144,7 @@ Three files carry the change, and one of them is a move.
   `MIN_NODE_MAJOR`, `MIN_NODE_MINOR`. Its emptiest property is its most important one: an import
   here - a Node builtin included - puts the guard back behind a graph, silently, on the versions
   nobody will test. The header says so.
-- **`bin/raise.js`** is now 48 lines: import the guard, refuse, or `await import('../src/cli.js')`
+- **`bin/raise.js`** is now 49 lines: import the guard, refuse, or `await import('../src/cli.js')`
   and run `main`. The `main().catch` error handler stayed here rather than moving, because the
   entry point is the only thing still running when the CLI fails to load.
 - **`src/cli.js`** is the old `bin/raise.js`, moved with `git mv` so the history follows it.
