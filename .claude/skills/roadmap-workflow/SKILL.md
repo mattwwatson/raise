@@ -142,14 +142,13 @@ loose document.
    `wip-23-stale-page-code` would upset nothing upstream. This is our convention, so that a
    branch list can be scanned by issue: the number starts the branch name or a path element of
    it - `23-stale-page-code` or `fix/23-stale-page-code`, never `wip-23-stale-page-code`.
-   `npm run tasks:gate` enforces it, and enforces exactly that: a branch naming a **known item**
-   in the wrong place fails, while a branch naming no item at all passes as an untracked change.
-   So the gate is not a way of finding out that you forgot to name this one after its issue -
-   name it yourself.
+   **`npm run tasks:gate` does not enforce this, and cannot.** A branch whose key is not in an
+   anchored position simply reads as untracked and passes - telling that from an ordinary name
+   was built twice and removed twice, so do not expect the gate to catch it and do not try to
+   make it. Getting the name right is on you.
 
    The anchoring matters more than it did for `RAI-12`, which announced itself. A bare number
-   does not, so `feat/v2-rewrite` deliberately does **not** name issue 2 - though it would be
-   read as a misplaced key if issue 2 existed, since nothing in the name says otherwise.
+   does not, so `feat/v2-rewrite` deliberately does **not** name issue 2.
 3. **Set `status: in-progress` and `branch:`** in the spec file.
 4. **Flesh the spec out before writing code** - problem, decisions with their reasoning, what
    is deliberately *not* being built. Record decisions as they are taken; a decision that
@@ -206,13 +205,12 @@ push makes no claim to be mergeable, so failing it would only paint CI red all d
 `GITHUB_HEAD_REF`, because a `pull_request` checkout is a detached merge commit with no branch
 name in `.git/HEAD`.
 
-Its three answers, because the first two are easy to confuse: a branch naming **no** item
-anywhere passes, shipping nothing tracked; a branch naming a known item outside an anchored
-position fails and is told how to rename itself; a correctly keyed branch fails unless its spec
-says `shipped`. The first two are separated by asking the spec set - `23_stale_page_code` fails
-because issue 23 exists, `bump-node-24` passes because nothing is issue 24 - so **what it cannot
-see is a branch that never mentions its item**: `fix/whatever` shipping tracked work slips past,
-as it always could. It guards against forgetting, not against evasion. See
+Two answers, and the branch name is all it reads: a branch with an **anchored** key is held to
+its spec, and every other branch passes as untracked. So `wip-23-stale-page-code` and
+`fix/whatever` both slip past, which is a known gap rather than an oversight - telling a
+misnamed branch from an ordinary one was built twice and removed twice, most sharply because a
+legacy key collided with the bare issue sharing its number and the gate's own rename advice went
+green over the wrong item's spec. It guards against forgetting, not against evasion. See
 [docs/tasks/9-gate-passes-an-unkeyed-branch.md](../../../docs/tasks/9-gate-passes-an-unkeyed-branch.md).
 
 **`tasks:links`** runs on every build, a dangling reference being just as broken on `main`.

@@ -1699,21 +1699,21 @@ from the **pull request**, not from the branch name, so this is our convention r
 constraint, and `npm run tasks:gate` is what enforces it. The PR that ships an item sets
 `status: shipped` and `shipped:` in its spec file and adds `## Implementation notes`.
 
-**The gate gives three answers, not two, and the split is the point.** A branch naming no item
-anywhere - `fix/some-typo` - **passes**: it ships nothing tracked, so there is nothing to
-assert, and failing it made a one-line spec correction cost an issue, a spec, a branch and a
-pipeline run. A branch naming one somewhere the convention does not put it -
-`wip-23-stale-page-code`, `rai-14-tooling` - **fails**, because the key is in the name and so
-forgetting is not the explanation; that is the case the naming rule exists for. A correctly
-keyed branch fails unless its spec exists and says `shipped`.
+**The gate gives two answers, and the branch name is all it reads.** A branch with the key in an
+anchored position is held to its spec exactly as before - the file must exist and say `shipped`.
+**Every other branch passes**, `fix/some-typo` and `wip-23-stale-page-code` alike: failing the
+first made a one-line spec correction cost an issue, a spec, a branch and a pipeline run.
 
-**Which of the first two it is comes from the spec set, not from the shape of the name**, and
-that is what makes the split hold. `23_stale_page_code` fails while issue 23 exists;
-`bump-node-24` passes because nothing is issue 24. A looser second pattern was tried and cannot
-work - the two are the same shape, and every widening that admits a real misnaming fails an
-ordinary branch. What follows is the honest limit: **the gate cannot see a branch that never
-mentions its item**, so `fix/whatever` shipping tracked work slips past, exactly as it always
-could. It guards against forgetting, never against evasion.
+**That the second one passes is a known gap, and closing it was tried twice and abandoned.**
+Do not rebuild it - the reasoning is in the comment in `gateBranch` and in full in
+[docs/tasks/9-gate-passes-an-unkeyed-branch.md](docs/tasks/9-gate-passes-an-unkeyed-branch.md).
+Matching the *shape* of a misplaced key cannot separate `23_stale_page_code` from
+`bump-node-24`; asking the spec set whether the number is a real item fails `release/v1.2.3` and
+`3d-render`, grows a new false failure with every issue filed, and collides a legacy key with the
+bare issue sharing its number - `wip-RAI-7-x` was reported as issue 7, whose spec is shipped, so
+its own rename advice turned the gate green over RAI-7's unshipped spec. What the gate protects
+against is **forgetting** to mark an item shipped, which needs a correctly named branch anyway;
+a misnamed one still goes through review.
 
 An epic gets a spec too, and it carries the shared background for everything under it -
 `docs/tasks/RAI-1-open-source-release.md` holds the reasoning behind the whole open-source

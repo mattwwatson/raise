@@ -30,43 +30,6 @@ outcome, and it passes. A branch shipping no tracked item therefore needs neithe
 a spec, and AGENTS.md and the `roadmap-workflow` skill say so - both stated "no branch without a
 spec file" as an absolute, which this makes false as written.
 
-**A branch that names an item and has misplaced it is a different case, and it still fails as
-`no-key`.** `wip-23-tooling`, `revertRAI-14` and `rai-14-roadmap-tooling` all carry a key
-`BRANCH_KEY_PATTERN`'s anchors refuse, and the key being right there in the name is what rules
-out the explanation the pass is for: you did not forget to track this, you misnamed the branch.
-Collapsing the two would have waved through precisely the case this gate exists to catch.
-
-## Which of the two it is comes from the spec set, not from the shape of the name
-
-The first attempt at telling them apart was a second, looser regex - the same key shapes with
-the anchors relaxed - and it does not work. *Looks like a key* and *is a key* are different
-questions, and only the second one has an answer:
-
-| | |
-| --- | --- |
-| must fail | `wip-23-tooling`, `23_stale_page_code`, `23/stale-page-code`, `RAI-14_tooling`, `RAI-14x` |
-| must pass | `release-2026-08-12`, `bump-node-24`, `fix/readme-node-22` |
-
-Those two rows are the same shape - a number at a token boundary - so no arrangement of
-separators separates them. Each widening that admitted a real misnaming failed an ordinary
-branch, and the wrong-separator case is the likeliest real typo of the lot: `23_stale_page_code`
-is a correctly *positioned* key that the gate simply cannot read.
-
-`gateBranch` is already holding `byTicket`, the set of items that exist, so `misplacedKey` asks
-it. A branch names an item when it contains that item's key with the number intact - `RAI-14`
-case-insensitively, since `rai-14-roadmap-tooling` is a misnaming rather than an unrelated
-change, and a bare `23` bounded so it is not a slice of `2026`. Nothing is guessed and no
-separator is enumerated. 2026, 24 and 22 name no item; 23 and RAI-14 do.
-
-**The residue is real and is the honest version of the trade.** `feat/v2-rewrite` is an ordinary
-branch until issue 2 exists - which on this repo it now does - at which point nothing in the name
-says which of the two it meant and it is read as a misnaming. Same for `fix/typo-on-line-9` while
-issue 9 exists. Each is a rename away from passing and the failure says so, where the
-shape-matching version got that same case wrong for names carrying no key at all, and told the
-reader to go looking for an issue number they had never written. `BRANCH_KEY_PATTERN` still
-refuses to read `v2` as issue 2 outright: the branch is told to rename, never handed issue 2's
-spec.
-
 **Nothing about a keyed branch changes.** Its spec must exist and must say `shipped`, exactly as
 before - `wont-do` included, since an item abandoned on a branch being merged is still a
 contradiction. There is a test asserting precisely that, because the whole risk of this change
@@ -74,11 +37,47 @@ is that it reads as "the gate got softer" and gets loosened further by someone w
 
 ## The trade, which is accepted rather than overlooked
 
-Somebody could name a branch `fix/whatever` while genuinely shipping a tracked item, and slip
-past. That was always true in substance: the gate has never been able to tell a deliberate
-evasion from an untracked change, and it never asserted otherwise. What it protects against is
-**forgetting**, and forgetting leaves the key in the branch name - which is exactly the case
-that still fails.
+`wip-23-tooling` passes. So does `fix/whatever` on a branch genuinely shipping issue 23. **That
+is a known gap and it is not closed**, and since the obvious objection is that the key is right
+there in the name, the reasons it is acceptable are worth stating rather than assuming:
+
+- **The gate's job is catching a shipped item whose spec still says `in-progress`**, and that
+  needs a correctly named branch anyway. A branch it cannot read is one it was never going to
+  answer for.
+- **A misnamed branch still gets reviewed.** With `no-mistakes` mandated for contributions
+  ([#7](https://github.com/mattwwatson/raise/issues/7)), nothing reaches `main` without a
+  pipeline run and a pull request, so this is not the only thing looking.
+- **It never asserted otherwise.** The gate has never been able to tell a deliberate evasion
+  from an untracked change.
+
+## Two mechanisms were built to close that gap and both were removed
+
+This is the part worth not repeating. Both attempts were wrong, in opposite directions.
+
+**The first matched the *shape* of a key** - the same alternatives as `BRANCH_KEY_PATTERN` with
+the anchors relaxed. It could not be made to cover the separators without covering ordinary
+names too: `23_stale_page_code`, `23/stale-page-code`, `RAI-14_tooling` and `RAI-14x` escaped it
+while `release-2026-08-12`, `bump-node-24` and `fix/readme-node-22` tripped it. Those are the
+same shape - a number at a token boundary - so no arrangement of separators separates them.
+
+**The second asked the spec set** whether the number named a real item, `gateBranch` already
+holding `byTicket`. Precise about the set and wrong about everything else:
+
+- It failed `release/v1.2.3`, `fix/oauth2-callback`, `fix/http-2-notes` and `3d-render` on the
+  bare items this repo already has, each told it "names" an issue nobody had written.
+- **The surface grows.** Every issue filed turns another class of ordinary name into a failure -
+  `bump-node-24` is fine only until issue 24 exists. A rule that decays as the project succeeds
+  is not a rule.
+- **A legacy key collides with the bare issue sharing its number.** `wip-RAI-7-x` was reported as
+  issue 7, and `7-require-no-mistakes.md` is `shipped` - so following the gate's own rename advice
+  would have turned it **green while RAI-7's spec still said `in-progress`**. The one thing this
+  gate exists to prevent, reached through its own guidance. RAI-1/1 through RAI-4/4 and RAI-7/7
+  collide today and more arrive as issue numbers climb.
+
+The conclusion both reach is the same: **a misnamed branch is not something this can reliably
+tell from an ordinary one.** So the gate gives two answers, not three, and `test/task-gate.test.js`
+asserts the gap as a decision - including the RAI-3/3 collision, so a third attempt fails there
+rather than in CI.
 
 ## Two things this deliberately does not do
 
@@ -93,26 +92,23 @@ that still fails.
   removed. `enforce_admins` stays on, so `CONTRIBUTING.md`'s claim that the rule binds the
   maintainer too stays true.
 
-## The naming failure stays, and names the item
+## The dead branch goes, and one surviving message was wrong
 
 `no-key`'s failure text - four lines about branch naming and what GitHub does and does not
-enforce - is still reached, by the branch that names an item in the wrong place. It gains two
-things. It **names the item**, which the gate now knows and could not know while the answer came
-from a shape: *branch "wip-23-tooling" names 23, but not where the convention puts it*, followed
-by the rename to make. And it closes by saying that a branch naming no tracked item passes
-instead, because the reader now has two outcomes to tell apart and the failure is where they
-will be standing when they need to.
+enforce - is unreachable once nothing produces that outcome, and AGENTS.md forbids dead code. An
+unreachable failure message is the kind that gets read as live documentation of behaviour that
+no longer exists.
 
-That is also what makes the line true of every branch that reaches it. The shape-matching
-version asserted "carries an issue number" on `bump-node-24`, which carries nothing of the sort.
+The `no-spec` failure needed a correction of its own. It said *"Every item needs one, and no
+branch may exist without it"* - the same absolute this change makes false, in the one copy of
+the rule a contributor actually reads, at the moment they read it. It now says every **tracked**
+item needs one.
 
 ## Acceptance
 
-- A branch naming no known item anywhere exits 0 and says why, on stdout.
-- A branch naming a known item outside an anchored position fails as `no-key`, names the item,
-  and gives the branch-naming guidance.
-- A digit-bearing name matching no item passes.
-- A keyed branch whose spec is missing or not `shipped` still fails.
+- A branch with no anchored key exits 0 and says why, on stdout - whatever digits it carries.
+- A keyed branch whose spec is missing or not `shipped` still fails, and a legacy key never
+  resolves to the bare issue sharing its number.
 - `npm run lint`, `npm test`, `npm run typecheck` green.
 
 ## Implementation notes
