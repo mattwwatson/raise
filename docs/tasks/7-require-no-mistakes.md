@@ -136,6 +136,20 @@ pipeline, because the pipeline's ability to open a GitHub pull request is the ve
 exists to establish. The check is not in the required set, so the red mark is a report rather
 than a block - which is the whole reason the sequencing puts step 3 last.
 
+**It was added to the required set and taken back out within the hour, which is the outcome
+worth recording.** Step 3 above was carried out once #9 proved the pipeline could open a GitHub
+pull request and satisfy the check - and it immediately collided with #9 itself. Requiring the
+check makes a full pipeline run, measured at fifty minutes on #9, the price of correcting one
+stale sentence; #9 existed to remove exactly that friction. The two items were in direct
+tension and only one could win.
+
+The resolution: the expectation is **stated, checked and visible, and not enforced**. A rule too
+expensive to follow is one people route around, and a routed-around rule costs more than the case
+it catches - which is the same argument this file already makes for why the check is named for
+what it reads rather than for what it proves. `CONTRIBUTING.md`'s claim that the maintainer is
+bound by required-check enforcement was true for those ten minutes and is corrected; the honest
+version is that the maintainer follows it by choice.
+
 **`edited` is in the trigger list for a reason worth keeping.** The pipeline writes its section
 into the body, and on some orderings that is an edit to a pull request that already exists.
 Without `edited`, a pull request that legitimately gained the marker would keep a failed check

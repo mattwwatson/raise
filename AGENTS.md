@@ -1546,6 +1546,15 @@ user-editable field, so it is a **convention check and not proof** - it gates ag
 knowing the process, never against choosing to skip it, and the job is named for what it reads
 rather than for what somebody might wish it proved.
 
+**It is deliberately not a required status check.** It was added to the required set and taken
+back out within the hour: requiring it makes a full pipeline run - fifty minutes, measured on
+[#9](https://github.com/mattwwatson/raise/issues/9) - the price of correcting a single stale
+sentence, which is exactly the friction that item existed to remove. The two are in direct
+tension and the resolution is that the expectation is **stated, checked and visible, and not
+enforced**. Do not quietly promote it without re-reading
+[docs/tasks/7-require-no-mistakes.md](docs/tasks/7-require-no-mistakes.md); a rule too expensive
+to follow is one that gets routed around, which costs more than the case it catches.
+
 It deliberately does **not** use the machine-readable
 `<!-- no-mistakes-pipeline-attestation:v1 … -->` line that sits beside the marker, even though
 its `head_sha` would defeat copy-paste from another pull request. That was measured rather than

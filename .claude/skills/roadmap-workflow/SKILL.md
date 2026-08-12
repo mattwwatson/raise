@@ -37,6 +37,39 @@ live in one directory.
 A spec carries **one** of `issue:` or `ticket:`, never both. Both is one item with two
 identities, and nothing downstream could say which of them a branch or a `depends:` meant.
 
+## `main` is protected, and not every change is a work item
+
+**You cannot push to `main`.** It requires a pull request and two green CI jobs, enforced for
+administrators as well - so `git push origin main` is refused, and that is deliberate rather
+than a misconfiguration to work around.
+
+**A change that ships no tracked item needs no issue and no spec.** Correcting a stale sentence,
+fixing a typo, updating a link: name the branch anything without a leading issue number, and the
+roadmap gate passes it as `untracked`. Four commands, and the last one merges it the moment CI
+goes green:
+
+```sh
+git switch -c fix/<short-name>
+git commit -am "fix: <what>"
+gh pr create --fill
+gh pr merge --auto --squash
+```
+
+That is the whole path. No issue, no spec file, no `## Implementation notes`. Everything below
+about capturing and picking up applies to **tracked work** - something worth an issue, a spec
+and a record of why.
+
+**Code should go through the pipeline**, which opens the pull request for you:
+
+```sh
+git push no-mistakes <branch>
+```
+
+It runs review, tests, lint and docs first, and a check reports whether a pull request carried
+its signature. That check is **not required and does not block a merge** - see
+[docs/tasks/7-require-no-mistakes.md](../../../docs/tasks/7-require-no-mistakes.md) for why
+requiring it was tried and reversed. Use it for anything that is not a one-line correction.
+
 ## Capturing a new task
 
 **Write the file first. Create the issue last.** In this order, so each artefact is written
@@ -160,6 +193,13 @@ loose document.
 6. **Put `Closes #23` in the pull request description.** This is what closes the issue on
    merge, and it is the one piece of automation in the whole workflow. Without it the issue
    stays open over merged work, which is the tracker and `main` telling different stories.
+
+   > **The pipeline writes the pull request body itself, so this line does not survive
+   > `git push no-mistakes`.** Issue 9 shipped in a merged pull request and stayed open,
+   > because nothing put a closing keyword in a body `no-mistakes` had authored. Either add it
+   > to the body afterwards with `gh pr edit --body`, or close the issue by hand and say which
+   > pull request shipped it. Check after merging; the failure is silent and looks exactly like
+   > an item nobody finished.
 7. **In the PR, set the spec's `status: shipped` and `shipped: <date>`**, and add the
    `## Implementation notes` section. Merging closes the issue; only the PR can set the file.
 
@@ -264,8 +304,9 @@ Add to this list as more are found.
 
 ## The rules that make this work
 
-- **One item, one branch, one issue, one file.** A tightly related batch may share a branch;
-  prefer not to.
+- **One tracked item, one branch, one issue, one file.** A tightly related batch may share a
+  branch; prefer not to. A change that ships no tracked item has none of the four and needs
+  none - see the top of this file.
 - **Nothing edits a shared ordered list.** Status changes touch only the item's own file, so
   two branches never conflict over the roadmap itself.
 - **GitHub issues the numbers**, so two sessions can create work items at the same time
