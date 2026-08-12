@@ -35,12 +35,25 @@ written once:
    attach a web link on the ticket pointing at the file:
 
    ```
-   https://bitbucket.org/mattw_watson/no-mistakes-monitor/src/main/docs/tasks/RAI-15-<short-name>.md
+   https://github.com/mattwwatson/raise/blob/main/docs/tasks/RAI-15-<short-name>.md
    ```
 
    Link title `Spec: docs/tasks/<file>`. The URL 404s until the PR merges - that is fine
-   and expected. **The repository is being renamed under [RAI-3]; this URL changes with
-   it.**
+   and expected.
+
+   **The link follows the spec, not the ticket.** A ticket gets one when its spec file
+   exists and not before, which is the whole rule: an epic child captured under the
+   exception below has no spec until somebody picks it up, so it correctly has no link
+   until then either. Add it in the same pass that writes the file. A ticket that will
+   never have a spec - one closed as `wont-do`, say - never gets one.
+
+   > **None of the existing links work, and that is scheduled rather than unnoticed.**
+   > Audited 12/08/2026: 14 tickets carry one, 13 of them still naming the pre-rename
+   > `no-mistakes-monitor` slug, and every one of them pointed at a private Bitbucket
+   > repository no reader could open. Five tickets with specs carry none at all - RAI-4,
+   > RAI-6, RAI-7, RAI-8 and RAI-14. Rewriting the lot onto the GitHub URL above is
+   > [RAI-5]'s, along with the move that makes it resolve; do not add Bitbucket links in
+   > the meantime.
 
 The reason for the order is that a file is cheap to rewrite and a Jira ticket is not. While
 the shape is still moving, moving it on disk costs nothing.
@@ -227,4 +240,4 @@ Add to this list as more are found.
 - **Both gates pass before anything is done**: `npm test` and `npm run typecheck`, plus
   `npm run lint`. See AGENTS.md.
 
-[RAI-3]: https://mattwwatson.atlassian.net/browse/RAI-3
+[RAI-5]: https://mattwwatson.atlassian.net/browse/RAI-5
