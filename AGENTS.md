@@ -1540,6 +1540,22 @@ lint and typecheck do not, being version-independent. Why there is no coverage j
 the two Node versions are each for, is in that file's own comments; renaming any npm script it
 invokes - these three, or either roadmap gate below - means changing it there too.
 
+**A third workflow, `.github/workflows/no-mistakes-required.yml`, checks that a pull request
+carries the signature the `no-mistakes` pipeline writes into its body.** It reads a
+user-editable field, so it is a **convention check and not proof** - it gates against not
+knowing the process, never against choosing to skip it, and the job is named for what it reads
+rather than for what somebody might wish it proved.
+
+It deliberately does **not** use the machine-readable
+`<!-- no-mistakes-pipeline-attestation:v1 … -->` line that sits beside the marker, even though
+its `head_sha` would defeat copy-paste from another pull request. That was measured rather than
+assumed: across six merged pull requests on the project this pattern was taken from, the
+attested SHA matched the pull request head on three. It is written when the body is written and
+a later push moves the head without rewriting it, so gating on it would fail legitimate
+contributions - a false failure in the check whose whole job is teaching people the process.
+Revisit only if `no-mistakes` starts rewriting it on every push. See
+[docs/tasks/7-require-no-mistakes.md](docs/tasks/7-require-no-mistakes.md).
+
 **A pull request and a push are two different builds and both run.** The push builds the
 branch head; the pull request builds its merge with the base, which is what catches a branch
 that passes alone and fails against `main`. The gate that is *not* on both is `tasks:gate`,
@@ -1635,6 +1651,12 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
   is what proves an unconfigured Raise makes no request at all - **do not weaken that guard
   either.** If this ever grows a second thing to send or a second place to send it, that is a
   change to the README's privacy section first and code second.
+- **`.github/workflows/no-mistakes-required.yml` reads a pull request body, which is untrusted
+  input.** It takes it through the environment and never interpolates `${{ }}` into the `run:`
+  block, because that substitution happens before the shell sees it - a body containing shell
+  syntax would execute. Same rule `src/exec.js` follows for argv. It is also not redundant with
+  `ci.yml` and must not be folded into it: `ci.yml` asks whether the code is good, this asks how
+  the change got here, and only this one needs the `edited` trigger.
 - **Do not weaken `src/security.js`.** Token, `Host` allowlist and `Origin` allowlist are all
   three load-bearing - this server ends up running `osascript` and `tmux`, and localhost is
   not a boundary. `/health` is the only unauthenticated route and returns liveness only.

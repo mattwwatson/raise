@@ -657,7 +657,9 @@ Node 22 to keep the version requirement above honest.
 Architecture, conventions, the file layout and the design decisions behind them are in
 [AGENTS.md](AGENTS.md). What a contribution has to clear is in
 [CONTRIBUTING.md](CONTRIBUTING.md) - a new terminal is one entry and a test, and that is the
-contribution the architecture was shaped for. Security reports go through
+contribution the architecture was shaped for. Changes are pushed through the
+[no-mistakes](https://github.com/kunchenguid/no-mistakes) pipeline rather than straight to the
+remote, the maintainer's included; `CONTRIBUTING.md` has the two commands. Security reports go through
 [SECURITY.md](SECURITY.md) rather than an issue.
 
 ## Roadmap
