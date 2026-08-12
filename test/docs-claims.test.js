@@ -157,6 +157,22 @@ for (const doc of DOCS) {
 const PACKAGE_NAME = /^(?:@[a-z0-9-][a-z0-9-._]*\/)?[a-z0-9-][a-z0-9-._]*$/;
 
 /**
+ * A filename, which is package-name-shaped and is not a package.
+ *
+ * `package.json` passes `PACKAGE_NAME` on every character, and the sentence is
+ * one plausible rewording away from carrying it - the neighbouring bullet
+ * already writes ``dependencies` in `package.json``. A fourth name there is a
+ * failure telling the author to fix a list that is correct, which is the
+ * learned-around check this file is written against.
+ *
+ * This stays a rule about **shape** rather than the package-name exemption list
+ * rejected above, and the distinction is the whole reason it is allowed: an
+ * exemption list is a second inventory to keep in step, an extension is not. A
+ * scoped name keeps its slash segment and has no dot to match on.
+ */
+const FILE_NAME = /\.(?:json|md|js|mjs|cjs|ts|mts|cts|yml|yaml|toml|lock|txt|sh|html|css)$/;
+
+/**
  * The devDependencies a document names, from the bullet that enumerates them.
  *
  * Written to fail when the lists genuinely disagree and not when somebody
@@ -171,12 +187,17 @@ const PACKAGE_NAME = /^(?:@[a-z0-9-][a-z0-9-._]*\/)?[a-z0-9-][a-z0-9-._]*$/;
  *    anything, including naming a package as an example.
  * 3. Only **package-shaped backticked tokens** count, per `PACKAGE_NAME`.
  *
- * Returns null when the anchor is not there, which the caller must fail on:
- * a parser that quietly finds nothing is a green tick over an unread document,
- * which is this project's own failure mode wearing a passing test.
+ * Returns null when the anchor is not there *and* when it is there but names
+ * nothing, which the caller must fail on: a parser that quietly finds nothing is
+ * a green tick over an unread document, which is this project's own failure mode
+ * wearing a passing test. The two are one answer on purpose - an empty list
+ * reported as a list is the check blaming the document for drift when what
+ * actually happened is that the parser lost the sentence, and a rewording it is
+ * meant to survive gets there: a bold lead-in with no full stop inside it leaves
+ * the sentence split holding the clause after it.
  *
  * @param {string} text
- * @returns {string[]|null} names as written, or null if the bullet is gone
+ * @returns {string[]|null} names as written, or null if the list was not found
  */
 export function devDependenciesNamedIn(text) {
   const lines = text.split('\n');
@@ -193,9 +214,10 @@ export function devDependenciesNamedIn(text) {
   // The lead-in ends in a full stop of its own, so it is stripped before the
   // sentence split rather than counted as the first sentence.
   const sentence = body.split(/(?<=\.)\s+(?=[A-Z])/)[0];
-  return [...sentence.matchAll(/`([^`]+)`/g)]
+  const named = [...sentence.matchAll(/`([^`]+)`/g)]
     .map((match) => match[1])
-    .filter((token) => PACKAGE_NAME.test(token));
+    .filter((token) => PACKAGE_NAME.test(token) && !FILE_NAME.test(token));
+  return named.length > 0 ? named : null;
 }
 
 test('devDependenciesNamedIn reads the enumerating sentence and nothing after it', () => {
@@ -222,13 +244,34 @@ test('devDependenciesNamedIn returns null when the bullet it anchors on is gone'
   assert.equal(devDependenciesNamedIn('- **A runtime dependency.** `dependencies` is empty.'), null);
 });
 
+// A lead-in carrying no full stop of its own leaves the sentence split holding
+// the clause that follows it, so the names sit one sentence further on and the
+// parse comes back empty. That is the parser losing the list, not the document
+// disagreeing with package.json, and it has to fail as the former.
+test('devDependenciesNamedIn reports a lead-in with no full stop as a lost anchor', () => {
+  const text = [
+    '- **A fourth devDependency** is not on the table. They are `typescript`,',
+    '  `@types/node` and `oxlint`.',
+  ].join('\n');
+  assert.equal(devDependenciesNamedIn(text), null);
+});
+
+test('devDependenciesNamedIn ignores a filename sharing the enumerating sentence', () => {
+  const text = [
+    '- **A fourth devDependency.** They are `typescript`, `@types/node` and `oxlint` in',
+    '  `package.json`, for `npm run typecheck`.',
+  ].join('\n');
+  assert.deepEqual(devDependenciesNamedIn(text), ['typescript', '@types/node', 'oxlint']);
+});
+
 test('CONTRIBUTING.md names exactly the devDependencies package.json has', () => {
   const named = devDependenciesNamedIn(readFileSync(join(ROOT, 'CONTRIBUTING.md'), 'utf8'));
   assert.ok(
     named,
-    'CONTRIBUTING.md has no bullet whose bold lead-in mentions devDependency - the check ' +
-      'above cannot find the list it is meant to be pinning, and needs re-anchoring rather ' +
-      'than deleting',
+    'CONTRIBUTING.md yielded no devDependency list - either no bullet has a bold lead-in ' +
+      'mentioning devDependency, or the one that does no longer names them in its first ' +
+      'sentence. Either way the check above cannot find the list it is meant to be pinning, ' +
+      'and needs re-anchoring rather than deleting',
   );
   const actual = Object.keys(
     JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).devDependencies,
