@@ -666,9 +666,10 @@ Every item has a written spec in [docs/tasks/](docs/tasks/), in this repository 
 built, and the reasoning behind it. `npm run tasks` prints the board from those files, which is
 the same board without the ordering.
 
-**The ordering itself lives in a tracker that is not public**, so it is not linked here rather
-than linked and locked. That is the only part of this that a reader cannot see; the
-specifications are the part worth reading anyway.
+**The ordering lives in [the issues](https://github.com/mattwwatson/raise/issues)**, top down,
+and it is the only thing that is not on disk - a spec says how an item works, never when it is
+due. Until 12/08/2026 that ordering sat in a private tracker and this paragraph said so; it is
+public now, so the whole roadmap is.
 
 `npm run tasks:links` and `npm run tasks:gate` are the two checks CI runs over the specs, the
 second asserting that the spec for a pull request's item already says `shipped`. What each
