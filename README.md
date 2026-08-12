@@ -1,8 +1,7 @@
 # Raise (`raise`)
 
-One page that shows every agent session on your machine - Claude Code, Claude Desktop, pi and
-Codex - tells you which one is waiting for you, and jumps to that window when you click it. If
-you use `no-mistakes`, each session also shows what its pipeline is doing.
+One page that shows every agent session on your machine - Claude Code, Claude Desktop, Codex
+and pi - tells you which one is waiting for you, and jumps to that window when you click it.
 
 If you run several agent sessions across several repos, the problem is not knowing that work
 is happening. It is noticing the one that stopped and wants an answer, and then finding which
@@ -10,203 +9,36 @@ of your fifteen terminal tabs it was in. That is what this fixes.
 
 ```
 WAITING FOR YOU
-  hexbattle      HXB-56-residue-never-drains   Waiting for you - Claude needs your response   2m   tmux
+  payments     PAY-56-retry-backoff     Waiting for you - Claude needs your response   2m   tmux
 PIPELINE PARKED
-  firstmate      fm/poll-dispatch              Pipeline parked at a gate                      12s  tab
-                 NO-MISTAKES  review
+  storefront   feat/checkout-redesign   Pipeline parked at a gate                      12s  tab
+               NO-MISTAKES  review
 WORKING
-  moroku-skills  feature/dev-setup-skill       Working                                             tab
-                 NO-MISTAKES  test · Running npm test
+  docs-site    fix/broken-anchors       Working                                             tab
+               NO-MISTAKES  test · Running npm test
 ```
 
-## What it watches
+The `NO-MISTAKES` lines are one of the [optional signals](#optional-signals): they appear if
+you have that tool and are simply absent if you do not. Nothing else on the page changes.
 
-Three different things, because they answer three different questions.
+## What you need
 
-| Signal | Where it comes from | What it means |
-| --- | --- | --- |
-| **Waiting for you** | the agent's own hooks | The agent hit a permission prompt, or Claude Code has been idle waiting for input. This is the one worth interrupting yourself for. **Not pi**, which has no permission prompt - see [pi sessions](#pi-sessions); a [Codex](#codex-sessions) row can say it but cannot say why. |
-| **Waiting on your review** | the running `lavish-axi poll` | The agent is sitting in a `lavish-axi poll`, waiting for you to open a review page and respond. It looks busy from the outside; it is not. |
-| **Pipeline parked** | the no-mistakes database | A run stopped at a gate. Usually the agent answers it itself within seconds, so it is informational. |
+- **Node 22.13 or newer.** 22.13 is where `node:sqlite` stopped needing a command-line flag;
+  earlier 22.x will not run it.
+- **One supported agent**: Claude Code, [Codex](#codex-sessions) or [pi](#pi-sessions). More
+  than one at a time is fine - they share the page.
+- **macOS, for clicking a row to raise its window.** Monitoring itself runs anywhere. Raising
+  a window means AppleScript against iTerm2 or Terminal.app, so that half is macOS-only -
+  worth knowing now rather than three minutes in.
 
-**There is nothing to configure per project.** Sessions report themselves through the agent's
-hooks, so a repo shows up the first time you work in it and is never registered anywhere. The
-pipeline half needs no setting up either: `no-mistakes` keeps one daemon and one SQLite database
-for the whole machine, so every repo's runs are read from that one place.
-
-**Rows name themselves apart.** A row is normally labelled with just the repo directory name,
-but a repo, its worktrees and a second clone of it all share that name - three cards reading
-`hexbattle` tell you nothing about which is which. When two rows would collide, each grows
-one parent directory at a time until they differ, and no further:
-
-```
-work/hexbattle          /Users/you/work/hexbattle
-2/hexbattle             /Users/you/.treehouse/hexbattle-04b649/2/hexbattle
-no-mistakes-monitor     unique already, so left alone
-```
-
-Rows for the *same* place keep one name - two sessions in one repo, say. No amount of path
-would separate them, so they are told apart by their branch, their state, and the name you
-gave the session, if you gave it one.
-
-## Every row says what it is about
-
-"Working" across four repos tells you nothing about which one to look at. Every row a session
-has reported shows Claude's own name for the session and the tool it is running this second -
-the quiet rows for [sessions that never reported](#install) are the one exception - and when
-no-mistakes is driving, what the pipeline is doing gets a line of its own beneath, because the
-two are happening at once:
-
-```
-WAITING FOR YOU
-  hexbattle      Waiting for you - Claude needs your response    Editing terrain.js   2m
-                 Design landing page with hex game visuals
-WORKING
-  money-webapp   Working                                         Running npm
-                 Build PR feedback automation
-```
-
-That comes from the transcript Claude Code already writes, so it is quoted rather than
-guessed at. The transcript never leaves your machine: the server reads a local file and
-renders it on your own dashboard, in your own browser. Nothing else leaves it either, unless
-you deliberately turn on the one feature that asks a forge about a pull request - see
-[Security](#security).
-
-**Expand a row to see the last few things it did.** The chevron on the right of any session
-row opens a panel with what you asked, what Claude said back, and every tool it ran with how
-each turned out - enough to decide whether to go and look without switching to the terminal.
-
-```
-alpha  feat/live-pr                                    PR #41 OPEN   51m  tab  Focus ↗  ⌃
-  14:39:21  YOU     can you wire up the settlement ledger and make it idempotent
-  14:39:31  CLAUDE  Looking at the existing job first - it retries on failure, so…
-  14:39:41  Read    Reading reconcile.js                                        ✓
-  14:40:11  Bash    Run the reconciliation tests                                ✗
-  14:42:41  Bash    Re-run the reconciliation tests                             …
-```
-
-It is fetched only when you open it, one session at a time, and it refreshes while it is
-open. Subagent side-conversations and the boilerplate Claude Code injects into the user role
-are filtered out, so what you see is what actually passed between you and Claude.
-
-**A row links its pull request.** If a branch has one open, the row shows `PR #41` and takes
-you to it. The state is only shown as a badge while somebody is actually watching the PR -
-which, unless you turn on the forge lookup below, means a no-mistakes run still going *and* a
-reading from the last few minutes. Once the run ends no-mistakes stops checking, so a stored
-"open" can be days out of date; and a run can keep running long after anything stopped
-looking, so being alive is not on its own enough. After that the link stays and the state
-moves into the tooltip as *"was open, last checked 3d ago"*. The link outlives the run on
-purpose: the run is over in minutes, and the review is what you are waiting on for the rest
-of the day.
-
-Pull requests opened outside a no-mistakes run are picked up from the session's own
-transcript, so a plain `gh pr create` still gets a link.
-
-**You can have the badge always be right, by letting Raise ask.** Turning on
-[pull request state](#pull-request-state-from-the-forge) makes Raise ask GitHub or Bitbucket
-directly, which is the one source that cannot be out of date - so a merged pull request stops
-saying `OPEN` within the minute, and a review nobody is watching gets a real state rather than
-a tooltip. It is off until you configure it, and it is the only thing in Raise that makes an
-outbound request.
-
-**The branch is always shown**, next to the repo name, read straight from `.git/HEAD` - so it
-is right for worktrees and for sessions that have never run the pipeline. It is also what ties
-a pipeline and a pull request to a session, so a checkout on a detached HEAD shows neither
-rather than borrowing whichever was nearest.
-
-**If you have named a session, the name is shown too**, between the repo and the branch. Two
-sessions on one repo and one branch is an ordinary day, and nothing else on the row tells them
-apart - so `/rename Open Source Planning` in Claude Code, or `/name` in pi, is the fastest way
-to make the right card obvious:
-
-```
-no-mistakes-monitor  Open Source Planning     feat/session-names   3m  tmux  Focus ↗
-Waiting for you - Claude needs your response
-Add Pi support and promote session monitoring tool
-```
-
-The AI-generated title stays on its own line underneath. The name is what you meant the session
-for; the title is what it turned out to be doing, and over a long session the two drift apart.
-
-**One row per repo, even while no-mistakes is running.** no-mistakes does its pipeline work in
-its own Claude sessions, in worktrees of their own. Those show up to the hooks like any other
-session, so they used to arrive as extra cards titled with a run id - an unrelated-looking
-repo you could not click. They are now folded onto the row of the repo they are working on:
-
-```
-PIPELINE PARKED
-  hexbattle  HXB-63-review                                    2m  tmux  Focus ↗
-  Pipeline parked at a gate
-  Work out why the ridge tiles overlap
-  NO-MISTAKES  review - 2 finding(s) · Reviewing terrain.ts
-```
-
-If one of those agents ever stops for a permission prompt, the repo's row goes red and says so
-- the pipeline has stalled and only you can free it.
-
-**What you are doing and what the pipeline is doing are separate lines**, because they happen
-at the same time. Your session keeps its own state and title while no-mistakes works underneath
-it; the `NO-MISTAKES` line says which step is running and what it is up to. That works even when
-there is no pipeline agent to see - a CI monitor rebasing your pull request runs inside the
-no-mistakes daemon, and the line still reports it.
-
-**The pipeline lands on the session that started it.** Several sessions open on one checkout
-is an ordinary day, and only one of them can answer a gate - so the other cards show nothing
-about the pipeline at all: no step, no parked gate, no `NO-MISTAKES` line. They still name the
-same repo and branch, and they still link its pull request.
-
-**A run that cannot be placed gets one card of its own, at the bottom**, saying it could not be
-traced to a session and how many of your sessions share that repo. That happens when the session
-that started it has gone, when it was run by hand, or when nothing was running to trace it to.
-It is never shown on a session that might not own it: on a page you trust to tell you who needs
-you, a pipeline attached to the wrong card is worse than one attached to none.
-
-**A run that has passed leaves the page**, because it is finished business. A run that
-**failed** stays, until you switch that checkout to another branch.
-
-A session in a git worktree counts here as being in the checkout the worktree was created
-from, because that is the repo no-mistakes registers its runs against - so a pipeline started
-from a Treehouse tree lands on that tree's row rather than on an idle card for the main
-checkout. Sibling worktrees are told apart by their branch, so a worktree left on a detached
-HEAD shows no pipeline rather than the one next door's.
-
-**A session waiting on a Lavish review says so, and gives you the link back.** An agent
-sitting in a `lavish-axi poll` has stopped and is waiting for you to open a page you opened a
-while ago and have since buried under thirty tabs. The hooks see a busy session, so this used
-to be invisible. Now it gets its own group, ranked just under "waiting for you", with a
-`Review ↗` straight back to the page.
-
-The favicon carries the most urgent state on the page, so a pinned tab tells you whether
-anything wants you without being opened. It goes hollow when the page goes stale, for the same
-reason the header dot does.
-
-## Requirements
-
-- Node 22.13 or newer (`node:sqlite` is used, and it is built in - **there are no runtime dependencies**). 22.13 is where `node:sqlite` stopped needing a command-line flag; earlier 22.x will not run it
-- Claude Code, for the "waiting for you" half. [Codex](#codex-sessions) is supported too and has
-  a real approval gate; [pi](#pi-sessions) is supported with the caveat that it has none
-- macOS for window focusing. Monitoring itself works anywhere.
-
-Optional, and independently so - Raise runs with neither, and says nothing about the ones you
-do not have:
-
-| Optional | Without it |
-| --- | --- |
-| `no-mistakes` | No pipeline rows: nothing is parked, failed or running a step, and no pull request comes from the database. Sessions, blocks, reviews and focusing are unaffected. |
-| `lavish-axi` | No "waiting on your review" rows. That state is detected by watching for a live `lavish-axi poll` and by nothing else, so without Lavish there is nothing to detect. |
-| `gh` | No pull request state from GitHub, if you turned that on at all - see [pull request state](#pull-request-state-from-the-forge). It is off by default, so on an unconfigured machine `gh` is never looked for. |
-
-Absence is not degradation and is never reported as a fault: no warning banner, no `fail` in
-`raise doctor`, and nothing shelled out looking for a command that is not there. `raise doctor`
-lists each as `--  not installed` so you can tell an integration you skipped from one that
-broke. Install no-mistakes later and a running monitor picks it up within a second - the
-daemon creates its database on first use, and Raise looks each time it reads.
+There are **no runtime dependencies at all** - Node's own builtins and nothing else. Everything
+below that names another tool is optional, and [says so](#optional-signals).
 
 ## Install
 
 ```sh
-git clone git@bitbucket.org:mattw_watson/no-mistakes-monitor.git
-cd no-mistakes-monitor
+git clone git@bitbucket.org:mattw_watson/raise.git
+cd raise
 npm link          # optional, puts `raise` on your PATH
 raise install-hooks
 raise serve
@@ -235,76 +67,259 @@ status we can honestly read. Restart it and it becomes an ordinary row.
 Then open the URL `raise serve` prints and leave the tab pinned. Click "Enable alerts" once if
 you want desktop notifications when something starts waiting on you.
 
-### Upgrading from `nmmon`
+Codex and pi each take one more command - [Codex sessions](#codex-sessions),
+[pi sessions](#pi-sessions).
 
-Raise used to be called `nmmon`. If that is what you have installed, two things need doing by
-hand, and the first of them wants doing **before you pull this change**.
+## Security
 
-**Uninstall the old hooks with the old binary.** From your existing checkout, still on the old
-commit:
+You have just been asked to let a program merge hooks into your agent's settings and read your
+transcripts. Here is exactly what that means.
 
-```sh
-nmmon uninstall-hooks
-nmmon uninstall-pi
+**There are no runtime dependencies.** Not "few" - none. Raise runs on Node's own builtins,
+`dependencies` in `package.json` is empty and is meant to stay empty. Nothing here can be
+compromised through a package you did not choose, because there is no package you did not
+choose. For a tool that installs hooks into your agent and ends up running `osascript`, that
+is the load-bearing half of the answer.
+
+The server binds to `127.0.0.1`, but that alone is not a boundary: any page open in your
+browser can make requests to localhost, and DNS rebinding can point a hostile domain there.
+Since this server ends up running `osascript` and `tmux`, it also requires
+
+- a shared token, generated per install and kept `0600` in `~/.raise/token`
+- a `Host` header allowlist, which is what actually defeats DNS rebinding
+- an `Origin` allowlist
+
+`/health` is the only unauthenticated route, and it returns nothing but liveness.
+
+The hook - and pi's extension, which posts the same payload - never sends prompts,
+transcripts or file contents. It sends the session id, the working directory, the event name,
+a notification message where Claude supplies one, and the window identity needed to focus
+the tab. That is an allowlist rather than a promise: the hook copies out the fields it is
+allowed to send, so anything an agent adds to a payload in a future version stays inside
+your session unless someone deliberately adds it to the list.
+
+Expanding a row shows conversation text, and that is the only place it appears. It is read
+from a local file by a local server and rendered in your own browser - it is not in the
+event stream, not in the hook payload, and not sent anywhere. The token guards that route
+like every other one, which is exactly why localhost alone is not treated as a boundary.
+
+Finding the sessions that predate the hooks means listing your agents' own session
+directories - `~/.claude/projects`, `~/.codex/sessions` and `~/.pi/agent/sessions` - and
+reading enough of a recent transcript to learn which directory it was working in. That is the
+same kind of local read as everything above, on the same machine, and none of it goes further
+than the page in your browser.
+
+**One optional feature sends anything at all, and it is off until you configure it.** Raise
+can ask GitHub or Bitbucket whether a pull request already on your dashboard is still open.
+What goes out is that pull request's own URL, the one the row already links to, to the forge
+that hosts it. Nothing else: no transcript, no prompt text, no file contents, no branch names,
+no list of your repositories, and no request to any host but that forge's own API -
+`api.github.com`, reached through `gh`, or `api.bitbucket.org`, and nowhere else. With it
+off - which is the default - Raise makes no outbound network request of any kind. GitHub
+goes through your own `gh` login, so Raise never sees a GitHub credential at all; Bitbucket
+needs an API token with the single scope `read:pullrequest:bitbucket`, which grants no access
+to your source code, kept `0600` in `~/.raise/config.json`, never logged, never echoed, and
+never sent anywhere but Bitbucket. Turning it on is
+[one config file](#pull-request-state-from-the-forge).
+
+Everything the hooks install is reversible - `uninstall-hooks`, `uninstall-codex`,
+`uninstall-pi` - and every write to a settings file keeps a `.raise-backup` beside it.
+
+## What it watches
+
+Three different things, because they answer three different questions.
+
+| Signal | Where it comes from | What it means |
+| --- | --- | --- |
+| **Waiting for you** | the agent's own hooks | The agent hit a permission prompt, or Claude Code has been idle waiting for input. This is the one worth interrupting yourself for. **Not pi**, which has no permission prompt - see [the support matrix](#which-agent-reports-what). |
+| **Waiting on your review** | the running `lavish-axi poll` | The agent is sitting in a `lavish-axi poll`, waiting for you to open a review page and respond. It looks busy from the outside; it is not. |
+| **Pipeline parked** | the no-mistakes database | A run stopped at a gate. Usually the agent answers it itself within seconds, so it is informational. |
+
+**There is nothing to configure per project.** Sessions report themselves through the agent's
+hooks, so a repo shows up the first time you work in it and is never registered anywhere. The
+pipeline half needs no setting up either: `no-mistakes` keeps one daemon and one SQLite database
+for the whole machine, so every repo's runs are read from that one place.
+
+**Rows name themselves apart.** A row is normally labelled with just the repo directory name,
+but a repo, its worktrees and a second clone of it all share that name - three cards reading
+`payments` tell you nothing about which is which. When two rows would collide, each grows
+one parent directory at a time until they differ, and no further:
+
+```
+work/payments       /Users/you/work/payments
+2/payments          /Users/you/.worktrees/payments/2/payments
+docs-site           unique already, so left alone
 ```
 
-Raise recognises its own entries in `~/.claude/settings.json` and `~/.pi/agent/settings.json`
-by the *filename* of the hook and the extension, and both filenames changed with the rename, so
-the new binary does not know the old entries are its. Each one goes on running `node` against
-`hooks/nmmon-hook.js` - a path this change deletes - on every one of the six events it was
-registered for. What you are likely to see for that is a module-not-found on stderr naming the
-old path, which says nothing about a rename, so it is worth knowing to look for it; how loudly
-a failing non-blocking hook is surfaced is Claude Code's business rather than ours, and not
-something to count on.
+Rows for the *same* place keep one name - two sessions in one repo, say. No amount of path
+would separate them, so they are told apart by their branch, their state, and the name you
+gave the session, if you gave it one.
 
-What is certain is that Raise cannot tidy this up for you. `uninstall-hooks` does not recognise
-the old marker, so it cannot remove the stale entries, and `install-hooks` appends a *second*
-group per event rather than replacing the old one - leaving both registered and both firing. If
-you have already pulled, editing those two settings files by hand and deleting the entries
-naming `nmmon` is the only remedy left.
+## Every row says what it is about
 
-**Move the forge config across**, if you turned on
-[pull request state from the forge](#pull-request-state-from-the-forge):
+"Working" across four repos tells you nothing about which one to look at. Every row a session
+has reported shows the agent's own name for the session and the tool it is running this second -
+the quiet rows for [sessions that never reported](#install) are the one exception - and when
+no-mistakes is driving, what the pipeline is doing gets a line of its own beneath, because the
+two are happening at once:
 
-```sh
-mkdir -p ~/.raise && mv ~/.nmmon/config.json ~/.raise/config.json   # keep it 0600
+```
+WAITING FOR YOU
+  payments     Waiting for you - Claude needs your response    Editing ledger.js   2m
+               Make the settlement job idempotent
+WORKING
+  storefront   Working                                         Running npm
+               Redesign the checkout flow
 ```
 
-`~/.raise/` is created by `raise serve`, which at this point you have not run yet - hence the
-`mkdir`. Everything else in `~/.nmmon/` regenerates - the token, `server.json`, the session
-records - but this file does not. Left where it is, the lookup silently reverts to off, and it
-is silent in both directions: `raise doctor` reports it as simply not enabled, because from the
-new path's point of view there is no config to have an opinion about. The mode matters as much
-as the move, since an unsafe mode makes Raise refuse the whole file, opt-in included.
+That comes from the transcript the agent already writes, so it is quoted rather than
+guessed at. The transcript never leaves your machine: the server reads a local file and
+renders it on your own dashboard, in your own browser. Nothing else leaves it either, unless
+you deliberately turn on the one feature that asks a forge about a pull request - see
+[Security](#security).
 
-### pi sessions
+**Expand a row to see the last few things it did.** The chevron on the right of any session
+row opens a panel with what you asked, what the agent said back, and every tool it ran with how
+each turned out - enough to decide whether to go and look without switching to the terminal.
 
-[pi](https://pi.dev) sessions are watched too, and they are marked with a `pi` chip so you can
-tell them from Claude Code rows at a glance:
-
-```sh
-raise install-pi
+```
+payments  feat/idempotent-ledger                          PR #41 OPEN   51m  tab  Focus ↗  ⌃
+  14:39:21  YOU     can you wire up the settlement ledger and make it idempotent
+  14:39:31  CLAUDE  Looking at the existing job first - it retries on failure, so…
+  14:39:41  Read    Reading reconcile.js                                        ✓
+  14:40:11  Bash    Run the reconciliation tests                                ✗
+  14:42:41  Bash    Re-run the reconciliation tests                             …
 ```
 
-That adds one path to `~/.pi/agent/settings.json`, with the same manners as `install-hooks` -
-it shows the change, asks first, keeps a `.raise-backup`, leaves your other extensions alone
-and in order, and is safe to run twice. Restart any pi sessions afterwards; extensions load at
-startup. Undo it with `raise uninstall-pi`.
+It is fetched only when you open it, one session at a time, and it refreshes while it is
+open. Subagent side-conversations and the boilerplate an agent injects into the user role
+are filtered out, so what you see is what actually passed between you and the agent.
 
-Everything on a pi row works the way it does on a Claude Code row - the repo, the branch, the
-pull request, the pipeline step, what it is doing right now, the review gate, and clicking to
-focus the window.
+**A row links its pull request.** If a branch has one open, the row shows `PR #41` and takes
+you to it. The state is only shown as a badge while somebody is actually watching the PR -
+which, unless you turn on the forge lookup below, means a no-mistakes run still going *and* a
+reading from the last few minutes. Once the run ends no-mistakes stops checking, so a stored
+"open" can be days out of date; and a run can keep running long after anything stopped
+looking, so being alive is not on its own enough. After that the link stays and the state
+moves into the tooltip as *"was open, last checked 3d ago"*. The link outlives the run on
+purpose: the run is over in minutes, and the review is what you are waiting on for the rest
+of the day.
 
-**One thing is genuinely different: a pi row never says "waiting for you".** pi has no
-permission prompt - it runs its tools without asking - so there is no such state to report,
-and Raise does not invent one. A pi session that has finished its turn shows as idle, not as
-something demanding your attention. It can still reach the top of the page through its
-pipeline: parked, failed, or waiting on a review.
+Pull requests opened outside a no-mistakes run are picked up from the session's own
+transcript, so a plain `gh pr create` still gets a link.
 
-The other small difference: Claude Code writes a short AI-generated title for every session and
-pi generates none, so a pi row shows no summary line. Naming the session with `/name Refactor
-auth` still works and still shows - it appears next to the repo, the same place Claude Code's
-`/rename` does.
+**You can have the badge always be right, by letting Raise ask.** Turning on
+[pull request state](#pull-request-state-from-the-forge) makes Raise ask GitHub or Bitbucket
+directly, which is the one source that cannot be out of date - so a merged pull request stops
+saying `OPEN` within the minute, and a review nobody is watching gets a real state rather than
+a tooltip. It is off until you configure it, and it is the only thing in Raise that makes an
+outbound request.
+
+**The branch is always shown**, next to the repo name, read straight from `.git/HEAD` - so it
+is right for worktrees and for sessions that have never run the pipeline. It is also what ties
+a pipeline and a pull request to a session, so a checkout on a detached HEAD shows neither
+rather than borrowing whichever was nearest.
+
+**If you have named a session, the name is shown too**, between the repo and the branch. Two
+sessions on one repo and one branch is an ordinary day, and nothing else on the row tells them
+apart - so `/rename Payments migration` in Claude Code, or `/name` in pi, is the fastest way
+to make the right card obvious:
+
+```
+payments  Payments migration     feat/idempotent-ledger   3m  tmux  Focus ↗
+Waiting for you - Claude needs your response
+Make the settlement job idempotent
+```
+
+The AI-generated title stays on its own line underneath. The name is what you meant the session
+for; the title is what it turned out to be doing, and over a long session the two drift apart.
+
+**One row per repo, even while no-mistakes is running.** no-mistakes does its pipeline work in
+its own Claude sessions, in worktrees of their own. Those show up to the hooks like any other
+session, so they used to arrive as extra cards titled with a run id - an unrelated-looking
+repo you could not click. They are now folded onto the row of the repo they are working on:
+
+```
+PIPELINE PARKED
+  payments  PAY-63-refund-double-count                       2m  tmux  Focus ↗
+  Pipeline parked at a gate
+  Work out why the ledger double-counts refunds
+  NO-MISTAKES  review - 2 finding(s) · Reviewing ledger.ts
+```
+
+If one of those agents ever stops for a permission prompt, the repo's row goes red and says so
+- the pipeline has stalled and only you can free it.
+
+**What you are doing and what the pipeline is doing are separate lines**, because they happen
+at the same time. Your session keeps its own state and title while no-mistakes works underneath
+it; the `NO-MISTAKES` line says which step is running and what it is up to. That works even when
+there is no pipeline agent to see - a CI monitor rebasing your pull request runs inside the
+no-mistakes daemon, and the line still reports it.
+
+**The pipeline lands on the session that started it.** Several sessions open on one checkout
+is an ordinary day, and only one of them can answer a gate - so the other cards show nothing
+about the pipeline at all: no step, no parked gate, no `NO-MISTAKES` line. They still name the
+same repo and branch, and they still link its pull request.
+
+**A run that cannot be placed gets one card of its own, at the bottom**, saying it could not be
+traced to a session and how many of your sessions share that repo. That happens when the session
+that started it has gone, when it was run by hand, or when nothing was running to trace it to.
+It is never shown on a session that might not own it: on a page you trust to tell you who needs
+you, a pipeline attached to the wrong card is worse than one attached to none.
+
+**A run that has passed leaves the page**, because it is finished business. A run that
+**failed** stays, until you switch that checkout to another branch.
+
+A session in a git worktree counts here as being in the checkout the worktree was created
+from, because that is the repo no-mistakes registers its runs against - so a pipeline started
+from a worktree lands on that worktree's row rather than on an idle card for the main
+checkout. Sibling worktrees are told apart by their branch, so a worktree left on a detached
+HEAD shows no pipeline rather than the one next door's.
+
+**A session waiting on a Lavish review says so, and gives you the link back.** An agent
+sitting in a `lavish-axi poll` has stopped and is waiting for you to open a page you opened a
+while ago and have since buried under thirty tabs. The hooks see a busy session, so this used
+to be invisible. Now it gets its own group, ranked just under "waiting for you", with a
+`Review ↗` straight back to the page.
+
+The favicon carries the most urgent state on the page, so a pinned tab tells you whether
+anything wants you without being opened. It goes hollow when the page goes stale, for the same
+reason the header dot does.
+
+## Which agent reports what
+
+Everything on the page works the same way for all three agents - the repo, the branch, the
+pull request, the pipeline step, the review gate, and clicking to focus the window. What
+differs is what each agent is *able* to tell us, and where a cell below says no, that is the
+agent's own design rather than something missing here.
+
+| | Claude Code | Codex | pi |
+| --- | --- | --- | --- |
+| Repo, branch, what it is doing right now | yes | yes | yes |
+| Pull request, pipeline, review gate, click to focus | yes | yes | yes |
+| **Waiting for you** - stopped at a permission prompt | yes | yes | **never** - pi has no permission prompt |
+| ...and what it is asking you for | yes | no - Codex sends no message with it | n/a |
+| A finished turn escalating to "waiting for you" after a minute | yes | no | no |
+| `Not for me`, to dismiss that escalation | yes | n/a | n/a |
+| A session title the agent wrote itself | yes | writes none | writes none |
+| The name you gave the session | `/rename` | none | `/name` |
+| Setting it up | `raise install-hooks` | `raise install-codex`, then approve it inside Codex | `raise install-pi` |
+
+The two rows worth reading twice:
+
+**pi never says "waiting for you"**, because pi ships no approval gate - its tools simply run,
+so there is no such state to report and Raise does not invent one. A finished pi turn shows as
+idle. It still reaches the top of the page honestly, through its pipeline: parked, failed, or
+waiting on a review.
+
+**A Codex row does turn red, and will not tell you why.** Codex has a real approval gate, so it
+can genuinely say a human is needed - but it has no notification of any kind, so there is
+nothing to carry the reason and Raise does not guess one. A red Codex row means go and look;
+the window itself will say what it is asking.
+
+## Setting up Codex and pi
+
+Claude Code needs nothing beyond `install-hooks` above. The other two each take one command.
 
 ### Codex sessions
 
@@ -327,19 +342,45 @@ no hash for**, so until you approve it, Raise sees no Codex sessions at all and 
 about why. Raise deliberately does not write that hash - `config.toml` is the record of what
 *you* have agreed to let Codex run, and it is not a monitor's to forge.
 
-Everything on a Codex row works the way it does on a Claude Code row - the repo, the branch,
-the pull request, the pipeline step, what it is doing right now, the review gate, and clicking
-to focus the window.
-
-**A Codex row does turn red, and it will not tell you why.** Codex has a real approval gate, so
-unlike pi it can genuinely say a human is needed - but it has no notification of any kind, so
-there is nothing to carry the reason and Raise does not guess one. A red Codex row means go and
-look; the window itself will say what it is asking. Codex writes no session title either, so a
-Codex row shows no summary line, the same as pi.
-
 **A finished Codex turn reads idle and stays that way.** There is no sixty-second nudge to
 escalate it, because Codex has no event for one and inventing one would put a Codex row in
-competition with real approval prompts on the strength of a guess.
+competition with real approval prompts on the strength of a guess. Codex writes no session
+title either, so a Codex row shows no summary line, the same as pi.
+
+### pi sessions
+
+[pi](https://pi.dev) sessions are watched too, and they are marked with a `pi` chip so you can
+tell them from Claude Code rows at a glance:
+
+```sh
+raise install-pi
+```
+
+That adds one path to `~/.pi/agent/settings.json`, with the same manners as `install-hooks` -
+it shows the change, asks first, keeps a `.raise-backup`, leaves your other extensions alone
+and in order, and is safe to run twice. Restart any pi sessions afterwards; extensions load at
+startup. Undo it with `raise uninstall-pi`.
+
+pi generates no AI title of its own, so a pi row shows no summary line. Naming the session
+with `/name Refactor auth` still works and still shows - it appears next to the repo, the same
+place Claude Code's `/rename` does.
+
+## Optional signals
+
+Three tools light up extra rows if you have them. **Raise runs with none of them**, and says
+nothing about the ones you do not have:
+
+| Optional | Without it |
+| --- | --- |
+| `no-mistakes` | No pipeline rows: nothing is parked, failed or running a step, and no pull request comes from the database. Sessions, blocks, reviews and focusing are unaffected. |
+| `lavish-axi` | No "waiting on your review" rows. That state is detected by watching for a live `lavish-axi poll` and by nothing else, so without Lavish there is nothing to detect. |
+| `gh` | No pull request state from GitHub, if you turned that on at all - see [pull request state](#pull-request-state-from-the-forge). It is off by default, so on an unconfigured machine `gh` is never looked for. |
+
+Absence is not degradation and is never reported as a fault: no warning banner, no `fail` in
+`raise doctor`, and nothing shelled out looking for a command that is not there. `raise doctor`
+lists each as `--  not installed` so you can tell an integration you skipped from one that
+broke. Install no-mistakes later and a running monitor picks it up within a second - the
+daemon creates its database on first use, and Raise looks each time it reads.
 
 ## Commands
 
@@ -351,8 +392,8 @@ competition with real approval prompts on the strength of a guess.
 | `raise doctor` | Check the setup and explain anything missing |
 | `raise focus <session>` | Bring a session's window to the front from the terminal |
 | `raise install-hooks` / `uninstall-hooks` | Manage the Claude Code hooks |
-| `raise install-pi` / `uninstall-pi` | Manage the pi extension |
 | `raise install-codex` / `uninstall-codex` | Manage the Codex hooks |
+| `raise install-pi` / `uninstall-pi` | Manage the pi extension |
 
 Useful flags: `--port`, `--settings <path>`, `--dry-run`, `--yes`. `RAISE_PORT` sets the
 default port when `--port` is absent; if it holds something that is not a port, `serve`
@@ -455,10 +496,10 @@ Supported terminals today: **iTerm2** and **Terminal.app**, plus **tmux** inside
 ### Claude Desktop sessions
 
 Opening a session in the Claude Desktop app puts it on the dashboard too - the app runs the
-same Claude Code underneath, so it fires the same hooks. Those rows are marked `desktop`
-rather than `tab`, and everything else about them is ordinary: the repo, the branch, what it
-is working on, its pull request, and any no-mistakes run it started all appear exactly as they
-do for a terminal session.
+same Claude Code underneath, so it fires the same hooks and needs no separate install. Those
+rows are marked `desktop` rather than `tab`, and everything else about them is ordinary: the
+repo, the branch, what it is working on, its pull request, and any no-mistakes run it started
+all appear exactly as they do for a terminal session.
 
 Focusing one brings the app to the front, and says so in a toast: Raise cannot reach inside
 Claude Desktop to select a session, so it raises the app and leaves the sidebar to you. The
@@ -469,52 +510,10 @@ where the app would recognise the id instead of copying is a session an earlier 
 already imported, so the link would land on that duplicate rather than the session you clicked
 - which is why Raise never uses it.
 
-## Security
+## Pull request state from the forge
 
-The server binds to `127.0.0.1`, but that alone is not a boundary: any page open in your
-browser can make requests to localhost, and DNS rebinding can point a hostile domain there.
-Since this server ends up running `osascript` and `tmux`, it also requires
-
-- a shared token, generated per install and kept `0600` in `~/.raise/token`
-- a `Host` header allowlist, which is what actually defeats DNS rebinding
-- an `Origin` allowlist
-
-`/health` is the only unauthenticated route, and it returns nothing but liveness.
-
-The hook - and pi's extension, which posts the same payload - never sends prompts,
-transcripts or file contents. It sends the session id, the working directory, the event name,
-a notification message where Claude supplies one, and the window identity needed to focus
-the tab. That is an allowlist rather than a promise: the hook copies out the fields it is
-allowed to send, so anything Claude Code adds to a payload in a future version stays inside
-your session unless someone deliberately adds it to the list.
-
-Expanding a row shows conversation text, and that is the only place it appears. It is read
-from a local file by a local server and rendered in your own browser - it is not in the
-event stream, not in the hook payload, and not sent anywhere. The token guards that route
-like every other one, which is exactly why localhost alone is not treated as a boundary.
-
-Finding the sessions that predate the hooks means listing your agents' own session
-directories - `~/.claude/projects`, `~/.pi/agent/sessions` and `~/.codex/sessions` - and
-reading enough of a recent transcript to learn which directory it was working in. That is the
-same kind of local read as everything above, on the same machine, and none of it goes further
-than the page in your browser.
-
-**One optional feature sends anything at all, and it is off until you configure it.** Raise
-can ask GitHub or Bitbucket whether a pull request already on your dashboard is still open -
-once a no-mistakes run ends nothing is watching it, so a stored "open" can be days old. What
-goes out is that pull request's own URL, the one the row already links to, to the forge that
-hosts it. Nothing else: no transcript, no prompt text, no file contents, no branch names, no
-list of your repositories, and no request to any host but that forge's own API -
-`api.github.com`, reached through `gh`, or `api.bitbucket.org`, and nowhere else. With it
-off - which is the default - Raise makes no outbound network request of any kind. GitHub
-goes through your own `gh` login, so Raise never sees a GitHub credential at all; Bitbucket
-needs an API token with the single scope `read:pullrequest:bitbucket`, which grants no access
-to your source code, kept `0600` in `~/.raise/config.json`, never logged, never echoed, and
-never sent anywhere but Bitbucket.
-
-### Pull request state from the forge
-
-Off by default. Turn it on by writing `~/.raise/config.json`:
+Off by default, and the only thing in Raise that makes an outbound request - what it sends and
+where is in [Security](#security). Turn it on by writing `~/.raise/config.json`:
 
 ```sh
 umask 077 && cat > ~/.raise/config.json <<'JSON'
@@ -574,7 +573,9 @@ only ever make a badge more current than it would have been without it, never le
 
 **Nothing appears.** Run `raise doctor`. The usual cause is hooks installed but sessions not
 restarted - in which case your sessions are on the page already, under **Not reporting to
-Raise**, and restarting each one turns it into an ordinary row.
+Raise**, and restarting each one turns it into an ordinary row. On Codex it is more likely the
+approval step: Codex runs no hook it has no hash for, so
+[approve it inside Codex](#codex-sessions) and restart.
 
 **A row says "Not tracked" and does nothing.** That is the above: nothing has ever reported
 that session, so all Raise has is a transcript it found on disk. It cannot say whether the
@@ -598,7 +599,7 @@ be updated - and the banner clears itself, with no restart, once the schema is o
 knows again.
 
 This banner means a no-mistakes that is installed and cannot be read. Not having no-mistakes
-at all is silent by design - see [Requirements](#requirements).
+at all is silent by design - see [Optional signals](#optional-signals).
 
 **No pipeline rows, ever.** Check `raise doctor`. If it says `--  no-mistakes  not installed`
 then Raise is looking in `~/.no-mistakes/state.sqlite` and finding nothing, which is the
