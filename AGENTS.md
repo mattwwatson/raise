@@ -480,7 +480,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 799 tests, no network, no dependencies, ~9s
+npm test          # 806 tests, no network, no dependencies, ~9s
 npm run lint      # oxlint over src, bin, hooks, public, test, scripts
 npm run typecheck # tsc --noEmit over src, bin, hooks, public, scripts
 ```
@@ -659,7 +659,7 @@ the [roadmap-workflow skill](.claude/skills/roadmap-workflow/SKILL.md).
 ## Commands
 
 ```sh
-npm test                       # 799 tests, ~9s
+npm test                       # 806 tests, ~9s
 npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
@@ -713,6 +713,14 @@ Two things that keep the rule honest, both learned from the state this file was 
 in `README.md` exists, because an index of pointers is only worth having if a pointer cannot
 rot. It is not covered by `npm run tasks:links`, which resolves references into `docs/tasks/`
 only.
+
+The same file pins the **one inventory `CONTRIBUTING.md` duplicates that can honestly be
+pinned** - the three devDependencies, against `package.json`. That duplication is deliberate and
+stays, because a contribution policy has to state a self-contained bar; the check makes it
+*detectable* when it drifts rather than impossible. The other three duplicated bars are prose,
+and are deliberately not matched on - the reasoning, and what would have to change for
+`REPORTABLE_FIELDS` to join them, is in that file's header and in
+[docs/tasks/6-contributing-drift.md](docs/tasks/6-contributing-drift.md).
 
 Prefer rewriting or pruning an existing entry over appending a new one, and keep entries
 concise. Adding a section here is a decision, not a default.
