@@ -1,6 +1,7 @@
 ---
 ticket: RAI-5
-status: in-progress
+status: shipped
+shipped: 2026-08-12
 size: L
 depends: RAI-3, RAI-6, RAI-8
 branch: RAI-5-package-for-public-release
@@ -220,10 +221,12 @@ Consequences, in the order they have to be resolved:
 - **The roadmap-workflow skill, `scripts/task-jira.js` and `tasks:validate`** all speak Jira.
   The skill is rewritten around issues; `tasks:validate` is the only command that talks to Jira
   and the only one that needs a credential, which is why no pipeline has ever run it.
-- **The `ticket:` frontmatter keeps its `RAI-N` keys.** Renumbering 21 shipped specs onto issue
-  numbers would rewrite the historical record to match a tracker that did not exist when the
-  work was done, and every cross-reference between specs would have to move with it. `RAI-N` is
-  what those items were called. New items take their issue number.
+- **The `ticket:` frontmatter keeps its `RAI-N` keys on everything already shipped.**
+  Renumbering those specs would rewrite the historical record to match a tracker that did not
+  exist when the work was done, and every cross-reference between specs would have to move with
+  it. `RAI-N` is what those items were called. New items take their issue number, and so do the
+  four unstarted ones above - see the amendment there for why that is the same rule rather than
+  an exception to it.
 
 ---
 
@@ -242,5 +245,51 @@ Consequences, in the order they have to be resolved:
 - `raise-cli` is installable from npm, and `raise --version` answers.
 
 ## Implementation notes
+
+Shipped 12/08/2026. What the build turned up that the plan above did not predict.
+
+**Two of the hand-over comment's obligations were already discharged**, and checking rather
+than doing them was the first useful act. `LICENSE` existed and `package.json` already carried
+`"license": "MIT"` - RAI-3 landed both, and the comment was written against an older tree. The
+roadmap skill already pointed at GitHub. Only the README install block was genuinely
+outstanding.
+
+**`doctor` was still on Node 22.5**, which the plan found rather than anticipated and which is
+the sharpest bug in the whole change. It is not a stale string: on 22.5 through 22.12 `engines`
+refuses the install while `doctor`, run from a checkout where nothing enforces `engines`,
+reports Node **ok in green** - and the tool then dies importing `node:sqlite`. Every other
+surface had been corrected to 22.13; the one that *tells a user their setup is fine* had not.
+
+**`tasks:gate` would have failed every pull request on GitHub, and nothing about the workflow
+file would have shown it.** The hand-over comment said `BITBUCKET_PR_ID` needed "a real
+equivalent rather than a rename", and the real equivalent turned out to be two things, not one:
+the *event* condition in the workflow, and `GITHUB_HEAD_REF` in `scripts/tasks.js`. A
+`pull_request` build checks out the **merge commit**, so `.git/HEAD` is detached and
+`currentBranch()` would have returned null - making the gate report `no-branch` and fail the
+merge it exists to guard. Reproduced both ways from a detached checkout before the fix was
+trusted.
+
+**The bare-number branch key needed anchors the legacy one did not.** `RAI-14` announces
+itself; `23` does not, and an unanchored alternative would read the `2` in `feat/v2-rewrite` as
+issue 2 and go looking for its spec. The anchors were belt-and-braces for the old pattern and
+are load-bearing for the new one.
+
+**`validate` lost a capability in the move, and saying so was the work.** Jira carried four
+workflow states; an issue is open or closed, so `backlog` and `in-progress` cannot be told
+apart from the tracker. They are counted and skipped rather than guessed between - a validator
+reporting one against the other would be wrong about half the time. What is still checked is
+the pair that actually goes wrong: a `shipped` spec over an open issue, and a closed issue over
+a spec saying the work never finished.
+
+**The four open bugs' specs were rekeyed, which the plan above did not call for.** Written as
+"`RAI-N` keeps its keys" full stop, it would have left four live items on a dead tracker's keys
+and four permanent orphans in `validate`. The rule is narrower than it first reads: what is
+frozen is the *shipped record*, because renumbering it rewrites what those items were called
+while they were built. Unstarted work has no such record. The paragraph in Phase D was amended
+in place rather than added to.
+
+**`tasks:links` earned its place twice** - catching an example filename in both AGENTS.md and
+the skill that named a spec which never existed, and then catching every reference to the four
+renamed specs.
 
 To be written as this lands.
