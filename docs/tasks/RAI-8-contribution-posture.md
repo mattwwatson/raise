@@ -94,6 +94,9 @@ informed, and one who is silently handed a login screen concludes the project is
 
 - **No CLA and no DCO.** MIT, and a line saying a contribution is offered under it. Anything
   heavier is process for a project with no contributors yet, and it deters the first one.
+  `CONTRIBUTING.md`'s closing line is backed by the `LICENSE` file
+  [`RAI-3-rename-to-raise.md`](RAI-3-rename-to-raise.md) added in its packaging pass, so nothing
+  here cites a licence the repository does not carry.
 - **No pull request template and no code of conduct.** Each is defensible and neither is
   load-bearing before there is any traffic. Add them on evidence.
 - **No issue templates, and the `contact_links` entry that would intercept a vulnerability filed
@@ -102,8 +105,6 @@ informed, and one who is silently handed a login screen concludes the project is
   document whether the chooser it renders in appears at all for a repository with a `config.yml`
   and no templates, so it needs a real template beside it and is more than one file.
 - **No promise about response times.** An unmet one is worse than none.
-- **`LICENSE` is not written here** - [RAI-5] owns it, and `CONTRIBUTING.md` referring to the
-  MIT licence is unbacked until it lands. Recorded in the hand-off rather than pre-empted.
 
 ## Hands to RAI-5
 
@@ -113,10 +114,10 @@ the repository to stay public. `github.com/mattwwatson/raise` exists, is public 
 
 Everything else this ticket could not close is **recorded on [RAI-5] as a comment**, that being
 where the Bitbucket-to-GitHub move actually happens - Matt's call on 12/08/2026, and Bitbucket is
-not kept. In short: `LICENSE` must land or both new files cite a licence the repository does not
-carry, and the README's install block must move to GitHub, closing the inconsistency above in
-both directions. The comment also carries what the move itself touches - the pipeline file, the
-no-mistakes push target and the spec-link convention - none of which is this ticket's to start.
+not kept. In short: the README's install block must move to GitHub, closing the inconsistency
+above in both directions. The comment also carries what the move itself touches - the pipeline
+file, the no-mistakes push target and the spec-link convention - none of which is this ticket's
+to start.
 
 ## Acceptance
 

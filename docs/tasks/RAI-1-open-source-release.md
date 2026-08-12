@@ -251,7 +251,9 @@ With one existing user, the answer was not a migration shim but `uninstall-hooks
 name and `install-hooks` on the new one, done deliberately, with no compatibility code. AGENTS.md
 already forbids shims for versions we do not support. RAI-3 found a second thing that does not
 regenerate - the forge `config.json` RAI-13 had put in the same directory - so the steps a human
-has to run are written out in README's *Upgrading from `nmmon`* section, which owns them.
+has to run are written out in [`RAI-3-rename-to-raise.md`](RAI-3-rename-to-raise.md), which owns
+them. The README no longer carries them: RAI-6 removed that section, nothing having been
+published under the old name and its whole audience having already migrated.
 
 ### 2.2 Packaging
 
