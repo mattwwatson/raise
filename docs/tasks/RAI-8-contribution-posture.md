@@ -54,7 +54,7 @@ auth, multi-user and remote access each turn a local page into a service.
 
 ## Decisions taken on pickup
 
-### Issues and pull requests are named as GitHub, ahead of the repository existing
+### Issues and pull requests are named as GitHub, ahead of the code moving there
 
 `https://github.com/mattwwatson/raise`. Matt's call. This is the opposite of the call made for
 the README's install block, which stayed on the working Bitbucket clone URL rather than

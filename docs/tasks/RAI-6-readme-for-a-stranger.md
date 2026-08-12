@@ -127,7 +127,7 @@ main checkout and a worktree of it, and branch names in both of the shapes peopl
 
 - **The related-tools section** - [RAI-7] owns it, and it has rules of its own that want
   checking the week it is written.
-- **`CONTRIBUTING.md`, `LICENSE`, `SECURITY.md`** - [RAI-8] and [RAI-5].
+- **`CONTRIBUTING.md`, `SECURITY.md`** - [RAI-8].
 - **Recording anything** - [RAI-9].
 - **Marketing copy.** The tone that works is the one already there.
 - **Anything under "Design decisions worth knowing" in `AGENTS.md`.** It is accurate, it is the
