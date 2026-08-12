@@ -177,7 +177,7 @@ const FILE_NAME = /\.(?:json|md|js|mjs|cjs|ts|mts|cts|yml|yaml|toml|lock|txt|sh|
  *
  * Written to fail when the lists genuinely disagree and not when somebody
  * rewords the paragraph around them, because a check that fires on an improved
- * sentence is one the next person learns to ignore. Three things do that
+ * sentence is one the next person learns to ignore. Five things do that
  * separating:
  *
  * 1. The bullet is found by its **bold lead-in mentioning devDependency**,
@@ -186,6 +186,10 @@ const FILE_NAME = /\.(?:json|md|js|mjs|cjs|ts|mts|cts|yml|yaml|toml|lock|txt|sh|
  *    sentence end. What follows is about formatters and bundlers and may say
  *    anything, including naming a package as an example.
  * 3. Only **package-shaped backticked tokens** count, per `PACKAGE_NAME`.
+ * 4. A token whose last dot-segment is a **file extension** is not one of them,
+ *    per `FILE_NAME` - a rule about shape, never the package-name exemption
+ *    list that would be a second inventory to keep in step.
+ * 5. A name written **twice** in that sentence counts once.
  *
  * Returns null when the anchor is not there *and* when it is there but names
  * nothing, which the caller must fail on: a parser that quietly finds nothing is
@@ -217,7 +221,12 @@ export function devDependenciesNamedIn(text) {
   const named = [...sentence.matchAll(/`([^`]+)`/g)]
     .map((match) => match[1])
     .filter((token) => PACKAGE_NAME.test(token) && !FILE_NAME.test(token));
-  return named.length > 0 ? named : null;
+  // A name written twice in one sentence is prose, never an inventory of two -
+  // "`typescript`, `@types/node` and `oxlint`, for `npm run lint` (`oxlint`)" is
+  // a correct list, and reporting it as drift is the false failure this parser
+  // is shaped to avoid.
+  const unique = [...new Set(named)];
+  return unique.length > 0 ? unique : null;
 }
 
 test('devDependenciesNamedIn reads the enumerating sentence and nothing after it', () => {
@@ -260,6 +269,14 @@ test('devDependenciesNamedIn ignores a filename sharing the enumerating sentence
   const text = [
     '- **A fourth devDependency.** They are `typescript`, `@types/node` and `oxlint` in',
     '  `package.json`, for `npm run typecheck`.',
+  ].join('\n');
+  assert.deepEqual(devDependenciesNamedIn(text), ['typescript', '@types/node', 'oxlint']);
+});
+
+test('devDependenciesNamedIn counts a name written twice in the sentence once', () => {
+  const text = [
+    '- **A fourth devDependency.** They are `typescript`, `@types/node` and `oxlint`, for',
+    '  `npm run typecheck` (`typescript`) and `npm run lint` (`oxlint`).',
   ].join('\n');
   assert.deepEqual(devDependenciesNamedIn(text), ['typescript', '@types/node', 'oxlint']);
 });

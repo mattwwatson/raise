@@ -74,7 +74,7 @@ means an npm script, a CI step and a line in two documents - more moving parts t
 ## Making it fail for the right reason
 
 A test that parses prose can fail because somebody reworded a sentence, and that is the failure
-mode to design against. Three choices do the separating:
+mode to design against. Five choices do the separating:
 
 1. **The bullet is found by its bold lead-in containing the word "devDependency"**, not by
    position or by matching the sentence. The surrounding prose can be rewritten freely.
@@ -83,10 +83,26 @@ mode to design against. Three choices do the separating:
    are allowed to say anything.
 3. **Only npm-package-shaped backticked tokens count.** `` `npm run typecheck` `` contains
    spaces and is not one, so it is skipped without needing an exemption list.
+4. **A token ending in a file extension is not a package name.** `` `package.json` `` is
+   package-name-shaped on every character, and the neighbouring bullet already writes it, so a
+   rewording that mentions the file inside the enumerating sentence would otherwise yield a
+   fourth name and a failure telling the author to fix a list that is correct. This is a rule
+   about **shape** and deliberately not the package-name exemption list rejected in item 3 - an
+   exemption list is a second inventory to keep in step, an extension is not, and a scoped name
+   like `` `@types/node` `` keeps its slash segment and has no dot to match on.
+5. **A name written twice in that sentence counts once.** A repetition in prose is never an
+   inventory of two, and reporting one as drift is the same false failure as item 4.
 
 And the anchor failing is itself a failure, loudly: if the bullet is ever renamed away, the test
 says the check needs re-anchoring rather than passing over a document it can no longer read. A
 silent no-op check is the quiet staleness this project is built against, wearing a green tick.
+
+**A parse that finds the anchor and no names is the same failure and gets the same message.** It
+is reachable by a rewording the design promises to survive - a bold lead-in carrying no full stop
+of its own leaves the sentence split holding the clause after it, so the names sit one sentence
+further on. Reported as an empty list it would blame the document for drift when what happened is
+that the parser lost the sentence, which is the one failure a check like this cannot afford: the
+whole of its value is that its message can be trusted.
 
 ## Acceptance
 
@@ -99,9 +115,18 @@ silent no-op check is the quiet staleness this project is built against, wearing
 
 ## Implementation notes
 
-Shipped 13/08/2026, as four tests in `test/docs-claims.test.js` - three on the parser and one on
+Shipped 13/08/2026, as seven tests in `test/docs-claims.test.js` - six on the parser and one on
 the real documents - plus a paragraph in `AGENTS.md`'s *Maintaining this file*, beside the
 sentence that already describes what that test file pins.
+
+**Three of those six parser tests came from the pipeline's own review, not the first draft**,
+and so did separators 4 and 5 above. The draft had the three separators the issue named and
+treated an empty parse as a list, so a lead-in with no full stop in it and a sentence mentioning
+`package.json` both reported a correct document as drift; a name repeated in the sentence did the
+same. Each is a rewording the design had already promised to survive, which is worth recording
+because the three were all the *same* mistake - the parser answering confidently about a sentence
+it had not actually read. That is the failure this item exists to prevent, arriving in the check
+written to prevent it.
 
 **The drift was reproduced before the check was written**, per the house rule: adding a fourth
 devDependency to `package.json` and running the suite. The failure names both lists in one
