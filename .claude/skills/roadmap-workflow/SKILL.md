@@ -203,13 +203,16 @@ loose document.
    and does nothing. (Linking the issue from the pull request's Development panel works too,
    but the keyword is the one that survives being written down.)
 
-   > **The pipeline writes the pull request body itself, so this line does not survive
-   > `git push no-mistakes`.** Issue 9 shipped in a merged pull request and stayed open,
-   > because nothing put a closing keyword in a body `no-mistakes` had authored; issue 15 did
-   > the same and sat in Todo through its own shipping. Either add it to the body afterwards
-   > with `gh pr edit --body`, or close the issue by hand and say which pull request shipped
-   > it - closing by hand does land the item in Done. Check after merging; the failure is
-   > silent and looks exactly like an item nobody finished.
+   > **The pipeline composes the pull request body, and it keeps a closing keyword you gave
+   > it.** Pull request 18 carries both a standalone `Closes #5` and the pipeline's own
+   > `## Pipeline` section, and issue 5 reached In Review off that link with no `gh pr edit`
+   > anywhere in it - so write the keyword into the description you hand the pipeline rather
+   > than planning to repair the body afterwards. What actually goes wrong is the keyword never
+   > being written at all: issue 9 shipped in a merged pull request and stayed open, and issue
+   > 15 did the same and sat in Todo through its own shipping. Check after merging; the failure
+   > is silent and looks exactly like an item nobody finished. For one that merged without the
+   > keyword, close the issue by hand and say which pull request shipped it - closing by hand
+   > does land the item in Done.
 7. **In the PR, set the spec's `status: shipped` and `shipped: <date>`**, and add the
    `## Implementation notes` section. Merging closes the issue; only the PR can set the file.
 
@@ -272,10 +275,10 @@ spec naming an issue that does not exist fails.
 
 **Know what it cannot check.** It asks `gh` for `number,title,state,stateReason` and nothing
 else, so the board's Status field never reaches it: `backlog` and `in-progress` are
-indistinguishable from here and are counted and skipped rather than guessed between. What is still checked is the pair that actually goes
-wrong: a spec saying `shipped` over an open issue, and a closed issue over a spec saying the
-work never finished. Legacy `RAI-N` specs are exempt - they have no issue and are not expected
-to.
+indistinguishable from here and are counted and skipped rather than guessed between. What is
+still checked is the pair that actually goes wrong: a spec saying `shipped` over an open issue,
+and a closed issue over a spec saying the work never finished. Legacy `RAI-N` specs are exempt -
+they have no issue and are not expected to.
 
 It is not in CI. It *could* be, `gh` needing no credential of ours, and it is deliberately not:
 it is a report, and a report that fails a build has become a gate.

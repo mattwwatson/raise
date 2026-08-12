@@ -165,25 +165,6 @@ the way it is, that is one place to look; the other is the header of the module 
 `AGENTS.md` indexes and where the reasoning behind a single module's decisions lives. You are
 not expected to write a spec for a contribution - that is the maintainer's job.
 
-**How an item moves across the board, and the two things it needs from you.** The board's
-Status field has four options - Todo, In Progress, In Review, Done - and two of the three
-transitions are already automatic, which is exactly why the third is easy to miss.
-
-- **Moving an item to In Progress is the human step, and it is the first thing you do when you
-  pick one up** - not when the branch appears, and not when the pull request does. It is the
-  only transition the board cannot work out for itself, because GitHub has no signal for
-  *somebody started*, so an item left in Todo is indistinguishable from one nobody has touched.
-- **In Review and Done are automatic, and both hang on the pull request being *linked* to the
-  issue.** A project workflow moves the item to In Review when a pull request is linked to it,
-  and to Done when that pull request merges. Closing an issue by hand lands it in Done too.
-- **A plain `#15` in the body is not a link.** It reads identically to a human and does
-  nothing: only a closing keyword - `Closes #15`, `Fixes #15`, `Resolves #15` - or linking the
-  issue from the pull request's Development panel creates the link GitHub acts on. Without it
-  neither transition fires, and the issue stays open over merged work: pull request 17 shipped
-  issue 15 that way, and the item sat in Todo until somebody closed it by hand. On the pipeline
-  path above the body is not yours to write, so the keyword is yours to add afterwards with
-  `gh pr edit --body` - or close the issue by hand and say which pull request shipped it.
-
 Security issues do **not** go in an issue - see [SECURITY.md](SECURITY.md).
 
 By contributing you agree that your work is published under the project's MIT licence.
