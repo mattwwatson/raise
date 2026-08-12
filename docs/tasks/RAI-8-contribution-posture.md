@@ -155,10 +155,16 @@ noted here because nothing in the codebase can check it.
 **The spec-link convention turned out never to have worked**, discovered while attaching the
 links this ticket's own spec would need. 14 tickets carry one; 13 name the pre-rename slug and
 would 404 for the maintainer, and all 14 point into a private Bitbucket repository that answers
-404 anonymously. Not one has ever resolved for a reader. The rule the skill was missing - the
-link follows the *spec*, not the ticket, so an epic child correctly has none until it is picked
-up - is now written down, along with an instruction not to add Bitbucket links while the move is
-pending. Rewriting the set is [RAI-5]'s, on the GitHub URL that makes them resolve.
+404 anonymously. Not one has ever resolved for a reader. Five tickets with specs carry no link at
+all - RAI-4, RAI-6, RAI-7, RAI-8 and RAI-14. The rule the skill is missing is that the link
+follows the *spec*, not the ticket, so an epic child correctly has none until it is picked up.
+
+**That rule is not written down by this branch, deliberately.** Writing it meant editing
+`.claude/skills/roadmap-workflow/SKILL.md`, which [RAI-5] is already rewriting around GitHub on
+its own branch, and two branches editing one file is a merge conflict bought for a paragraph.
+The edit was withdrawn here and the rule goes with the rest of the convention to [RAI-5], which
+is where the GitHub URL that makes these links resolve arrives anyway - so the audit above is
+this ticket's finding rather than its fix.
 
 **The `contact_links` idea was raised, explained and parked.** It would intercept somebody about
 to file a vulnerability as a public issue, which is the one reader `SECURITY.md` cannot reach.
