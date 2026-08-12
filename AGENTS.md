@@ -144,7 +144,9 @@ of its design - it is what stops the first page a stranger sees being blank. See
 | `src/git-branch.js` | the branch a checkout is on, and the checkout a worktree belongs to, read from `.git` |
 | `src/lavish.js` | resolving a Lavish artifact to the page waiting on you |
 | `src/forge.js` | asking GitHub or Bitbucket whether a pull request is still open |
-| `src/forge-config.js` | the one file a user writes, and the mode check that refuses it |
+| `src/user-config.js` | the one file a user writes, and the mode check that refuses it |
+| `src/forge-config.js` | the `forge` block of that file, and what may be asked of a forge |
+| `src/update-check.js` | asking npm whether a newer Raise exists, at most once a day |
 | `src/poll-watch.js` | which sessions are in a `lavish-axi poll`, which have a pipeline running, and which are driving one |
 | `src/firstmate.js` | which sessions firstmate started, from the markers it sets on itself |
 | `src/run-owner.js` | which session started which run, remembered across the gaps |
@@ -321,8 +323,14 @@ stratified on purpose, so read the whole file rather than one section.
 | timestamps come from the caller's clock at dispatch, never `Date.now()` on return | `src/forge.js` |
 | the Bitbucket credential lives in a `0600` file and never in the environment | `src/forge-config.js` |
 | GitHub goes through `gh` and holds no credential here - do not add a token path | `src/forge-config.js`, `src/forge.js` |
-| an unsafe mode refuses the whole file, opt-in included; `problem` is for `doctor` only | `src/forge-config.js` |
-| the config is re-read while the monitor runs; the mode is part of the cache key | `src/forge-config.js` (`watchForgeConfig`) |
+| an unsafe mode refuses the whole file, blocks with no secret in them included | `src/user-config.js` |
+| `problem` is for `doctor` only, and never for the ordinary case of no file | `src/user-config.js` |
+| the config is re-read while the monitor runs; the mode is part of the cache key | `src/user-config.js` (`watchUserConfig`) |
+| the watched read keeps its identity until the file changes, and `ForgeState` depends on it | `src/forge-config.js` (`watchForgeConfig`) |
+| asking is capped at a day and telling happens every start - two cadences, not one | `src/update-check.js` |
+| `doctor` reports the update check without making it; only `serve` ever asks | `src/update-check.js`, `docs/tasks/12-version-notice.md` |
+| a failed check is stamped in the cache, so being offline is not a request per start | `src/update-check.js` |
+| `isNewerVersion` fails closed on anything it cannot rank, pre-release pairs included | `src/update-check.js` |
 | a session nothing reported gets a row that refuses to say what it is doing | `src/untracked.js` |
 | the four states worth telling apart write byte-identical files | `src/untracked.js`, `docs/tasks/RAI-4-first-run-shows-something.md` |
 | the six bounds on the scan: window, tombstones, superseding, no id, no run, no pipeline agents | `src/untracked.js` |
@@ -484,7 +492,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 819 tests, no network, no dependencies, ~9s
+npm test          # 842 tests, no network, no dependencies, ~9s
 npm run lint      # oxlint over src, bin, hooks, public, test, scripts
 npm run typecheck # tsc --noEmit over src, bin, hooks, public, scripts
 ```
@@ -608,13 +616,21 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
   > stop. It was relaxed on purpose, for the expando, once it was clear the two halves it
   > collapsed are separable: what the page may show and what may leave the machine. The
   > second half has not moved an inch.
-- **The forge lookup is the product's only outbound request, and it is opt-in.** It must stay
-  that way: off unless `~/.raise/config.json` says otherwise, silent in every failure, and
-  sending nothing but a pull request URL to the forge already named in it. `server.test.js`
-  carries `fetch: () => assert.fail(...)` beside its `exec` guard on every other test, which
-  is what proves an unconfigured Raise makes no request at all - **do not weaken that guard
-  either.** If this ever grows a second thing to send or a second place to send it, that is a
-  change to the README's privacy section first and code second.
+- **There are exactly two outbound requests in the product, both opt-in, and the count is part
+  of the rule.** The forge lookup sends nothing but a pull request URL to the forge already
+  named in it; the update check sends one GET to `registry.npmjs.org` for this package's own
+  name. Each is off unless `~/.raise/config.json` says so, each is separately opted into, and
+  each is silent in every failure. `server.test.js` carries `fetch: () => assert.fail(...)`
+  beside its `exec` guard on every other test, which is what proves an unconfigured Raise makes
+  no request at all - **do not weaken that guard either**, and note that it still holds
+  literally: the update check runs in `raise serve`'s own command, never in `server.js`.
+
+  **A third one is a change to the README's Security section first and code second.** That
+  section's strongest sentence - that in the default configuration Raise makes no outbound
+  request of any kind - survives only because every one of these is off by default, and it is
+  written to say so rather than to be true by technicality. It had to be rewritten to admit a
+  second; issue 12 is the worked example of what that costs and what honesty it demands. Adding
+  one quietly is the failure this project is built against, turned on its own documentation.
 - **`.github/workflows/no-mistakes-required.yml` reads a pull request body, which is untrusted
   input.** It takes it through the environment and never interpolates `${{ }}` into the `run:`
   block, because that substitution happens before the shell sees it - a body containing shell
@@ -669,7 +685,7 @@ the [roadmap-workflow skill](.claude/skills/roadmap-workflow/SKILL.md).
 ## Commands
 
 ```sh
-npm test                       # 819 tests, ~9s
+npm test                       # 842 tests, ~9s
 npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above

@@ -123,18 +123,35 @@ reading enough of a recent transcript to learn which directory it was working in
 same kind of local read as everything above, on the same machine, and none of it goes further
 than the page in your browser.
 
-**One optional feature sends anything at all, and it is off until you configure it.** Raise
-can ask GitHub or Bitbucket whether a pull request already on your dashboard is still open.
-What goes out is that pull request's own URL, the one the row already links to, to the forge
-that hosts it. Nothing else: no transcript, no prompt text, no file contents, no branch names,
-no list of your repositories, and no request to any host but that forge's own API -
-`api.github.com`, reached through `gh`, or `api.bitbucket.org`, and nowhere else. With it
-off - which is the default - Raise makes no outbound network request of any kind. GitHub
-goes through your own `gh` login, so Raise never sees a GitHub credential at all; Bitbucket
-needs an API token with the single scope `read:pullrequest:bitbucket`, which grants no access
-to your source code, kept `0600` in `~/.raise/config.json`, never logged, never echoed, and
-never sent anywhere but Bitbucket. Turning it on is
+**Exactly two features send anything at all, they are both off until you configure them, and
+with neither turned on - which is the default - Raise makes no outbound network request of any
+kind.** They are opted into separately, in the same file, and each is described below in full.
+
+**Pull request state.** Raise can ask GitHub or Bitbucket whether a pull request already on
+your dashboard is still open. What goes out is that pull request's own URL, the one the row
+already links to, to the forge that hosts it. Nothing else: no transcript, no prompt text, no
+file contents, no branch names, no list of your repositories, and no request to any host but
+that forge's own API - `api.github.com`, reached through `gh`, or `api.bitbucket.org`, and
+nowhere else. GitHub goes through your own `gh` login, so Raise never sees a GitHub credential
+at all; Bitbucket needs an API token with the single scope `read:pullrequest:bitbucket`, which
+grants no access to your source code, kept `0600` in `~/.raise/config.json`, never logged,
+never echoed, and never sent anywhere but Bitbucket. Turning it on is
 [one config file](#pull-request-state-from-the-forge).
+
+**The update check**, which asks npm whether a newer Raise has been published, because nothing
+else will ever tell you. What goes out is one HTTPS request to `https://registry.npmjs.org`
+for this package's own name, at most once a day, and nothing else ever: no query string, no
+version number, no machine or user identifier, no list of anything you have installed.
+
+That is a small disclosure and it is not nothing, so here it is in the terms that matter. The
+npm registry learns your IP address, the time, and that somebody asked about `raise-cli` -
+and since nobody else has a reason to ask about that package, that is close enough to saying a
+machine at your address has Raise installed. It does **not** learn which version you are on:
+your version never leaves the machine, and the comparison happens here against the number the
+registry sent back. Nothing else about this changes anything above - it never upgrades
+anything, it is not in the hook or the extension, and the server that runs while your dashboard
+is open makes no request at all. Turning it on is
+[the same config file](#telling-you-when-there-is-a-newer-raise).
 
 Everything the hooks install is reversible - `uninstall-hooks`, `uninstall-codex`,
 `uninstall-pi` - and every write to a settings file keeps a `.raise-backup` beside it.
@@ -189,8 +206,9 @@ WORKING
 That comes from the transcript the agent already writes, so it is quoted rather than
 guessed at. The transcript never leaves your machine: the server reads a local file and
 renders it on your own dashboard, in your own browser. Nothing else leaves it either, unless
-you deliberately turn on the one feature that asks a forge about a pull request - see
-[Security](#security).
+you deliberately turn on one of the two features that reach the network - asking a forge about
+a pull request, or asking npm whether there is a newer Raise. Both are off by default and
+[Security](#security) says exactly what each sends.
 
 **Expand a row to see the last few things it did.** The chevron on the right of any session
 row opens a panel with what you asked, what the agent said back, and every tool it ran with how
@@ -226,8 +244,8 @@ transcript, so a plain `gh pr create` still gets a link.
 [pull request state](#pull-request-state-from-the-forge) makes Raise ask GitHub or Bitbucket
 directly, which is the one source that cannot be out of date - so a merged pull request stops
 saying `OPEN` within the minute, and a review nobody is watching gets a real state rather than
-a tooltip. It is off until you configure it, and it is the only thing in Raise that makes an
-outbound request.
+a tooltip. It is off until you configure it, and it is one of only two things in Raise that
+make an outbound request.
 
 **The branch is always shown**, next to the repo name, read straight from `.git/HEAD` - so it
 is right for worktrees and for sessions that have never run the pipeline. It is also what ties
@@ -526,8 +544,8 @@ already imported, so the link would land on that duplicate rather than the sessi
 
 ## Pull request state from the forge
 
-Off by default, and the only thing in Raise that makes an outbound request - what it sends and
-where is in [Security](#security). Turn it on by writing `~/.raise/config.json`:
+Off by default, and one of the two things in Raise that make an outbound request - what it
+sends and where is in [Security](#security). Turn it on by writing `~/.raise/config.json`:
 
 ```sh
 umask 077 && cat > ~/.raise/config.json <<'JSON'
@@ -582,6 +600,60 @@ to the tooltip's *"was open, last checked"* within five minutes rather than sitt
 answer nobody can confirm. A `MERGED` badge is the one exception, and it is the same rule -
 that answer cannot change, so there is nothing for it to go stale against. Turning this on can
 only ever make a badge more current than it would have been without it, never less.
+
+## Telling you when there is a newer Raise
+
+Also off by default, in the same file, and opted into separately - what it sends and to whom is
+in [Security](#security):
+
+```sh
+umask 077 && cat > ~/.raise/config.json <<'JSON'
+{
+  "updates": {
+    "enabled": true
+  }
+}
+JSON
+chmod 600 ~/.raise/config.json
+```
+
+Both blocks live in the one file, so if you already turned on pull request state, add `updates`
+beside `forge` rather than replacing it. The `0600` rule is the file's rather than either
+feature's: if anyone else on the machine can read it, Raise refuses the whole file and
+`raise doctor` says so.
+
+**Why this is worth a config file at all.** npm has no way of telling you. A published version
+sits in the registry and your install stays on whatever it has until you reinstall or happen to
+notice it in `npm outdated -g` - and for a monitor that is the wrong way round, because the
+fixes worth having are the ones that stop a row telling you something untrue, and whoever is
+running that row is exactly who will never find out.
+
+With it on, `raise serve` says so at startup, once, and nothing else changes:
+
+```
+  A newer Raise is available. You have 0.1.0; 0.2.0 is on npm.
+  Upgrade with npm install -g raise-cli.
+```
+
+It never upgrades anything. It does not appear on the dashboard - that page is for your
+sessions, not for us - and there is nothing in the hook or the pi extension, which run inside
+your agent and are held to stricter rules again.
+
+**It asks at most once a day and tells you every time.** Those are two different things on
+purpose. The answer changes every few weeks, so asking more often than daily buys nothing and
+would turn a wrapper script that restarts `serve` into a request a minute; the banner is read at
+every start, so a notice shown once and scrolled past is a notice nobody acted on. The answer is
+kept in `~/.raise/update-check.json`, which means restarting `serve` ten times in an afternoon
+is ten notices and one request.
+
+`raise doctor` reports it too, and **reports it without asking anybody** - it prints what the
+last check found and how long ago that was, so it stays instant and truthful with no network.
+If the check has not answered it says that rather than saying you are up to date.
+
+Everything about it fails silently: offline, a timeout, a rate limit, an answer it cannot make
+sense of. Each leaves `raise serve` printing exactly what it printed before you turned this on,
+and the failed attempt is remembered too, so a laptop with no network makes one attempt a day
+rather than one per start.
 
 ## Troubleshooting
 

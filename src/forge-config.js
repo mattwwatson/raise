@@ -1,9 +1,9 @@
 /**
- * Reading the one file a user writes, and refusing to read it when it is unsafe.
+ * What the forge lookup is allowed to do, read out of the user's config file.
  *
- * The forge lookup is the only outbound network request Raise makes, so it is
- * off until this file says otherwise. Everything about the shape here follows
- * from two decisions.
+ * The forge lookup was the first outbound network request Raise made, so it is
+ * off until this block says otherwise. Everything about its shape follows from
+ * two decisions.
  *
  * **The credential lives in a file, never in the environment.** That is the
  * opposite of the intuitive answer, and the reason is `src/exec.js`: it spawns
@@ -21,34 +21,17 @@
  * and `GITHUB_TOKEN` out of the environment we hand it, so there is nothing a
  * token path of our own could add.
  *
- * A mode that lets anyone else on the machine read the file means the whole file
- * is refused, Bitbucket half and opt-in together. Honouring the safe half of a
- * file we have just called unsafe teaches nobody to fix it, and the credential
- * that is already exposed is exposed either way. This is ssh's rule, and it is
- * what makes a documented `0600` more than a comment: a file can be written
- * correctly and chmodded later.
+ * Reading the file, and refusing to read it when its mode would let anyone else
+ * on the machine see that credential, is `src/user-config.js` - it is a property
+ * of the file rather than of this feature, and there are two features in the
+ * file now. This module only interprets the `forge` block of what it returns.
  */
 
-import { readFileSync, statSync } from 'node:fs';
+import { userConfigPath } from './config.js';
+import { defaultConfigAccess, readUserConfig, watchUserConfig } from './user-config.js';
 
-import { forgeConfigPath } from './config.js';
-
-/**
- * @typedef {object} ConfigFileAccess
- * @property {(path: string) => {mode: number, mtimeMs: number, size: number}} stat
- * @property {(path: string) => string} readText
- */
-
-/** @type {ConfigFileAccess} */
-export const defaultConfigAccess = {
-  stat(path) {
-    const info = statSync(path);
-    return { mode: info.mode, mtimeMs: info.mtimeMs, size: info.size };
-  },
-  readText(path) {
-    return readFileSync(path, 'utf8');
-  },
-};
+/** @typedef {import('./user-config.js').ConfigFileAccess} ConfigFileAccess */
+/** @typedef {import('./user-config.js').UserConfig} UserConfig */
 
 /**
  * What the forge lookup is allowed to do, and why not, when it is not.
@@ -65,49 +48,19 @@ export const defaultConfigAccess = {
  * @property {string|null} problem something to fix, in words `doctor` can print
  */
 
-/** The mode bits that would let another user on this machine read the file. */
-const GROUP_OR_OTHER_READABLE = 0o077;
-
 /** @type {ForgeConfig} */
 const DISABLED = { enabled: false, bitbucket: null, problem: null };
 
 /**
- * Read `~/.raise/config.json`.
+ * The `forge` block of a file that has already been read and vetted.
  *
- * Fails closed in every direction: anything unexpected disables the lookup
- * rather than half-enabling it, because the failure this guards is an outbound
- * request the user did not ask for.
- *
- * @param {{path?: string, files?: ConfigFileAccess}} [deps]
+ * @param {UserConfig} file
+ * @param {string} path only to name the offender in a `problem`
  * @returns {ForgeConfig}
  */
-export function readForgeConfig({ path = forgeConfigPath(), files = defaultConfigAccess } = {}) {
-  let mode;
-  try {
-    mode = files.stat(path).mode;
-  } catch {
-    // No file is the default, and the default says nothing. Anything else that
-    // stops us reaching it - a permission error on the directory, say - is
-    // indistinguishable from that here and is treated the same way.
-    return DISABLED;
-  }
-  if (mode & GROUP_OR_OTHER_READABLE) {
-    const octal = (mode & 0o777).toString(8).padStart(4, '0');
-    return {
-      ...DISABLED,
-      problem:
-        `${path} is mode ${octal}, which lets other users on this machine read it - ` +
-        `it holds a credential, so nothing in it is used until you run chmod 600 on it`,
-    };
-  }
-
-  let raw;
-  try {
-    raw = JSON.parse(files.readText(path));
-  } catch (err) {
-    return { ...DISABLED, problem: `${path} is not valid JSON (${err.message})` };
-  }
-  const forge = raw?.forge;
+function forgeFrom(file, path) {
+  if (file.problem) return { ...DISABLED, problem: file.problem };
+  const forge = file.data?.forge;
   // `enabled` has to be the boolean true. A missing block, a string "false", or
   // a file holding only a Bitbucket credential are all "not turned on" - opting
   // in is a deliberate act, so it is not inferred from a credential being there.
@@ -135,39 +88,41 @@ export function readForgeConfig({ path = forgeConfigPath(), files = defaultConfi
 }
 
 /**
+ * Read the forge block of `~/.raise/config.json`.
+ *
+ * Fails closed in every direction: anything unexpected disables the lookup
+ * rather than half-enabling it, because the failure this guards is an outbound
+ * request the user did not ask for.
+ *
+ * @param {{path?: string, files?: ConfigFileAccess}} [deps]
+ * @returns {ForgeConfig}
+ */
+export function readForgeConfig({ path = userConfigPath(), files = defaultConfigAccess } = {}) {
+  return forgeFrom(readUserConfig({ path, files }), path);
+}
+
+/**
  * The same read, kept current under a running monitor.
  *
- * This file is the user's to write, and the README tells them to write it - so
- * an answer captured when the server started is one the server and `raise
- * doctor` disagree about for as long as it runs, the doctor reporting an opt-in
- * that never reached the poll loop. That is the confident-wrong shape this
- * codebase is built against, so the file is re-read as it changes instead.
- *
- * The cost is a `stat` per poll and nothing else, because the parse is cached
- * on what that `stat` says. **Only the positive case is remembered**, the same
- * rule `nm-state.js` follows for the database appearing under a running
- * monitor: no file at all is the overwhelmingly common case, and caching that
- * absence would mean a file written later was never noticed. The mode is part
- * of the key as well as of the answer, so a file chmodded to `0644` after the
- * server started stops being used on the next poll.
+ * `watchUserConfig` does the watching and explains why it is worth doing; this
+ * adds the one property `ForgeState` depends on, which is that **the returned
+ * config keeps its identity until the file changes**. `ForgeState#observe`
+ * notices a changed file by comparing references, and re-interpreting an
+ * unchanged read into a fresh object every poll would make every poll look like
+ * a change - dropping the failure backoff each time, which is the one thing that
+ * backoff exists to prevent.
  *
  * @param {{path?: string, files?: ConfigFileAccess}} [deps]
  * @returns {() => ForgeConfig} cheap enough to call on every poll
  */
-export function watchForgeConfig({ path = forgeConfigPath(), files = defaultConfigAccess } = {}) {
-  /** @type {{key: string, config: ForgeConfig}|null} */
+export function watchForgeConfig({ path = userConfigPath(), files = defaultConfigAccess } = {}) {
+  const watch = watchUserConfig({ path, files });
+  /** @type {{source: UserConfig, config: ForgeConfig}|null} */
   let cached = null;
   return () => {
-    let info;
-    try {
-      info = files.stat(path);
-    } catch {
-      cached = null;
-      return DISABLED;
-    }
-    const key = `${info.mode}:${info.mtimeMs}:${info.size}`;
-    if (cached?.key === key) return cached.config;
-    cached = { key, config: readForgeConfig({ path, files }) };
+    const source = watch();
+    if (cached?.source === source) return cached.config;
+    cached = { source, config: forgeFrom(source, path) };
     return cached.config;
   };
 }

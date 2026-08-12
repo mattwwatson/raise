@@ -35,6 +35,12 @@ import { GitBranch } from './git-branch.js';
 import { LavishState } from './lavish.js';
 import { ForgeState } from './forge.js';
 import { readForgeConfig } from './forge-config.js';
+import {
+  isNewerVersion,
+  newerVersion,
+  readUpdateCache,
+  readUpdateConfig,
+} from './update-check.js';
 import { PollWatch } from './poll-watch.js';
 import { FirstmateWatch } from './firstmate.js';
 import { UntrackedScan } from './untracked.js';
@@ -53,7 +59,7 @@ import {
   piSettingsPath,
   codexHooksPath,
   claudeSettingsPath,
-  forgeConfigPath,
+  userConfigPath,
 } from './config.js';
 import { buildRows } from './dashboard.js';
 import { RunOwners } from './run-owner.js';
@@ -158,6 +164,26 @@ function packageVersion() {
   }
 }
 
+/**
+ * How long ago something happened, in the coarsest unit that still says it.
+ *
+ * Only `doctor` uses this, and only to date a reading it is reporting rather
+ * than taking - which is the point of printing it at all: *"up to date"* off a
+ * cache is a claim about somewhere else, and a claim with no age on it is one
+ * the reader cannot weigh. The page has its own version of this sentence for
+ * the same reason, in `PullRequest`'s tooltip.
+ *
+ * @param {number} ms
+ * @returns {string}
+ */
+function ago(ms) {
+  const minutes = Math.max(0, Math.round(ms / 60000));
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
+
 function usage() {
   return `${bold('Raise')} - every agent session on this machine, and which one is waiting for you
 
@@ -230,6 +256,14 @@ async function cmdServe(flags) {
     return;
   }
 
+  // Fired here rather than below the banner so the request - on the one start a
+  // day that makes one - is in flight while the banner prints, and never
+  // awaited, because nothing on the page or in this process depends on the
+  // answer. It resolves to null when the feature is off, which is the default,
+  // and in that case it makes no request and touches no file.
+  const version = packageVersion();
+  const update = newerVersion({ current: version, fetch });
+
   console.log(`${bold('Raise')} is watching.`);
   console.log(`  Dashboard  ${green(monitor.url())}`);
   console.log(`  Source     ${SOURCE_LABELS[monitor.probe.mode] ?? SOURCE_LABELS.cli}`);
@@ -254,6 +288,21 @@ async function cmdServe(flags) {
     );
   }
   console.log(dim('\n  Ctrl-C to stop.'));
+
+  // Below `Ctrl-C to stop` rather than inside the banner, because a line that
+  // has to wait for an answer cannot be printed before one - and waiting for it
+  // would mean a startup that stalls on somebody else's server. On the ordinary
+  // day the answer is already on disk and this lands on the next tick; on the
+  // one start a day that asks, it lands a moment later into a terminal that has
+  // nothing else to say. Said in the same register as the hooks notices above:
+  // your setup could be better, here is the one command that fixes it.
+  update.then((latest) => {
+    if (!latest) return;
+    console.log(
+      `\n  ${yellow('A newer Raise is available.')} You have ${version}; ${latest} is on npm.`,
+    );
+    console.log(`  Upgrade with ${bold('npm install -g raise-cli')}.`);
+  });
 
   const shutdown = async () => {
     await monitor.stop();
@@ -803,12 +852,53 @@ async function cmdDoctor() {
   } else if (!forgeConfig.enabled) {
     off(
       'Pull request state',
-      `not enabled - pull request state comes from no-mistakes only (see ${forgeConfigPath()})`,
+      `not enabled - pull request state comes from no-mistakes only (see ${userConfigPath()})`,
     );
   } else if (forgeConfig.bitbucket) {
     ok('Pull request state', 'enabled - GitHub through gh, Bitbucket through its API');
   } else {
     ok('Pull request state', 'enabled for GitHub through gh; no Bitbucket credential configured');
+  }
+
+  // The other outbound request, reported on the same terms - and, unlike every
+  // other check here, reported without being *made*. `doctor` reads what `serve`
+  // last wrote and never asks the registry itself: this is where you come when
+  // something is already wrong, which is frequently with no network, and a
+  // diagnostic that pauses to time out a request nobody is blocked on is one
+  // people stop running. It also keeps the promise the README makes about how
+  // often this contacts anybody a function of elapsed time rather than of how
+  // many commands you typed.
+  const updateConfig = readUpdateConfig();
+  const version = packageVersion();
+  if (updateConfig.problem) {
+    warn('Update check', updateConfig.problem);
+  } else if (!updateConfig.enabled) {
+    off(
+      'Update check',
+      `not enabled - nothing tells you when a newer Raise is published (see ${userConfigPath()})`,
+    );
+  } else {
+    const cached = readUpdateCache();
+    if (!cached) {
+      ok('Update check', `enabled - nothing asked yet; ${bold('raise serve')} asks once a day`);
+    } else if (cached.latest && isNewerVersion(version, cached.latest)) {
+      warn(
+        'Update check',
+        `${cached.latest} is available - you have ${version}, so run ${bold('npm install -g raise-cli')}`,
+      );
+    } else if (cached.latest) {
+      ok('Update check', `${version} is the latest, as of ${ago(Date.now() - cached.checkedAt)}`);
+    } else {
+      // Asked and got nothing. Reported rather than folded into "up to date",
+      // because a check that has not answered is something Raise does not know,
+      // and `ok` over it would be the small end of the confident-wrong shape
+      // this whole tool is built against. There is no step for the reader here,
+      // which is why the detail says so.
+      warn(
+        'Update check',
+        `the check ${ago(Date.now() - cached.checkedAt)} got no answer - usually no network, and nothing to fix; it tries again a day after that`,
+      );
+    }
   }
 
   const settings = readSettingsQuietly(DEFAULT_SETTINGS);
