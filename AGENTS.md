@@ -127,8 +127,8 @@ one, so it comes last. Do not reorder them back.
 A fifth exists and is deliberately not in that table, because it answers a different kind of
 question: **`src/untracked.js` walks the three agents' session directories for transcripts no
 hook has ever accounted for.** It is not a source of *state* - it cannot be, which is the whole
-of its design - it is what stops the first page a stranger sees being blank. See *A session
-nothing has reported* below.
+of its design - it is what stops the first page a stranger sees being blank. See the header of
+`src/untracked.js`.
 
 | Path | What |
 | --- | --- |
@@ -706,9 +706,10 @@ Two things that keep the rule honest, both learned from the state this file was 
   *"Only `sqlite` is remembered"* without *"because the daemon creates the database on first
   use, long after a monitor was left running"* is a rule the next tidy-up reverts.
 
-`test/docs-claims.test.js` checks that every source path named here and in `CONTRIBUTING.md`
-exists, because an index of pointers is only worth having if a pointer cannot rot. It is not
-covered by `npm run tasks:links`, which resolves references into `docs/tasks/` only.
+`test/docs-claims.test.js` checks that every source path named here, in `CONTRIBUTING.md` and
+in `README.md` exists, because an index of pointers is only worth having if a pointer cannot
+rot. It is not covered by `npm run tasks:links`, which resolves references into `docs/tasks/`
+only.
 
 Prefer rewriting or pruning an existing entry over appending a new one, and keep entries
 concise. Adding a section here is a decision, not a default.

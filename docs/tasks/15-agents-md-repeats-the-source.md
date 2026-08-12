@@ -368,11 +368,14 @@ The compression alone would leave the file 1793 lines again by November, so:
   keep it honest (never cut on the assumption a header covers it; compression is rewriting,
   not summarising).
 - **`test/docs-claims.test.js`** asserts that every `src/…`, `bin/…`, `hooks/…`, `public/…`,
-  `test/…`, `scripts/…`, `docs/…` and `.github/…` path named in `AGENTS.md` or
-  `CONTRIBUTING.md` exists, and that every row of the decision index names a file. An index of
-  pointers is only worth having if a pointer cannot rot, and `npm run tasks:links` does not
-  cover this - it scans the whole repo but resolves references into `docs/tasks/` only. It was
-  verified to fail on a deliberately broken pointer, not just to pass.
+  `test/…`, `scripts/…`, `docs/…`, `.github/…` and `.claude/…` path named in `AGENTS.md`,
+  `CONTRIBUTING.md` or `README.md` exists, and that every row of the decision index names a
+  file. An index of pointers is only worth having if a pointer cannot rot, and
+  `npm run tasks:links` does not cover this - it scans the whole repo but resolves references
+  into `docs/tasks/` only. It was verified to fail on a deliberately broken pointer, not just
+  to pass. `README.md` is in the set because the split left it naming the roadmap-workflow
+  skill, which nothing else names, and it is the document a stranger reads first; `.claude/`
+  is in the prefix list for that same skill.
 
 ### References corrected
 

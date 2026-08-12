@@ -12,6 +12,10 @@
  * only resolves references *into* `docs/tasks/`, so a dead `src/…` mention is
  * invisible to it.
  *
+ * `README.md` is covered for the same reason and not as an afterthought: it is
+ * the document a stranger reads first, and the split left it naming a file
+ * nothing else does - the roadmap-workflow skill.
+ *
  * Deliberately real files rather than a fake tree, unlike most tests here. The
  * claim under test is about this repository's actual contents, so a fake
  * filesystem would assert nothing at all - and there is no clock, no
@@ -27,7 +31,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /** The documents that carry pointers into the source tree. */
-const DOCS = ['AGENTS.md', 'CONTRIBUTING.md'];
+const DOCS = ['AGENTS.md', 'CONTRIBUTING.md', 'README.md'];
 
 /**
  * The directories a path has to start with to be a claim about this repo.
