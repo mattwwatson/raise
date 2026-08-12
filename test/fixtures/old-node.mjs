@@ -27,7 +27,15 @@
  * is worse than no reproduction at all.
  */
 
-import { register, registerHooks } from 'node:module';
+// A namespace import, and it is the same lesson as `bin/raise.js`. A named
+// import is validated while the module graph is *linked*, and `registerHooks`
+// is not an export of `node:module` before 22.15 - so
+// `import { register, registerHooks }` throws `SyntaxError` on 22.13 and 22.14
+// before any statement here can run, which kills the fallback below on exactly
+// the two versions it exists for. A namespace import requires no particular
+// name to exist, so nothing is checked at link time and the guard runs. Do not
+// tidy this back into named bindings.
+import * as nodeModule from 'node:module';
 
 import { resolve } from './no-sqlite-hook.mjs';
 
@@ -46,5 +54,5 @@ Object.defineProperty(process.versions, 'node', {
 // skim past. But `registerHooks` only arrived in 22.15, and `engines` floors us
 // at 22.13 - so the deprecated path stays as the fallback for the two versions
 // in between rather than the floor being quietly raised to suit a test.
-if (typeof registerHooks === 'function') registerHooks({ resolve });
-else register('./no-sqlite-hook.mjs', import.meta.url);
+if (typeof nodeModule.registerHooks === 'function') nodeModule.registerHooks({ resolve });
+else nodeModule.register('./no-sqlite-hook.mjs', import.meta.url);
