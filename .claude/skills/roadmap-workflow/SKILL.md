@@ -92,10 +92,17 @@ When that applies:
   That is what `RAI-1-open-source-release.md` is - it holds the reasoning behind RAI-2 through
   RAI-9, none of which needed their own file until someone started one.
 
-**The hard rule that keeps this from drifting: no branch without a spec file.** That is the
-point at which the *how* must exist, it is trivially checkable, and it stops "the spec comes
-later" quietly becoming "there is no spec". If you are about to branch and the file is not
-there, write it first.
+**The hard rule that keeps this from drifting: no branch shipping a tracked item without its
+spec file.** That is the point at which the *how* must exist, and it stops "the spec comes
+later" quietly becoming "there is no spec". If you are about to branch on an item and the file
+is not there, write it first.
+
+**A branch shipping no tracked item needs neither an issue nor a spec** - a typo, a stale
+sentence, a one-line correction. That is not a loophole to reach for, it is the case the
+ceremony was never for: an issue, a spec, a branch named after it and a pipeline run is larger
+than the change, and the predictable result is that the correction stops being made. `tasks:gate`
+checks the first rule and can only check it when the branch says which item it means; see
+**Tooling** below for what that does and does not catch.
 
 Outside that exception, never open a new task by creating the issue - the issue is the *last*
 step of capture.
@@ -135,7 +142,10 @@ loose document.
    `wip-23-stale-page-code` would upset nothing upstream. This is our convention, so that a
    branch list can be scanned by issue: the number starts the branch name or a path element of
    it - `23-stale-page-code` or `fix/23-stale-page-code`, never `wip-23-stale-page-code`.
-   `npm run tasks:gate` enforces it.
+   **`npm run tasks:gate` does not enforce this, and cannot.** A branch whose key is not in an
+   anchored position simply reads as untracked and passes - telling that from an ordinary name
+   was built twice and removed twice, so do not expect the gate to catch it and do not try to
+   make it. Getting the name right is on you.
 
    The anchoring matters more than it did for `RAI-12`, which announced itself. A bare number
    does not, so `feat/v2-rewrite` deliberately does **not** name issue 2.
@@ -194,6 +204,14 @@ file claiming the work never started. It runs on **pull requests only**: a work-
 push makes no claim to be mergeable, so failing it would only paint CI red all day. It reads
 `GITHUB_HEAD_REF`, because a `pull_request` checkout is a detached merge commit with no branch
 name in `.git/HEAD`.
+
+Two answers, and the branch name is all it reads: a branch with an **anchored** key is held to
+its spec, and every other branch passes as untracked. So `wip-23-stale-page-code` and
+`fix/whatever` both slip past, which is a known gap rather than an oversight - telling a
+misnamed branch from an ordinary one was built twice and removed twice, most sharply because a
+legacy key collided with the bare issue sharing its number and the gate's own rename advice went
+green over the wrong item's spec. It guards against forgetting, not against evasion. See
+[docs/tasks/9-gate-passes-an-unkeyed-branch.md](../../../docs/tasks/9-gate-passes-an-unkeyed-branch.md).
 
 **`tasks:links`** runs on every build, a dangling reference being just as broken on `main`.
 

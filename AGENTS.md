@@ -1529,7 +1529,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 787 tests, no network, no dependencies, ~9s
+npm test          # 793 tests, no network, no dependencies, ~9s
 npm run lint      # oxlint over src, bin, hooks, public, test, scripts
 npm run typecheck # tsc --noEmit over src, bin, hooks, public, scripts
 ```
@@ -1696,13 +1696,32 @@ in one directory. Do not "tidy" the old ones.
 Branch as `<ISSUE>-<short-name>`, with the number starting the branch name or a path element
 of it - `23-stale-page-code` or `fix/23-stale-page-code`. GitHub links a branch to its issue
 from the **pull request**, not from the branch name, so this is our convention rather than its
-constraint, and `npm run tasks:gate` is what enforces it. The PR that ships an item sets
-`status: shipped` and `shipped:` in its spec file and adds `## Implementation notes`.
+constraint - and **nothing enforces it**, `npm run tasks:gate` included. What the gate checks is
+narrower: a branch whose key *is* in an anchored position must have a spec that says `shipped`.
+The PR that ships an item sets `status: shipped` and `shipped:` in its spec file and adds
+`## Implementation notes`.
+
+**The gate gives two answers, and the branch name is all it reads.** A branch with the key in an
+anchored position is held to its spec exactly as before - the file must exist and say `shipped`.
+**Every other branch passes**, `fix/some-typo` and `wip-23-stale-page-code` alike: failing the
+first made a one-line spec correction cost an issue, a spec, a branch and a pipeline run.
+
+**That the second one passes is a known gap, and closing it was tried twice and abandoned.**
+Do not rebuild it - the reasoning is in the comment in `gateBranch` and in full in
+[docs/tasks/9-gate-passes-an-unkeyed-branch.md](docs/tasks/9-gate-passes-an-unkeyed-branch.md).
+Matching the *shape* of a misplaced key cannot separate `23_stale_page_code` from
+`bump-node-24`; asking the spec set whether the number is a real item fails `release/v1.2.3` and
+`3d-render`, grows a new false failure with every issue filed, and collides a legacy key with the
+bare issue sharing its number - `wip-RAI-7-x` was reported as issue 7, whose spec is shipped, so
+following its own rename advice would have turned the gate green while RAI-7's spec still said
+`in-progress`. What the gate protects against is **forgetting** to mark an item shipped, which
+needs a correctly named branch anyway; a misnamed one still goes through review.
 
 An epic gets a spec too, and it carries the shared background for everything under it -
 `docs/tasks/RAI-1-open-source-release.md` holds the reasoning behind the whole open-source
-push, so its children need their own file only when one is picked up. **No branch without a
-spec file.**
+push, so its children need their own file only when one is picked up. **No branch shipping a
+tracked item without its spec file** - a branch shipping no tracked item needs neither an issue
+nor a spec, which is the whole of what changed here.
 
 `scripts/` holds four commands over all this - `npm run tasks`, `tasks:links`, `tasks:gate`
 and `tasks:validate`. Two of them run in CI, and which two is the design:
@@ -1735,7 +1754,7 @@ command reports - is the [roadmap-workflow skill](.claude/skills/roadmap-workflo
 ## Commands
 
 ```sh
-npm test                       # 787 tests, ~9s
+npm test                       # 793 tests, ~9s
 npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above

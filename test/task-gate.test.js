@@ -87,23 +87,105 @@ test('a checkout with no branch fails as "no branch", not as a bad branch name',
   assert.equal(result.exitCode, 1);
 });
 
-test('a branch with no key at all fails the gate and explains the naming rule', () => {
+test('a branch with no issue number passes, because it ships no tracked item', () => {
+  // The gate asserts one thing: the pull request that ships an item marks that
+  // item shipped. That is a statement about items, so a branch carrying none
+  // has nothing to assert. It used to fail here, and with `tasks:gate` inside a
+  // required check that made a one-line spec correction cost an issue, a spec
+  // and a pipeline run.
   const result = gateBranch('tidy-up', indexed([spec()]));
-  assert.equal(result.outcome, 'no-key');
-  const rendered = text(renderGate(result));
-  assert.ok(rendered.includes('23-roadmap-tooling'));
-  assert.ok(rendered.includes('fix/23-roadmap-tooling'));
+  assert.equal(result.outcome, 'untracked');
+  assert.equal(result.exitCode, 0);
+
+  const prefixed = gateBranch('fix/some-typo', indexed([spec()]));
+  assert.equal(prefixed.outcome, 'untracked');
+  assert.equal(prefixed.exitCode, 0);
 });
 
-test('the naming failure says this is our convention rather than the tracker\'s rule', () => {
-  // GitHub links a branch to its issue from the pull request rather than from
-  // the branch name, so nothing upstream enforces this - and Jira, before it,
-  // found the key anywhere in the name and was equally content. Saying otherwise
-  // sends somebody looking for an automation rule that was never the reason.
+// The items every branch name below could be read as naming - both halves of
+// the RAI-3/3 collision that ended the second attempt at misplaced-key
+// detection, so a rebuilt one fails here rather than in CI.
+const known = () =>
+  indexed([
+    spec(),
+    spec({ file: '23-stale-page-code.md', ticket: '23' }),
+    spec({ file: 'RAI-3-rename-to-raise.md', ticket: 'RAI-3', status: 'in-progress' }),
+    spec({ file: '3-ambiguous-unowned-run.md', ticket: '3' }),
+  ]);
+
+test('a branch whose key is not in an anchored position passes, and that gap is known', () => {
+  // The accepted gap, asserted so it is a decision rather than an oversight.
+  // Telling these from an ordinary branch name was built twice and removed
+  // twice - see the comment in `gateBranch`. What the gate protects against is
+  // forgetting to mark an item shipped, which needs a correctly named branch
+  // anyway, and a misnamed branch still goes through review.
+  for (const branch of ['wip-23-tooling', '23_stale_page_code', '23/stale-page-code',
+    'revertRAI-14', 'rai-14-roadmap-tooling', 'RAI-14_tooling', 'RAI-14x']) {
+    const result = gateBranch(branch, known());
+    assert.equal(result.outcome, 'untracked', branch);
+    assert.equal(result.exitCode, 0, branch);
+  }
+});
+
+test('an ordinary name carrying digits passes whatever items exist', () => {
+  // Why the second mechanism went: it read these as naming an item, and the
+  // set of names it broke grew with every issue filed. `3` and `RAI-3` are both
+  // in `known()`, so `release/v1.2.3` and `3d-render` are the live cases.
+  for (const branch of ['release-2026-08-12', 'bump-node-24', 'fix/readme-node-22',
+    'release/v1.2.3', 'fix/oauth2-callback', 'fix/http-2-notes', '3d-render', 'feat/v2-rewrite']) {
+    const result = gateBranch(branch, known());
+    assert.equal(result.outcome, 'untracked', branch);
+    assert.equal(result.exitCode, 0, branch);
+  }
+});
+
+test('a legacy key and the bare issue sharing its number stay separate items', () => {
+  // The collision that ended the second attempt: it reported `wip-RAI-3-x` as
+  // issue 3, whose spec is shipped, so following its rename advice would have
+  // turned the gate green while RAI-3 itself was never marked shipped. Nothing
+  // may resolve one of these to the other.
+  assert.equal(ticketFromBranch('RAI-3-rename-to-raise'), 'RAI-3');
+  assert.equal(ticketFromBranch('3-ambiguous-unowned-run'), '3');
+
+  const legacy = gateBranch('RAI-3-rename-to-raise', known());
+  assert.equal(legacy.outcome, 'not-shipped');
+  assert.equal(legacy.spec?.file, 'RAI-3-rename-to-raise.md');
+
+  const bare = gateBranch('3-ambiguous-unowned-run', known());
+  assert.equal(bare.outcome, 'ok');
+  assert.equal(bare.spec?.file, '3-ambiguous-unowned-run.md');
+});
+
+test('the missing-spec failure asks for the spec of a tracked item, not of any branch', () => {
+  // A branch shipping no tracked item needs neither an issue nor a spec, so
+  // the one copy of the rule a contributor reads at the gate may not say that
+  // no branch may exist without one.
+  const err = renderGate(gateBranch('RAI-99-mystery', known())).err.join('\n');
+  assert.ok(err.includes('Every tracked item needs one'));
+  assert.ok(!err.includes('no branch may exist'));
+});
+
+test('passing without a key says so rather than passing silently', () => {
+  // Silence would be indistinguishable from passing because a spec said
+  // shipped, and which of the two it was is the thing worth reading.
   const rendered = text(renderGate(gateBranch('tidy-up', indexed([spec()]))));
-  assert.ok(rendered.includes('our'));
-  assert.ok(rendered.includes('convention'));
-  assert.ok(rendered.includes('pull request'));
+  assert.ok(rendered.includes('tidy-up'));
+  assert.ok(rendered.includes('no issue number'));
+  assert.ok(rendered.includes('<issue>-<short-name>'));
+});
+
+test('an unkeyed pass goes to stdout, not to stderr with the failures', () => {
+  const rendered = renderGate(gateBranch('tidy-up', indexed([spec()])));
+  assert.deepEqual(rendered.err, []);
+  assert.ok(rendered.out.length > 0);
+});
+
+test('a keyed branch is not relaxed at all - its spec must still say shipped', () => {
+  // The whole risk of this change is that it reads as "the gate got softer".
+  // It did not: everything with a key in its name is checked exactly as before.
+  const result = gateBranch('7-require-no-mistakes', indexed([spec({ ticket: '7', status: 'in-progress' })]));
+  assert.equal(result.outcome, 'not-shipped');
+  assert.equal(result.exitCode, 1);
 });
 
 test('a branch whose key has no spec fails and names the file to create', () => {
@@ -150,7 +232,10 @@ test('the pass line goes to stdout and every failure to stderr', () => {
   assert.ok(passed.out.length > 0);
   assert.deepEqual(passed.err, []);
 
-  const failed = renderGate(gateBranch('tidy-up', indexed([spec()])));
+  // A keyed branch whose spec is missing - `tidy-up` is no longer a failure,
+  // it is the untracked pass, and asserting stderr on it would have been
+  // asserting the behaviour this change removed.
+  const failed = renderGate(gateBranch('99-mystery', indexed([spec()])));
   assert.deepEqual(failed.out, []);
   assert.ok(failed.err.length > 0);
 });
