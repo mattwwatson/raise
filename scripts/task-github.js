@@ -28,7 +28,8 @@
  *
  * **No credential lives here.** `gh` authenticates itself, which is the same
  * reason `src/forge.js` shells out to it rather than holding a GitHub token -
- * see the note in AGENTS.md about there deliberately being no GitHub token path.
+ * see the note in `src/forge-config.js` about there deliberately being no
+ * GitHub token path.
  * That is also what makes this command runnable in CI at all, unlike the Jira
  * one it replaced, though nothing runs it there yet.
  */

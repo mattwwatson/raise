@@ -1,8 +1,10 @@
 ---
 issue: 15
-status: backlog
+status: shipped
+shipped: 2026-08-12
 size: L
 depends: -
+branch: 15-agents-md-repeats-the-source
 ---
 # 15 - AGENTS.md is mostly a second copy of the comments already in the code
 
@@ -183,3 +185,264 @@ either keep that heading text or update both. Then `CONTRIBUTING.md:7,147,153`,
 `.github/workflows/ci.yml:6,27`, `scripts/tasks.js:86`, `scripts/task-github.js:31`,
 `src/hooks.js:15,46`, `src/nm-state.js:259` and `src/registry.js:349`, each of which describes
 `AGENTS.md` in prose and should still read true afterwards.
+
+## Implementation notes
+
+Built 12/08/2026 on `15-agents-md-repeats-the-source`, against the tree at `633b32d`.
+
+**The brief's figures were re-measured first and they hold at that tree**: 1793 lines, 132KB,
+107 bolded headlines, `## Design decisions worth knowing` at lines 189-1409 (68% of the file).
+The issue body's "1743 lines / ~103 headlines" is from an earlier draft and is the number to
+distrust. Result: **1793 lines to 718**, a 60% cut, and roughly 33k tokens to ~13k.
+
+**718 rather than the ~620 the brief estimated, and the difference is all index.** The estimate
+assumed ~45 index rows; there are 84. Rows were split wherever one row would have covered two
+headlines, because the acceptance test is that a reviewer can pick any headline and find where
+it went - a coarser index passes the line count and fails the walk. Nothing was retained for
+length: the assembly was done by slicing the kept ranges out of the old file rather than
+retyping them, so no wording drifted.
+
+**Two kept sections are not byte-identical, and both exceptions are the same one.** Slicing a
+section out whole is exactly what preserves a pointer into a section that is about to be
+deleted, so the kept sections are where a dangling cross-reference survives:
+
+- § Architecture ended its `src/untracked.js` paragraph with *"See *A session nothing has
+  reported* below"* - a headline this change relocated into that module. A reader following it
+  would have concluded the rule was dropped rather than moved. It now reads *"See the header of
+  `src/untracked.js`"*.
+- § Project Overview said *"Two consequences that are not obvious, and that the sections below
+  keep returning to"*, where "the sections below" were the deleted decisions. It now reads
+  *"Two consequences that everything below keeps returning to"*, which the invariants and the
+  index both satisfy.
+
+Neither is a wording change and neither should be reverted; both are pointers that the cut made
+false. Nothing else in either section moved, and the remaining kept sections are byte-identical
+apart from the test count.
+
+### The 9-of-11 measurement was checked and holds
+
+Every one of the eleven sampled modules was read before anything was cut. Nine carry their
+`AGENTS.md` rationale in their own header (`nm-state.js`, `run-owner.js`, `forge.js`,
+`untracked.js`, `firstmate.js`, `codex-transcript.js`, `registry.js`, `focus/tmux.js`,
+`hook-payload.js`); `dashboard.js` (1573 lines behind a 14-line header) and `server.js` (632
+behind 8) are the two that do not, exactly as described.
+
+**Three of the brief's proposed relocations turned out to be unnecessary, which is the sample
+being conservative rather than wrong.** `src/forge-config.js` already states the mode being part
+of the cache key, at `watchForgeConfig`. `src/forge.js` already states that a failed lookup
+drops the previous reading, at `#fail`, and that the forge settles state and never the link.
+`src/transcript.js` already carries the `lastActivityAt` whitelist and the `away_summary`
+regression in full, at `ACTIVITY_TYPES`. `src/server.js`'s keepalive and empty-reading rules
+were already at their call sites - what was missing there was a *header* surfacing them, which
+is what the acceptance criterion about reading it cold actually tests.
+
+### What the modules gained
+
+Ten edits, each a rule that was demonstrably in `AGENTS.md` and nowhere else. The last of them
+was found in review rather than on the first pass, which is the walk doing its job:
+
+| File | Gained |
+| --- | --- |
+| `src/dashboard.js` | a real header: ownership-over-rank and the veto-to-preference inversion, the preference ending when the run does, identity following the session's own path, the forge as the one asserting source, the three guards that fail three ways, and the two-lines-per-card rule |
+| `src/dashboard.js` (`withForgeState`) | a disagreement with no-mistakes is not surfaced - one answer per fact |
+| `src/server.js` | a real header: the keepalive as a named event and why tidying it back blinds the page, the no-sync-subprocess rule and its two test guards, and why `release`/`prune` are guarded on a non-empty reading |
+| `src/nm-state.js` (`DbFile`) | the replaced-inode narrative - the old handle answers every query happily, so `existsSync` is satisfied and the previous file's runs are served as current |
+| `src/hooks.js` (`HOOK_EVENTS`) | the `PostToolUse` / `PostToolBatch` rejection, stated where the one-line change would be made, including that hook registration is read at session start |
+| `src/registry.js` (`dismissBlock`) | the forward-looking half: if the key is ever changed, change it to something that moves |
+| `src/pi-transcript.js` | pi's `/name` normalises onto `custom-title`, and why the `ai-title` rewrite was wrong |
+| `src/codex-transcript.js` | Codex writes no title of any kind, and `state_5.sqlite` is raw prompt text |
+| `src/focus/tmux.js` | control mode matched on pane title, the `missing value` tty, the intermittency, and no `-t` target ever being a session name |
+| `public/index.html` (`.name`) | why the name cannot go in `.meta` on layout as well as on meaning - that side is `flex: none` with no ellipsis - and that it never replaces `.summary`, because the two answer different questions and drift apart on a long session |
+
+### The rule walk
+
+All 107 headlines from `main`, in file order, with where each one now lives. Numbers are the
+line in the old file. "kept" means the section survived whole - byte-identical but for the two
+repointed cross-references recorded above, in § Architecture and § Project Overview.
+
+| # | Headline | Now in |
+| --- | --- | --- |
+| 1 (19) | The session is the unit | `AGENTS.md` § Project Overview (kept) + § Invariants |
+| 2 (44) | Raise watches one machine | `AGENTS.md` § Project Overview (kept) |
+| 3 (48) | Focusing is macOS-only | `AGENTS.md` § Project Overview (kept) |
+| 4 (54) | Read as a contribution policy | `AGENTS.md` § Project Overview (kept) |
+| 5 (99) | `npx` is not an install | `AGENTS.md` § Tech Stack (kept) |
+| 6 (194) | no-mistakes and lavish-axi are optional | `src/nm-state.js` header + § Invariants |
+| 7 (210) | re-decided on every read | `src/nm-state.js` header |
+| 8 (218) | the `stat` reads identity | `src/nm-state.js` `DbFile` **(added)** |
+| 9 (227) | `cli` may not latch either | `src/nm-state.js` header |
+| 10 (245) | Polling SQLite, not the daemon socket | `src/server.js` header |
+| 11 (250) | the keepalive is an SSE `event` | `src/server.js` header **(added)**, call site, `public/connection.js` |
+| 12 (257) | `server.json` is not the source of truth | `src/health.js` header |
+| 13 (262) | summary read from the transcript | `src/transcript.js` header |
+| 14 (268) | the name is identity, so line 1 | `public/index.html` (`.name`) + `src/dashboard.js` (`sessionName` in `buildRows`) |
+| 15 (281) | both names normalise onto `custom-title` | `src/pi-transcript.js` **(added)** |
+| 16 (286) | the name survives the 128KB tail | `src/transcript.js` `TAIL_BYTES` |
+| 17 (299) | the tool with no result yet | `src/transcript.js` header |
+| 18 (304) | a recorded block is disbelieved | `src/dashboard.js` `blockDisproved`; `src/hooks.js` **(added)**; § Invariants |
+| 19 (356) | a human looking is evidence too | `src/registry.js` `dismissBlock` |
+| 20 (367) | a dismissal answers one announcement | `src/registry.js` `dismissBlock` **(added forward half)** |
+| 21 (376) | only the idle nudge may be dismissed | `src/dashboard.js` `isDismissibleBlock` + § UI Rules (kept) |
+| 22 (385) | server-side, and it says so on the row | `src/dashboard.js` `Row.dismissed` + § UI Rules (kept) |
+| 23 (393) | only while the dismissal quietened it | `src/dashboard.js` `Row.dismissed`, `blockDismissalInEffect` |
+| 24 (408) | a `lavish-axi poll` is a human gate | `src/lavish.js` header + `src/dashboard.js` `ATTENTION_ORDER` |
+| 25 (415) | `Notification` means two things | `src/dashboard.js` `isIdleNudge` + `src/registry.js` `EVENT_STATES` |
+| 26 (431) | it comes from `notification_type` | `src/dashboard.js` `isIdleNudge` |
+| 27 (447) | `PermissionRequest` is worth installing | `src/hooks.js` `HOOK_EVENTS` |
+| 28 (466) | one block, announced twice | `src/registry.js` `blockAnnouncedAt` |
+| 29 (491) | a live poll process settles it | `src/poll-watch.js` header |
+| 30 (500) | matched on the executable | `src/poll-watch.js` `isPipelineCommand` |
+| 31 (509) | a run belongs to the session that started it | `src/run-owner.js` header |
+| 32 (578) | `RunOwners` is a memory | `src/run-owner.js` header |
+| 33 (588) | ownership does not change hands | `src/run-owner.js` header |
+| 34 (602) | a reading we did not get is not evidence | `AGENTS.md` § Invariants + `src/server.js` call sites |
+| 35 (610) | a worktree run registers against the checkout | `src/git-branch.js` header |
+| 36 (701) | ownership of a running run decides | `src/dashboard.js` header **(added)** + `buildRows` |
+| 37 (729) | the preference ends when the run does | `src/dashboard.js` header **(added)** + `buildRows` |
+| 38 (740) | a session and its pipeline get a line each | `AGENTS.md` § UI Rules (kept) + `src/dashboard.js` header **(added)** |
+| 39 (764) | presence follows the run existing | `src/dashboard.js` `Agent` |
+| 40 (770) | `step.lastActivity` arrives prefixed | `src/dashboard.js` `STEP_ACTIVITY_PREFIXES` |
+| 41 (781) | an unattributable run gets one card | `src/dashboard.js` `Row.attributable` |
+| 42 (791) | it sorts below every session | `src/dashboard.js` `sortRows` + § UI Rules (kept) |
+| 43 (798) | the pipeline's own agents are folded | `src/dashboard.js` `buildRows` |
+| 44 (825) | the marker never follows `Agent.activity` | `src/dashboard.js` `Agent` |
+| 45 (832) | the rule survives; where it hangs has moved | `src/dashboard.js` `Agent` |
+| 46 (841) | `Agent` reaches no renderer | `src/dashboard.js` `Agent` |
+| 47 (849) | three sources, ranked | `src/dashboard.js` `buildRows` (the `pr` chain) |
+| 48 (854) | a fourth outranks all three | `src/dashboard.js` `withForgeState` + § Invariants |
+| 49 (865) | not "the forge's last answer wins forever" | `src/dashboard.js` `withForgeState` |
+| 50 (872) | one exception and one guard | `src/dashboard.js` `withForgeState` |
+| 51 (889) | a disagreement is not surfaced | `src/dashboard.js` `withForgeState` **(added)** + § Invariants |
+| 52 (895) | a failed lookup drops the reading | `src/forge.js` `#fail` |
+| 53 (901) | the Bitbucket credential lives in a file | `src/forge-config.js` header |
+| 54 (911) | GitHub is the asymmetry | `src/forge-config.js` + `src/forge.js` headers |
+| 55 (918) | an unsafe mode refuses the whole file | `src/forge-config.js` header |
+| 56 (926) | the config is re-read while running | `src/forge-config.js` `watchForgeConfig` |
+| 57 (932) | only the positive case is remembered | `src/forge-config.js` `watchForgeConfig` |
+| 58 (940) | cadence and the two caches | `src/forge.js` `OPEN_REFRESH_MS`, `FAILURE_BACKOFF_MS`, `#start` |
+| 59 (948) | timestamps from the caller's clock | `src/forge.js` `#start` |
+| 60 (960) | all three gated on the branch | `src/dashboard.js` `buildRows`, `matchPullRequest` |
+| 61 (983) | still going is not still current | `src/nm-state.js` `prStateIsCurrent` |
+| 62 (992) | the threshold is measured | `src/nm-state.js` `PR_STATE_FRESH_MS` |
+| 63 (1000) | an observation time may not be substituted | `src/dashboard.js` `pullRequestForRun` |
+| 64 (1009) | several pull requests is not a sighting | `src/dashboard.js` `transcriptPullRequest` + `src/transcript.js` |
+| 65 (1026) | the branch comes from `.git/HEAD` | `src/git-branch.js` header + § Invariants |
+| 66 (1034) | a session nothing reported still gets a row | `src/untracked.js` header |
+| 67 (1044) | a hook record vs a recent transcript | `src/untracked.js` header |
+| 68 (1048) | four states, byte-identical files | `src/untracked.js` header, `test/untracked.test.js`, `docs/tasks/RAI-4-first-run-shows-something.md` |
+| 69 (1105) | thirty seconds, and tail-first | `src/untracked.js` `SCAN_INTERVAL_MS`, `#cwdFor` |
+| 70 (1121) | Claude Desktop identified by evidence | `src/process-tree.js` `DESKTOP_APP` + § Invariants |
+| 71 (1141) | firstmate declares itself | `src/firstmate.js` header |
+| 72 (1163) | the working directory would chip an editor | `src/firstmate.js` header |
+| 73 (1172) | the cost is once per pane | `src/firstmate.js` header + `#servers` |
+| 74 (1191) | the app cannot select a hosted session | `src/focus/claude-desktop.js` header |
+| 75 (1207) | the link is not used even where dedupe fires | `src/focus/claude-desktop.js` header |
+| 76 (1223) | a pi session can never be `blocked` | `src/registry.js` header |
+| 77 (1239) | pi's transcript is normalised | `src/pi-transcript.js` header |
+| 78 (1260) | the pi reporter is an extension | `hooks/raise-pi-extension.js` header |
+| 79 (1272) | registered by path, never copied | `src/pi-extension.js` header |
+| 80 (1277) | Codex is a third agent | `hooks/raise-hook.js` + `src/hooks.js` headers |
+| 81 (1286) | the agent comes from the installed command | `hooks/raise-hook.js` header + `src/hook-payload.js` `declaredAgent` |
+| 82 (1293) | a Codex row may go red and not say why | `src/registry.js` header |
+| 83 (1304) | a stale Codex block is cleared by the transcript | `src/codex-transcript.js` header |
+| 84 (1313) | Codex hooks are trust-gated | `bin/raise.js` (`install-codex`) |
+| 85 (1322) | `SessionEnd` asks for three seconds | `src/hooks.js` (Codex timeout) |
+| 86 (1328) | Codex writes no title of any kind | `src/codex-transcript.js` **(added)** |
+| 87 (1335) | a normaliser, whitelisting one outer type | `src/codex-transcript.js` header |
+| 88 (1341) | every Codex tool goes through one `exec` | `src/codex-transcript.js` header |
+| 89 (1347) | the host terminal is not stored | `src/focus/tmux.js` header |
+| 90 (1351) | control mode matched on pane title | `src/focus/tmux.js` header **(added)**, `paneTitle`, `src/focus/index.js` `titleNeedle` |
+| 91 (1363) | a pane can belong to several sessions | `src/focus/tmux.js` header |
+| 92 (1374) | which session tmux names varies with time | `src/focus/tmux.js` header **(added)** |
+| 93 (1392) | two picks from one ranking | `src/focus/tmux.js` `chooseTmuxClient` |
+| 94 (1397) | `controlMode` belongs to the ranked set | `src/focus/tmux.js` `chooseTmuxClient` |
+| 95 (1405) | no `-t` target is ever a session name | `src/focus/tmux.js` header **(added)** + `shellQuote` |
+| 96 (1543) | the signature workflow is a convention check | `AGENTS.md` § Testing and Quality (kept) + `.github/workflows/no-mistakes-required.yml` |
+| 97 (1549) | deliberately not a required check | `AGENTS.md` § Testing and Quality (kept) + `docs/tasks/7-require-no-mistakes.md` |
+| 98 (1568) | a pull request and a push are two builds | `AGENTS.md` § Testing and Quality (kept) + `.github/workflows/ci.yml` |
+| 99 (1683) | issues own ordering, the repo owns the spec | `AGENTS.md` § Roadmap (kept) |
+| 100 (1688) | the board is where the order lives | `AGENTS.md` § Roadmap (compressed to one clause) + the skill |
+| 101 (1693) | both halves are public now | **dropped as a dated change note** - see below |
+| 102 (1699) | two key namespaces | roadmap-workflow skill, *Two key namespaces* |
+| 103 (1713) | the gate gives two answers | `scripts/task-gate.js` `gateBranch` |
+| 104 (1715) | every other branch passes | `scripts/task-gate.js` `gateBranch` |
+| 105 (1718) | the gap was tried twice and abandoned | `scripts/task-gate.js` `gateBranch` + `docs/tasks/9-gate-passes-an-unkeyed-branch.md` |
+| 106 (1751) | what `validate` can no longer check | roadmap-workflow skill |
+| 107 (1759) | load the skill before touching `docs/tasks/` | `AGENTS.md` § Roadmap (kept) |
+
+**Row 101 is the only headline deliberately dropped rather than relocated, and it is worth
+being explicit about.** *"Both halves are public now, and that is the change"* is a dated note
+about a transition that has already happened - it told a reader in August 2026 that the board
+used to be private. It states no rule a future change could break. The fact survives in
+`README.md`'s Roadmap section, which says the same thing to the audience it is actually for.
+Nothing else on this list was cut; everything else moved.
+
+### The regrowth guard
+
+The compression alone would leave the file 1793 lines again by November, so:
+
+- **`## Maintaining this file` is rewritten as the placement rule** - a table saying where a
+  shipped item's invariant, reasoning and measurement each go, plus the two constraints that
+  keep it honest (never cut on the assumption a header covers it; compression is rewriting,
+  not summarising).
+- **`test/docs-claims.test.js`** asserts that every `src/…`, `bin/…`, `hooks/…`, `public/…`,
+  `test/…`, `scripts/…`, `docs/…`, `.github/…` and `.claude/…` path named in `AGENTS.md`,
+  `CONTRIBUTING.md` or `README.md` exists, and that every row of the decision index names a
+  file. An index of pointers is only worth having if a pointer cannot rot, and
+  `npm run tasks:links` does not cover this - it scans the whole repo but resolves references
+  into `docs/tasks/` only. It was verified to fail on a deliberately broken pointer, not just
+  to pass. `README.md` is in the set because the split left it naming the roadmap-workflow
+  skill, which nothing else names, and it is the document a stranger reads first; `.claude/`
+  is in the prefix list for that same skill.
+
+**The placement rule's UI row was amended in review, because it justified itself with something
+untrue.** It read *"a product, UI or safe-change rule stays here, because `public/index.html`
+has no header"*. The page has no *module* header, but it carries 219 comment blocks and reasons
+at the site as densely as any module does - and this change itself put a UI rule there, the
+`.name` identity rule that walk row 14 now points at. Left as written, the next
+layout-specific UI rule goes back into `AGENTS.md` on the strength of a false clause, which is
+the regrowth the rule exists to bound. It is now three rows: a rule with one site in the page
+goes in a comment at that site; a page-wide rule with no single site stays in § UI Rules; and a
+safe-change rule stays regardless, because it has to be known before you choose which file to
+open - that half of the original justification was always true and is kept verbatim.
+
+**Checked against every relocation this change made, and it is not a clean bill of health.**
+`public/index.html` is the only non-module destination in the whole branch - nine lines, the
+`.name` comment. Everything else landed in a `src/` module header, which the table's first row
+already covers, so the amendment disturbs nothing that shipped. But five bullets still in
+§ UI Rules are already second copies of reasoning the page carries at the site: the
+`HOST_LABELS` no-fallback bullet, the `AGENT_LABELS` bullet, the `SPAWNER_LABELS` bullet, the
+`AGENT_NAMES` expanded-panel bullet, and the untracked-row explanation. Under the amended rule
+each is a single-site rule that belongs at its site - and each is *already there*, so they are
+exactly the duplication this ticket exists to remove, left standing only because the brief
+scoped § UI Rules as kept whole. **That is known follow-up for a later item, deliberately not
+acted on here.** Four bullets were checked and are genuinely cross-cutting, so they stay
+wherever this lands: affordance-must-match-capability spans every control; a card carrying both
+lines is also a product rule and is in `dashboard.js`; where a pull request's state came from is
+a decision *not* to render something, so it has no site to sit at; and the `dismissed` marker
+binds two renderers, the page and the CLI being one protocol.
+
+### References corrected
+
+`CONTRIBUTING.md:7` said the reasoning was *in* *Design decisions worth knowing*; it now says
+that section is an index and the reasoning is in the headers. **`CONTRIBUTING.md:147` and
+`:153` in the old numbering are the same pointer gone false twice more**, and were missed on
+the first pass: one told a contributor the reasoning behind a ranking or state-frame decision
+is "written down in `AGENTS.md`", the other that `docs/tasks/` and `AGENTS.md` are "the two
+places to look". Both now name the owning module's header as where the reasoning is, with
+`AGENTS.md` as the index that says which module. What `CONTRIBUTING.md` *duplicates* from
+`AGENTS.md` is untouched - issue #6 owns that. `scripts/task-github.js:31`
+pointed at "the note in AGENTS.md" about there being no GitHub token path, which now lives in
+`src/forge-config.js`. `README.md:678` claimed `AGENTS.md` says what each `tasks*` command
+reports, which is the skill's job now. `src/registry.js` no longer cites `AGENTS.md` for a rule
+it states itself. `src/hooks.js:46` cited "the 'recorded block is disbelieved' note in
+AGENTS.md" for how a granted permission is settled, and now names `blockDisproved` in
+`dashboard.js`, which is where that reasoning went. The rest of the brief's list -
+`README.md:658`, `.github/workflows/ci.yml:6,27`, `scripts/tasks.js:86`, `src/hooks.js:15` and
+`src/nm-state.js:259` - were each re-read and still read true, because every section they point
+at was kept.
+
+### Verification
+
+`npm test` (799, up from 793 - the six new ones), `npm run lint`, `npm run typecheck`,
+`npm run tasks:links` and `npm run tasks:gate` all pass.

@@ -346,11 +346,16 @@ export class SessionRegistry {
    *
    * The page claims a human is needed; the human is the one clicking, so their
    * reading beats the sixty-second timer's. What is stored is the *announcement*
-   * - `blockAnnouncedAt`, which AGENTS.md records moves on every event that says
-   * blocked - and never the session. `stateSince` would have been the obvious
-   * key and is the wrong one: it deliberately does not move while the state is
-   * unchanged, so a dismissal keyed on it would outlive every future block on
-   * that session and could hide a permission prompt for good.
+   * - `blockAnnouncedAt`, which moves on every event that says blocked - and
+   * never the session. `stateSince` would have been the obvious key and is the
+   * wrong one: it deliberately does not move while the state is unchanged, so a
+   * dismissal keyed on it would outlive every future block on that session and
+   * could hide a permission prompt for good.
+   *
+   * That is the failure this design exists to prevent, so the forward-looking
+   * half matters as much as the rule: **if this field is ever changed, change
+   * it to something that moves.** A key that stands still makes one dismissal
+   * permanent and lets it swallow every future prompt on that session.
    *
    * A session with no announcement to answer cannot be dismissed. Whether *this*
    * announcement may be - only Claude Code's idle nudge may - is decided by the

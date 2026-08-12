@@ -654,8 +654,9 @@ npm run typecheck
 Every pull request runs all three, plus the two roadmap checks below, and the tests again on
 Node 22 to keep the version requirement above honest.
 
-Architecture, conventions, the file layout and the design decisions behind them are in
-[AGENTS.md](AGENTS.md). What a contribution has to clear is in
+Architecture, conventions and the file layout are in [AGENTS.md](AGENTS.md), which also indexes
+the design decisions behind them - the reasoning for each lives in the header of the module that
+owns it. What a contribution has to clear is in
 [CONTRIBUTING.md](CONTRIBUTING.md) - a new terminal is one entry and a test, and that is the
 contribution the architecture was shaped for. Changes are pushed through the
 [no-mistakes](https://github.com/kunchenguid/no-mistakes) pipeline rather than straight to the
@@ -675,6 +676,7 @@ thing that is not on disk, since a spec says how an item works and never when it
 the whole roadmap is.
 
 `npm run tasks:links` and `npm run tasks:gate` are the two checks CI runs over the specs, the
-second asserting that the spec for a pull request's item already says `shipped`. What each
-command reports, and why only those two run in CI, is in
-[AGENTS.md](AGENTS.md#roadmap-and-task-tracking).
+second asserting that the spec for a pull request's item already says `shipped`. The commands
+are summarised in [AGENTS.md](AGENTS.md#roadmap-and-task-tracking); what each reports, and why
+only those two run in CI, is in the
+[roadmap-workflow skill](.claude/skills/roadmap-workflow/SKILL.md).

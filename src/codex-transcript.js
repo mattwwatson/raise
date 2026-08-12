@@ -44,6 +44,14 @@
  * shell command has to be lifted out of the snippet - otherwise a Codex session
  * sitting in a `lavish-axi poll` is invisible, and every card reads the same
  * bare word.
+ *
+ * **Codex writes no title of any kind**, so a Codex card shows no summary line
+ * and is carried by its activity line, exactly as a pi card is. No rollout
+ * record carries one, and `threads.title` in Codex's own `state_5.sqlite` is
+ * the first user message verbatim - identical to `first_user_message` on every
+ * session checked. That is also the last word on reading that database: the one
+ * field that looked like a reward for it is raw prompt text, which is above the
+ * altitude a card may show.
  */
 
 /**

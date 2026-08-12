@@ -11,6 +11,45 @@
  *
  * All pure functions: the dashboard is a projection of state, never a source
  * of it.
+ *
+ * This is the busiest file in the repo and the one where a wrong answer is
+ * most expensive, so the four rules that are easiest to undo by accident are
+ * stated here rather than left to be found at the function that enforces them.
+ *
+ * **Ownership decides which run a card shows; rank is only the fallback.** See
+ * `buildRows`. It used to resolve one run by `rankRun` and consult `runOwners`
+ * as a *veto*, dropping the run when somebody else owned it - so ownership
+ * could take a wrong run off a card and never put the right one on it, which is
+ * the shape of every failure this attribution has produced. Inverting that is
+ * what closed the class. Two qualifiers travel with it and are not tidying: the
+ * preference holds only while the owned run is still *running*, because the
+ * whole reason to prefer it is the gate it is holding open and a finished run
+ * has none; and **identity still follows the session's own path**, so a session
+ * that owns a run is never retitled after it.
+ *
+ * **The forge is the one source allowed to assert.** See `withForgeState`.
+ * Everywhere else here indirect evidence may only ever *disprove* - the
+ * transcript can clear a block and can never announce one - because the forge
+ * is the authority on its own pull requests where the other three sources are
+ * recollections of one. It settles the *state* only: which pull request a row
+ * has is still the local sources' answer, and the link is never touched.
+ *
+ * **Three guards fail three different ways, on purpose.** `isDisplayable`
+ * fails **open** - an unrecognised run status keeps its card, because a card
+ * going quiet is the worst thing this page can do. `attentionFor` fails
+ * **soft** - only `failed` is coloured as a failure, because being on the page
+ * is knowledge and being red is a claim. `isRunOwnerCommand` (in
+ * `poll-watch.js`) fails **closed** - an unrecognised driving verb refuses to
+ * claim a run, because guessing puts a pipeline on the wrong card. Each fails
+ * in the direction that is safe for the thing it guards. **Do not "fix" any of
+ * them to match the others.**
+ *
+ * **A card carries the session's line and the pipeline's line, never one in
+ * place of the other.** They describe two things happening at once - you talk
+ * to a session while no-mistakes works for it - and the step used to win,
+ * erasing what you were working on the moment a pipeline started. `Row.summary`
+ * is always the session's own title; `Row.pipeline` is what no-mistakes is
+ * doing. See the `Row` typedef.
  */
 
 import { basename } from 'node:path';
@@ -443,6 +482,13 @@ function sameUrl(a, b) {
  *
  * The link is never touched. It is the one thing the local sources are as good
  * at, and the row keeps it in every case.
+ *
+ * **A disagreement with no-mistakes is not surfaced, because there is nothing
+ * in it to say.** It means one thing only - no-mistakes' reading is older -
+ * which `observedAt` already records. One answer per fact: a page that argues
+ * with itself teaches you to stop believing it, which is the same failure as a
+ * confident wrong chip, and this codebase refuses a second opinion everywhere
+ * else it has been tempted.
  *
  * **A forge reading ages exactly like anybody else's**, with one exception and
  * one guard, and both come from the same sentence: freshness exists because an

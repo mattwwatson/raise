@@ -43,7 +43,27 @@ import { dirname } from 'node:path';
  *
  * Nothing here reports that a permission prompt was *granted*, because Claude
  * Code has no such event to fire. That is settled by reading the transcript
- * instead. See the "recorded block is disbelieved" note in AGENTS.md.
+ * instead - see `blockDisproved` in `dashboard.js`.
+ *
+ * **The tempting fix is to add `PostToolUse` to `HOOK_EVENTS` below, and this
+ * is where that warning belongs, because it is a one-line change to that
+ * array.**
+ * `EVENT_STATES` in `registry.js` already maps it (and `PreToolUse`) to
+ * `working`, so nothing else would move. It is refused on two counts. It costs
+ * a hook process and a localhost POST *per tool call*, inside the user's
+ * editing loop. And hook *registration* is read at session start, so it fixes
+ * nothing until `raise install-hooks` is re-run **and** every open session is
+ * restarted - which is exactly when a stale block is most annoying. Reading the
+ * transcript fixes sessions that are already running, for free.
+ *
+ * `PostToolBatch` was weighed when `PermissionRequest` was adopted and refused
+ * on the same ground. It is cheaper - one hook per batch of parallel calls
+ * rather than one per call - but it still fires on every step of every turn,
+ * and it buys nothing the transcript does not already give within three
+ * seconds. Adopting `PermissionRequest` did not change this: it reports the
+ * *start* of a block sooner, and the end of one is still inferred, because
+ * there is nothing to report it. Revisit only if the transcript stops being
+ * readable.
  */
 export const HOOK_EVENTS = [
   'SessionStart', // register the session and capture its window identity

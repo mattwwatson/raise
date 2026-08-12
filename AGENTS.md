@@ -6,6 +6,12 @@ Guidance for Claude Code and other agents working in this repo.
 are looking at. This file is for changing it: architecture, conventions, and the decisions
 that are easy to undo by accident.
 
+**It is deliberately short, and staying short is a rule rather than an aspiration.** Everything
+here is loaded into every session before any work starts, so it earns its place only by being
+something you must know *before* you have chosen a file to open. A rule about one module lives
+in that module's header, where opening the file delivers it at the moment it is needed. See
+[Maintaining this file](#maintaining-this-file) for where a new decision goes.
+
 ## Project Overview
 
 Raise is a single-page monitor for the machine it runs on. It shows every agent session -
@@ -29,12 +35,12 @@ right - and every one of them eventually put a confident wrong answer on a card.
 | a pull request | it is on this checkout's branch | the database, or the session's own transcript - and, when it is switched on, the forge that hosts it |
 | a Lavish review | this session is sitting in a poll | the process table |
 
-Two consequences that are not obvious, and that the sections below keep returning to. **A
-session and its pipeline run at the same time** - you talk to a session while no-mistakes
-works for it - so the card shows both, and neither may displace the other. And **an attribute
-we cannot place belongs to nobody**: shown on every session that might own it, it is a false
-attribute on all but one, and there is no way to tell which. Better a single card that admits
-it than three that quietly disagree.
+Two consequences that everything below keeps returning to. **A session and its pipeline run at
+the same time** - you talk to a session while no-mistakes works for it - so the card shows
+both, and neither may displace the other. And **an attribute we cannot place belongs to
+nobody**: shown on every session that might own it, it is a false attribute on all but one,
+and there is no way to tell which. Better a single card that admits it than three that quietly
+disagree.
 
 The failure mode that matters most is not a crash - it is **quiet staleness**. A monitor that
 shows a confident green dot over state that stopped updating is worse than one that is
@@ -121,8 +127,8 @@ one, so it comes last. Do not reorder them back.
 A fifth exists and is deliberately not in that table, because it answers a different kind of
 question: **`src/untracked.js` walks the three agents' session directories for transcripts no
 hook has ever accounted for.** It is not a source of *state* - it cannot be, which is the whole
-of its design - it is what stops the first page a stranger sees being blank. See *A session
-nothing has reported* below.
+of its design - it is what stops the first page a stranger sees being blank. See the header of
+`src/untracked.js`.
 
 | Path | What |
 | --- | --- |
@@ -191,1221 +197,166 @@ Rules:
 These were each arrived at the hard way. Changing them is allowed; changing them by accident
 is the thing to avoid.
 
-**no-mistakes and lavish-axi are optional, and their absence is not a degraded state.** Two of
-the four sources are somebody else's tool, and the other two - the hooks and the transcript -
-answer the question this product exists for on their own. So a machine with neither installed
-is a supported setup, not a broken one, and the rule that follows is: **say nothing about an
-integration that is not there, and run nothing looking for it.** No warning banner, no `fail`
-in `doctor`, no subprocess.
-
-`nm-state.js` enforces it with a third mode, `absent`, decided by the database file simply not
-existing. Conflating that with `cli` - which is what a missing file used to fall into - cost
-both halves of the rule at once. It put *"Could not open the no-mistakes database
-(ERR_SQLITE_ERROR). Falling back to reading each repo individually"* on the page of somebody
-who had never installed no-mistakes, which is a fault report for a choice, and the error code
-could not even name the real reason: `node:sqlite` reports a missing file as a generic
-`ERR_SQLITE_ERROR`. And it armed the degraded path, which spawns `no-mistakes axi status` once
-per session directory every fifteen seconds, forever, for a binary that is not on the machine.
-
-**Which of the three it is gets re-decided on every read**, by one `stat`, and the rule is
-that **only `sqlite` is ever remembered, and only while the handle still points at the file it
-was decided about.** The database appearing is the daemon creating it on first use, long after
-a monitor was left running - deciding `absent` once and for good would leave the page quietly
-blind to every pipeline until somebody thought to restart it. The database *going away*
-matters more: the read-only handle keeps working on the unlinked inode, so an uninstall would
-otherwise leave the monitor serving a deleted file's frozen runs as current.
-
-**That `stat` reads identity, not existence, and the difference is a third case.** The daemon
-replaces the file on update, migration or a restore, which the module already assumes when it
-reopens once on a query error - but a replacement raises no error at all. The old inode
-answers every query happily, so `existsSync` sees a database that is there, the mode stays
-`sqlite`, and the previous file's runs are served as current for as long as the monitor runs:
-the deletion case's quiet staleness, reached by the path the deletion case does not cover.
-`dev` and `ino` captured when the handle is opened, compared on each read, close both for the
-same one `stat`.
-
-**`cli` may not latch either, and a database with no tables in it is not a version mismatch.**
-`PRAGMA table_info` returns no rows for a table that does not exist rather than throwing, so a
-file the daemon has created and not yet applied its schema to reads as one whose every column
-has been renamed. Reporting that as `cli` put the warning banner and the fifteen-second
-per-repo spawns - the two symptoms `absent` exists to remove - onto the ordinary act of
-installing no-mistakes under a running monitor, and left them there, because the re-probe used
-to fire only while the mode was `absent`. So a database carrying no tables at all is `absent`,
-and every mode except `sqlite` is re-probed on each read. A genuine version mismatch - tables
-present, columns we do not recognise - still degrades to the per-repo fallback with its
-warning, and now leaves it again when the schema becomes one we know. Re-probing costs an open
-and three PRAGMAs against a path that mode is already spawning a process per repo for.
-
-Lavish needs no equivalent, and the reason is worth knowing before adding one: the only thing
-that asks `lavish-axi` anything is a session whose transcript or process table shows a live
-`lavish-axi poll`, which cannot happen if Lavish is not installed. It is already inert. The
-guard that keeps it that way is `server.test.js`'s assertion that neither command is ever run
-on a machine without them - negative evidence, so it has to be asserted or it is lost.
-
-**Polling SQLite, not the daemon socket.** The no-mistakes daemon does expose a live event
-stream over its unix socket, but the protocol is private and undocumented. Polling a local
-SQLite file once a second is effectively free and survives no-mistakes upgrades that a
-reverse-engineered wire format would not.
-
-**The keepalive is an SSE `event`, not a comment.** `EventSource` only reports an error once
-the connection actually breaks, and a connection can stop carrying data long before that - a
-suspended laptop, a frozen server, a dropped NAT entry. The keepalive used to be an SSE
-*comment*, which the browser discards without telling the page, so in all of those the
-dashboard sat on a green "live" dot over state that had stopped updating. Liveness is
-positive evidence, never the absence of an error. Do not "tidy" the event back into a comment.
-
-**`server.json` is not the source of truth for "is it running".** `serve` asks the port
-itself via `/health`. A monitor started under a different `RAISE_HOME` writes its record
-somewhere you will never look, so the file says "not running" while the port disagrees -
-and a record outlives a server that was killed rather than shut down.
-
-**A session's summary is read from its transcript, not reported by the hook.** Claude Code
-already writes an `ai-title`, a `mode` and every `tool_use` into the transcript, so the
-summary is quoted rather than inferred. Doing it in the hook instead would mean a
-`PreToolUse`/`PostToolUse` pair firing a localhost POST inside the user's editing loop on
-every single tool call, to learn something already on disk.
-
-**The name you gave a session is identity, so it goes on line 1 and not in `.meta`.** Both
-agents let a human name a session - `/rename` in Claude Code, `/name` in pi - and that name is
-the only thing that distinguishes two sessions on the same repo *and* the same branch, which is
-an ordinary day here. It sits between the repo and the branch because it belongs with them;
-`.meta` is where controls and status live, and it is `flex: none` with no ellipsis, so a
-34-character name there would push the strip and squeeze line 1 instead of giving. It does not
-feed `disambiguateTitles`, which grows a path until two *places* differ - a name that happens to
-be unique must not stop that.
-
-The `ai-title` stays on its own line beneath. The two answer different questions - what you
-meant the session for, and what it turned out to be doing - and on a long session they drift
-apart, which is itself worth seeing.
-
-**Both agents' names normalise onto Claude Code's `custom-title` record**, for the reason pi's
-transcript is normalised at all: one concept, one field, one place on the card. pi's `/name`
-used to be rewritten as an `ai-title` for want of anywhere better, since pi generates no title
-of its own - and `title` for a pi session is null again now, correctly.
-
-**The name survives the 128KB tail window only because Claude Code re-appends it.** `/rename`
-writes its `custom-title` record once, which on a long session is far outside anything we read.
-What saves it is that Claude Code rewrites the record with every `ai-title` flush, within a few
-hundred bytes of one - measured on a 1.3MB transcript as flushes every ~40KB, worst gap 59KB. So
-the name inherits the summary's guarantee rather than having one of its own, and needs no head
-read, no second cache key and no extra I/O. That is a fact about Claude Code, not about us: if a
-name ever stops appearing on a card whose `ai-title` still updates, that re-appending is what
-changed, and a head read is the fix.
-
-A `custom-title` is not proof that `/rename` was typed - a fork writes `"<name> (fork)"`, and a
-resumed session carries its name forward - and no attempt is made to prove it. All three are the
-name Claude Code itself displays for the session, which is the thing worth showing.
-
-**The tool that is running is the one with no result yet.** A `tool_use` id that no
-`tool_result` refers back to is in flight; that is the whole basis of "what is it doing right
-now", and it is what separates *is sitting in a Bash command* from *used Bash at some point*.
-Results arrive out of order when tools run in parallel, so match on ids, never on position.
-
-**A recorded block is disbelieved once the transcript runs past it.** The installed hooks are
-`SessionStart`, `UserPromptSubmit`, `PermissionRequest`, `Notification`, `Stop`, `SessionEnd` -
-so after a block is announced, nothing fires again until the turn ends. **Claude Code has no
-event for a permission prompt being answered**, and that is a fact about Claude Code rather
-than a choice we made: all 31 hook events were read out of the 2.1.221 binary looking for one.
-Granting a permission prompt therefore leaves the session reading "Waiting for you" for the
-whole rest of the turn.
-Observed live at 185 seconds stale while the transcript was 3 seconds old. A false "waiting
-for you" is worse than a missing one: it is what teaches you to stop believing the page.
-
-The transcript settles it, because a session writing records is self-evidently not sitting
-waiting for a human. Two properties make this safe, and both were measured rather than
-assumed:
-
-- the post-turn metadata records (`ai-title`, `mode`, `last-prompt`) carry **no timestamp**,
-  so they cannot move `lastActivityAt` - a genuinely idle session goes quiet immediately
-
-  > **This was true when measured and is no longer the whole story.** Claude Code has since
-  > added timestamped records that are not the conversation, and one of them -
-  > `system`/`away_summary` - is written *because* the human is away. Counting it moved
-  > `lastActivityAt` forward on an idle session, disproved a real block, and rendered the row
-  > as "Working": this tool's one signal exactly inverted. Seen at 199s and 191s into a quiet
-  > stretch. `lastActivityAt` now counts `assistant` and `user` records only - a whitelist,
-  > because the conversation is the stable shape of a transcript while the ancillary types
-  > keep arriving (`attachment`, `file-history-delta`, `permission-mode` are all newer than
-  > this paragraph). **Do not widen it back to "any record with a timestamp".**
-- across real idle periods the last timestamped write lands within **0.3s** of the block,
-  against a 3s margin
-
-The transcript may only ever *clear* a block, never assert one. A transcript that cannot be
-read leaves the hooks' answer standing.
-
-> **Option not taken: a `PostToolUse` hook.** The direct fix would be to have Claude Code
-> report the *end* of the block rather than leave it to be inferred. It is a one-line change -
-> add `PostToolUse` to `HOOK_EVENTS` in `src/hooks.js`; `EVENT_STATES` in `registry.js`
-> already maps it (and `PreToolUse`) to `working`, so nothing else moves.
->
-> Not chosen because it costs a hook process and a localhost POST **per tool call**, inside
-> the user's editing loop, and because hooks are read at session start: it fixes nothing
-> until `raise install-hooks` is re-run *and* every open session is restarted, which is
-> exactly when a stale block is most annoying. The transcript approach fixes sessions that
-> are already running, for free.
->
-> `PostToolBatch` was looked at when `PermissionRequest` was adopted and rejected on the same
-> ground. It is cheaper - one hook per batch of parallel calls rather than one per call - but
-> it still fires on every step of every turn, and it buys nothing the transcript does not
-> already give within 3 seconds.
->
-> Adopting `PermissionRequest` did not change this. It reports the *start* of a block sooner;
-> the end of one is still inferred, because there is nothing to report it. Revisit only if
-> the transcript stops being readable or the 3s margin proves wrong in practice.
-
-**A human looking at the row is evidence too, and it is the only evidence an idle session can
-produce.** Everything above clears a stale block from something the session *did* - records in
-the transcript, a pipeline still running. An idle nudge is fired precisely because the session
-is doing nothing, so the one mechanism that retires a block has nothing to work with in the
-case where the block means least. Seen live at 749s red on a session with nothing gated.
-
-The escalation itself is right and is not touched - a quiet `Stop` becoming a loud "waiting for
-you" a minute later is how a finished session asks for its next instruction. What is added is
-that you may answer it. The page claims a human is needed; you are that human, and if you have
-looked and nothing is needed, that reading beats the sixty-second timer's.
-
-**A dismissal answers one announcement, never a session, and the key is what makes that true.**
-`Session.dismissedBlockAt` stores the `blockAnnouncedAt` that was dismissed, and the row is
-quiet only while the two are *equal*. `blockAnnouncedAt` moves on every event that says blocked,
-so the next announcement - a permission prompt above all - makes them disagree and the row is
-red again on the next poll, unaided. `stateSince` is the obvious key and the wrong one: it does
-not move while the state is unchanged, so keying on it would make one dismissal permanent and
-let it swallow every future prompt on that session. That is the failure this design exists to
-prevent, so if the field is ever changed, change it to something that moves.
-
-**Only the idle nudge may be dismissed, and a permission prompt gets no control at all.** A
-session stopped at a prompt genuinely cannot proceed without you, so a control there would be
-one whose *working* is the wrong outcome - the affordance rule from the other end. `isIdleNudge`
-already separates them and fails closed, so an unrecognised type is a hard block and offers
-nothing. The eligibility test is `isDismissibleBlock`, and the server re-runs it on the request
-rather than trusting the page: a tab is seconds behind, and the row it drew as a nudge may be a
-prompt by the time it is clicked. The state rule holds the block to `isIdleNudge` a second time,
-so even a dismissal that somehow reached the record could not suppress a prompt.
-
-**It is server-side, and it says so on the row.** The page and `raise status` are one protocol,
-so a dismissal only the browser knew would have them disagreeing about the same session; it
-lives with the session record, and both renderers show `Row.dismissed`. That visibility is the
-load-bearing half. The failure this product cares about most is quiet staleness - a confident
-indicator over state that stopped updating, because you stop checking - and a signal silently
-hidden is that same failure wearing different clothes. A dismissed row reads `Idle` *and*
-`dismissed`, so "nothing is waiting" and "I told it to stop saying so" can never be confused.
-
-**The word is on the row only while the dismissal is what quietened it**, which is narrower than
-a dismissal being on the record and is the same sentence read the other way round. A dismissed
-session whose folded pipeline agent then blocks is red - that block is the agent's and not this
-session's to answer - and `dismissed` beside "Waiting for you" would be the exact confusion the
-paragraph above forbids, with the marker's own promise that the row goes red again next time it
-asks already come true. A dismissed session the transcript then disproves reads `Working`, which
-is the stronger evidence winning and is right, but the dismissal is not why that row is quiet
-either. So `blockDismissalInEffect` is the dismissal branch of `effectiveSessionState` lifted out
-whole - one place deciding both the state and the word - and `Row.dismissed` requires it *and* an
-`idle` attention.
-
-Deliberately not built: dismissing a permission prompt, and any timeout that clears a nudge by
-itself. The second would be inventing evidence - the whole premise is that a human looked, and
-nothing else knows that.
-
-**A `lavish-axi poll` is a human gate wearing work clothes.** It blocks until someone opens
-the artifact and responds, so the hooks see a busy session while the actual blocker is a
-person who has lost the browser tab. That is why `review` outranks `parked`, and why the row
-drops its activity text - "Running lavish-axi" beside "Waiting on your review" reads as
-progress. `lavish-axi` takes about 1.7 seconds, so it is never on the poll path: the lookup is
-fired at most once every `REFRESH_MS` and the page uses the last answer.
-
-**Claude Code's `Notification` hook means two different things, and the payload says which.**
-It fires both when Claude wants permission for a tool and when a turn has ended and Claude has
-been idle for sixty seconds - and `registry.js` maps both to `blocked`, because at that layer
-they are the same event.
-
-The escalation is deliberate for the second case and worth keeping: a quiet `Stop` becoming a
-loud "waiting for you" a minute later is how a finished session asks for its next instruction.
-What is wrong is applying it to a session whose pipeline is still running. Claude Code
-backgrounds a command past its own ten-minute timeout, the turn ends, the nudge fires, and the
-page summons you to a session doing plenty of work - observed live for two minutes with
-`no-mistakes axi respond` running the whole time.
-
-So a live pipeline disproves the nudge, and **only the nudge**. `isIdleNudge` fails closed:
-anything unrecognised stays a hard block, because a permission prompt stops everything until a
-human answers whether or not something churns in the background.
-
-**Which one it is comes from `notification_type`, not from the message.** The payload carries
-`idle_prompt` for the nudge and `permission_prompt` for a real prompt, so the answer is read
-rather than matched. This replaced a regex on the message text, and it is strictly better than
-one: a reworded string no longer costs anything, and there is no case where the words and the
-type disagree. A type we do not recognise is *new*, not missing, so it stays a block and the
-message is not consulted underneath it - falling back there would be guessing with the answer
-already in hand. The message remains the fallback only when there is no type at all, which is
-a Claude Code too old to send one, or a record written before Raise read it.
-
-Two other things about this notification are worth knowing, both measured in the 2.1.221
-binary. It is **fired on a six-second tick and only once you have been idle six seconds**, so
-a permission prompt reaches us six to twelve seconds late, and later still while you are
-typing. And it is the *only* thing Claude Code says about a permission prompt: nothing fires
-when one is answered. See the `PermissionRequest` note below for the first, and the "recorded
-block is disbelieved" note above for the second.
-
-**`PermissionRequest` is the one per-tool-shaped hook worth installing, because it is not
-per-tool.** It fires only when a tool actually needs a human: the permission evaluation runs
-first, and a rule that approves the tool, `bypassPermissions`, `acceptEdits` for an edit, and
-the auto-mode classifier all settle the question before the event is reached. So it is as rare
-as a `Notification` and carries none of the cost that made `PostToolUse` unacceptable.
-
-What it buys is **six to twelve seconds**. The `Notification` for a permission prompt is fired
-on a repeating six-second tick and only once you have been idle six seconds, so it arrives
-late, and later still while you are typing. `PermissionRequest` fires the instant Claude
-decides it needs to ask. It also catches prompts answered inside six seconds, which previously
-never reached us at all - the cost being that a prompt you answer immediately can render the
-row red for one poll. That is a true statement briefly displayed, and `blockDisproved` clears
-it as soon as the transcript moves.
-
-It carries no message, so the row says a human is needed and picks up the reason when the
-`Notification` catches up. `stateSince` is what matters and it is set by the earlier event, so
-the waiting timer counts from when Claude asked rather than from when it got round to saying
-so.
-
-**One block, announced twice, needs two timestamps.** `stateSince` deliberately does not move
-while the state is unchanged, so once the `Notification` restates a block `PermissionRequest`
-already reported, it still points six to twelve seconds back. That is right for the waiting
-timer and wrong for the disproof: measuring `blockDisproved`'s three-second margin from there
-hands every permission block that much extra tolerance, and a transcript write four seconds
-after Claude asked - a sibling tool in the same batch returning, say - would clear a prompt
-still sitting open. So `Session.blockAnnouncedAt` moves on *every* event that says blocked and
-the disproof anchors on it, while the timer keeps counting from `stateSince`. It is held on
-the same terms as `message` and `notificationType`, and a record without it falls back to
-`stateSince`, so an older reporter behaves exactly as it always did.
-
-Two things this does **not** do. It does not shorten a stale block by one millisecond - there
-is no resolution event, so clearing is still the transcript's job. And it does nothing at all
-for a session that is already open: hook *registration* is read at session start, so this
-needs `raise install-hooks` re-run and every session restarted. Reading `notification_type`,
-by contrast, took effect everywhere the moment the server restarted, because the hook script's
-*contents* are read fresh on every event. That asymmetry is worth remembering when choosing
-between the two kinds of fix.
-
-One residual risk, noted rather than guarded: the hook fires *before* the dialog is rendered,
-and a `PermissionRequest` hook that returns `allow` or `deny` suppresses the dialog entirely.
-Ours returns nothing so it cannot do that, but a foreign hook could leave us asserting a block
-no human ever saw. The transcript clears it within seconds, which is why this is a note and
-not a mechanism.
-
-**A live poll process is what settles whether a review is still open**, not the transcript.
-Claude Code backgrounds any tool past its own ten-minute timeout and writes a `tool_result`,
-so the transcript reads as though the poll returned while the process runs on and the gate is
-still open - and a review taking a person more than ten minutes is the normal case, not an
-edge one. `src/poll-watch.js` scans the process table and attributes each poll to a session by
-walking up to the `host.pid` the registry already records for focusing, so nothing new has to
-be captured. The path there comes from argv, already expanded. One `ps` answers both questions
-it is asked - which sessions are polling, and which have a pipeline still running.
-
-**A pipeline is matched on the executable, never on the word appearing in argv.** The session
-most likely to be wrongly marked is the one working *on* no-mistakes, which greps for the
-string, runs tests in a directory named after it, and passes it inside `--instructions` text.
-Verified against a real run: the shell wrapper (`zsh -c eval 'no-mistakes axi status'`) is not
-matched and does not need to be, because the actual `no-mistakes axi status` child is, and both
-walk up to the same session. The permanently running `daemon` is excluded explicitly as well -
-the ancestor walk already drops it, but a rule that depends on the walk alone is one refactor
-away from claiming every session on the machine.
-
-**A run belongs to the session that started it, and only the process table knows which.**
-`matchRunForCwd` places a run by repo path alone, and that was once the whole rule - deliberate,
-on the ground that the row keeps showing the repo's recent pipeline. But several sessions open
-on one checkout is an ordinary day, and every one of them matched the same run. Three cards then
-carried the same step, the same parked gate and the same folded agent, each with a `Focus ↗` to
-a window that could not answer it. Seen with three sessions on this repo: one driving `axi run`,
-two with nothing under them at all.
-
-> **The path is no longer sufficient on its own, and the "recent pipeline" rule is gone.**
-> `matchRunForCheckout` requires the run's branch to match the checkout's, on the session's own
-> path as well as through a worktree's link. The old rule put a *live* pipeline from another
-> branch on an idle `main` card - the same wrong answer from the other direction - and a
-> checkout that has switched branch has said it is done with what ran there. A checkout whose
-> branch cannot be read matches nothing at all, failing closed like every other rule here.
->
-> This also retired the thirty-minute recency window. A run that **passed** leaves the page
-> when it passes; a run that ended **badly** stays, because failure is unfinished business and
-> the moment a card must not go quiet. The failed one needs no timer either - it stops showing
-> when the checkout leaves its branch, which is the same signal. `cancelled` counts as
-> finished: you cancelled it, so nothing is waiting on you. See `isDisplayable`.
->
-> **`FINISHED_QUIETLY` names the two endings that leave, and everything else stays** - so a
-> status a later no-mistakes invents (`errored`, `timed_out`) cannot be dropped from the page
-> in silence. The status word decides it and whether the run carries an error deliberately does
-> not: every `cancelled` run in the real database has one, so reading that instead would put
-> back exactly what this drops.
->
-> **Staying is not the same as being red, and the two rules fail in different directions.**
-> `isDisplayable` fails **open** - an unrecognised status keeps its card, because a card going
-> quiet is the worst thing this page can do. `attentionFor` fails **soft** - only `failed` is
-> coloured as a failure, and an unrecognised status reads as `working`. Being on the page is
-> knowledge; being red is a claim, and we genuinely do not know what a word we have never seen
-> means. `ACTIVE_STATUSES` in `nm-state.js` is an allowlist, so an unknown status is not
-> `active` either, and a new *running* state (`queued`, `waiting`) would arrive here looking
-> exactly like a new ending - red that sometimes means nothing is wrong is how this page stops
-> being believed. `ACTIVE_STATUSES` is the one place a new word would need adding.
->
-> That makes three guards that fail three different ways, and the shape is the point: each
-> fails in the direction that is safe for the thing it guards. `isRunOwnerCommand` fails
-> **closed** - an unrecognised *driving verb* must refuse to claim a run, because guessing puts
-> a pipeline on the wrong card. Do not "fix" any of them to match the others.
-
-Nothing in no-mistakes' database says whose run it is - `runs.intent_session_id` is empty on
-every row, the same field that already fails to place the pipeline's own agents. The answer
-comes from where the poll gate's does: walk the live process up to the `host.pid` the registry
-records for focusing. Same `ps`, third question.
-
-Two rules keep it from becoming a confident wrong answer of its own:
-
-- **Driving a run is ownership; reading one is not.** `isRunOwnerCommand` allows `run`,
-  `rerun`, `respond` and `abort` and refuses `status`, `logs` and the rest, so a session that
-  merely glanced at the pipeline cannot take the row off the one running it. It is an
-  allowlist, and it fails the safe way: a driving verb a later no-mistakes adds goes
-  unrecognised, the run goes unattributed, and the page behaves as it did before attribution
-  existed. The verb is found by scanning rather than by position, because global flags precede
-  it and `--intent` follows it with paragraphs of English - the five most recent real intents
-  on this machine run to 5.6KB and use the words "run", "abort" and "status" throughout.
-- **Ownership narrows for every session but the one that owns the run.** This is the same
-  shape as the transcript being allowed to clear a block but never assert one. On the owner's
-  own card it is also the positive answer, which is a later change and the resolution of a
-  whole class of failures - see *Ownership of a running run decides which run a session's card
-  shows* below.
-
-  > A run nobody was observed to own used to stay on **every** session in its repo, on the
-  > reasoning that an unattributed pipeline is better shown three times than not at all. Under
-  > a session-centric model that is a false attribute on all but one of them, with no way to
-  > tell which - and a pipeline line you learn to distrust on one card is one you distrust
-  > everywhere. It now goes to a card of its own; see *An unattributable run gets one card*.
-
-**`RunOwners` is a memory because the evidence is intermittent, not because it is expensive.**
-`axi run` *returns* at every approval gate and does not run again until the agent answers with
-`axi respond`, so there is no process to walk up from for exactly as long as a run is parked -
-which is when the dashboard matters most. Without the memory the run would fall off the card of
-the session holding its gate, at the gate, onto an unattributable row nobody can act on - and
-again for as long as a failed run stays visible, since nothing of it is running by then either.
-Verified live - with the run parked, `ps` showed only the daemon, so `raise status`, which is
-one-shot and has no memory, had nothing to attribute the run with at all. The server polls, so
-it catches `axi run` within a second of it starting and holds the answer.
-
-**Ownership does not change hands between live sessions, and is released when the owner is
-gone.** The first half is the guard against a session that ran a driving command near the end
-of a pipeline taking the row off the session that started it - a sighting from another *live*
-session is not a handover.
-
-The second half exists because the memory above outlives the sessions it names. A session ends
-while its run is parked, which is the ordinary way a pipeline outlives the window that started
-it, and whoever answers the gate next with `axi respond` is the session a human actually needs.
-Held by a dead owner, that run stayed unattributable: the new driver's card showed no pipeline
-at all, and the run fell through to a row with no Focus button - this feature's own failure
-mode inverted, and a confident wrong answer rather than the vague one it replaced. So `release`
-drops any ownership whose session is no longer registered, and it runs *before* the tick's
-sightings, or the new driver would still be refused on the very tick the old owner disappeared.
-
-**A reading we did not get is not evidence.** `prune` forgets runs that have left no-mistakes'
-recency window, so an empty runs list would forget every ownership at once - and the degraded
-`axi status` path returns exactly that from its cache until the first non-blocking call warms
-it. A parked run has no live process to be re-observed from, so one such tick would scatter it
-back across its repo permanently. The prune is therefore skipped on an empty reading, the same
-rule `PollWatch` applies to a `ps` it could not read. A few stale entries until a real reading
-arrives is the cheap side of the trade.
-
-**A run started in a worktree is registered against the main checkout, and only `.git` says
-so.** no-mistakes places a run by the path a repository resolves to, which for any linked
-worktree is the checkout it was created from. The session reporting itself to us is in the
-worktree, so `matchRunForCwd`'s prefix could never match - and this is not an edge case,
-because Treehouse puts *every* session in a worktree.
-
-Both halves of the attribution above failed on it, in a way that looked like neither. The
-sighting was there - `ps` saw `no-mistakes axi run` under the worktree session - and
-`observeFrom` threw it away, because it resolves the run being claimed through the same match.
-Unowned, the run then fell through to whichever other session happened to be open on the main
-checkout. Seen live: the worktree session sat at a parked review gate showing no pipeline at
-all, while an idle `main` card claimed the run, on a branch it was not on, with a `Focus ↗` to
-the one window that could not answer the gate. Ownership's own failure mode, reached by the
-route it does not cover.
-
-`GitBranch.checkoutFor` reads the link off the same `.git` the branch already comes from, and
-returns both from one resolution - not two accessors over one cache, because a cache *hit*
-still stats HEAD, so asking separately costs a second stat per session per second for one
-answer's worth of information. `matchRunForCheckout` tries the session's own directory first.
-Five things it deliberately does not do:
-
-- **the link is a fallback, never an override.** no-mistakes will register a worktree as a
-  repository in its own right, and that run is the more specific answer - the same rule
-  `matchRunForCwd` already applies to nesting.
-- **it does not resolve the link by rank, because the link is one-to-many.** Every worktree of
-  a checkout resolves to the same path and no-mistakes registers all of their runs against it,
-  so `matchRunForCwd`'s ranking - parked, then active, then most recent - hands one run to
-  every sibling tree and hands each of them somebody else's. Two runs on one repo inside the
-  thirty-minute window is an ordinary half-hour here. A worktree exists in order to be on its
-  own branch and every run carries one, so **through the link the branch is required**, and a
-  worktree with no branch to match on - a detached HEAD, which Treehouse produces routinely -
-  gets no run at all rather than a guess.
-
-  **The branch requirement applies everywhere, for display as well as for ownership.** It
-  used to stop at the link, on the rule that display asks what pipeline this checkout has
-  recently seen - so a session physically inside the checkout matched by repo path alone,
-  whatever branch it had since moved to. That rule is gone: it put a *live* pipeline from
-  somebody else's branch on an idle `main` card, with a `Focus ↗` to a window that could not
-  answer its gate, and a checkout that has switched branch has said it is done with what ran
-  there. Ownership asks the narrower question - which run this session is *driving* - and
-  `axi run` and `axi respond` both act on the branch they are issued from, so a session
-  cannot be driving a run for a branch it is not on. Narrowing a sighting by branch is the
-  definition of that question, not a heuristic answer to it.
-
-  **What the branch may not narrow is identity.** The run a card shows and the repo a card is
-  *named* after are two answers, and `buildRows` resolves them separately: `identityRepo` from
-  the unfiltered `matchRunForCwd` on the session's own path, `checkoutRun` from the
-  branch-gated match. Resolving both from the second coupled a card's name to which runs
-  happened to be in the reading - a session in a subdirectory retitled itself from `repo` to
-  `packages/api` and back as runs came and went, and lost the pull request its transcript
-  reported, the slug guard comparing the URL's repository against that subdirectory's name.
-
-  `RunOwners.observeFrom` therefore resolves a sighting through the same function - for the
-  same reason it was given the link in the first place: if the two disagree about which run
-  was seen, a genuine `axi run` from the second tree claims the first tree's run, is discarded
-  as already owned, and the run it was really of falls through to a bystander - but it hands
-  that function only the runs on the session's own branch, and a session with no branch to
-  read owns nothing at all. An unowned run gets a card of its own, which is the documented
-  degradation rather than a new failure.
-
-  **That was the third instance of one class, and the class is worth naming: rank standing in
-  for the branch.** The link picked a run by rank; the link then fanned one run out across
-  sibling trees; and a sighting on a session's *own* path was resolved by rank while a parked
-  run sat on the same `repoPath` - `rankRun` puts parked above active and `run.parked` implies
-  `run.active`, so `observeFrom`'s "only an active run can be owned" guard let it through. The
-  common cause is this branch's own premise: every worktree's run registers against the one
-  main checkout, so **several runs per `repoPath` is now the ordinary reading, not an unusual
-  one**, and anything that resolves a run by rank alone is picking between somebody else's.
-  There was a fourth, and it is what closed the class - see below.
-- **only a common dir named `.git` yields a checkout.** A linked worktree's admin directory is
-  always `<common dir>/worktrees/<name>`, and that dir is called `.git` only when the
-  repository has a working tree at all. no-mistakes' own gate repos are bare
-  (`~/.no-mistakes/repos/<hash>.git`), so its pipeline agents would otherwise be translated to
-  a directory no session is ever in; they are placed by run id instead, below. A submodule
-  points into `modules/` and is refused the same way.
-- **identity keeps the session's own path.** `titlePath` borrows the repo's path only when the
-  session is genuinely inside it. Borrowing it here would anchor the worktree and the checkout
-  on one path, and `disambiguateTitles` would have nothing left to grow - the `1/` and `2/`
-  that name a Treehouse tree would vanish and both cards would read `repo`.
-- **a run may not lend its branch at all, and the fallback that let it is gone.** `branch` used
-  to fall back to the matched run's when a checkout's own could not be read, which was fine for
-  a session sitting *in* the run's repo and a known-wrong answer through the link, because a
-  worktree exists to be on another branch. Caught the moment the link started matching: a tree
-  on a detached HEAD, legitimately branchless, took the name of the *sibling* tree's branch -
-  and since the pull request is gated on `run.branch === branch`, would have been handed that
-  branch's review as well. Requiring the branch on *every* path then removed the fallback
-  entirely rather than narrowing it: a run is matched on the branch, so in the one case the
-  fallback existed for there is no matched run to borrow from, and the line could never have
-  run again. What remains is the rule it was protecting: the branch is the checkout's own, or
-  it is null.
-
-**Ownership of a *running* run decides which run a session's card shows; rank is the fallback
-for a session that owns nothing live.** This is the resolution of the class above rather than a
-fifth rule beside it, and the shape of the mistake is the part worth carrying forward.
-
-`buildRows` used to resolve exactly one run by rank and only then consult `runOwners`, and it
-consulted it as a **veto**: the run was dropped when somebody else owned it. So ownership could
-take a wrong run off a card and never put the right one on it - which is precisely why the same
-failure kept arriving by a new route each time. Through the link, through the sibling fan-out,
-through the sighting, and finally here on the display path, every instance was rank picking
-between runs that ownership already knew the answer for. A session driving `axi run` was handed
-the parked run next to it, `rankRun` putting parked above active, and the run it was actually
-driving fell through to an unfocusable row of its own: this feature's failure mode, reached on
-the one path that had not yet been closed. Inverting the consultation closes all four, because
-there is no longer a place where rank decides something ownership knows.
-
-Two things it deliberately does not change. **Identity still follows the session's own path** -
-`title` and `titlePath` come from `identityRepo`, the unfiltered match on the session's own cwd,
-so a session that owns a run is not retitled after it and two cards on one checkout keep looking
-alike whatever branch either is on. And the **branch requirement is unmoved**: it narrows which
-run a card shows and which run a sighting claims, and it never touches the name of the card.
-`branch` is the checkout's own, from `.git/HEAD` and nothing else.
-
-The consequence is accepted on purpose: a session owning a run on a branch its checkout has
-since left shows *that* run, for as long as it is still going, rather than the repo's newest.
-That is the right answer - it is the run this session is answering for, and the only one whose
-gate it can actually reach - and the run it no longer shows is not lost, because an unclaimed
-run still gets a row of its own.
-
-**The preference ends when the run does, and that qualifier is load-bearing rather than
-tidying.** The whole justification for preferring an owned run is the gate it is holding open,
-and a finished run has none - so there is nothing left to prefer. An ownership outlives its run
-by design (`prune` keeps it for the half hour the run stays in the reading, `release` for as
-long as the session lives), so an unconditional preference would let a *completed* run sit on
-the card while a live or parked one in the same checkout lost the only session that could focus
-it: this branch's own failure, reached from the other side. `run.parked` implies `run.active`,
-so a parked run is still preferred, which is the case with a gate actually waiting. A session
-whose owned run has finished falls back to the rank-resolved match, nulled when somebody else
-owns it, exactly as a session that never owned anything.
-
-**A session and its pipeline get a line each, because they are happening at once.** The card
-used to have one line for both, and the step won it: `summary` was set to `step <name>` whenever
-a run was attached, and the page then suppressed the summary line outright when a step existed.
-The justification was that the step says what is being done to the repo where the transcript
-title only says what the conversation is about - true, and beside the point. They are not
-alternatives. no-mistakes runs *while* you are talking to the session, so the moment a pipeline
-started, what you had been doing vanished off its own card.
-
-So `Row.summary` is always the session's own title, and `Row.pipeline` is what no-mistakes is
-doing, rendered as a marked line beneath it. Three shapes, because no-mistakes works in three
-different ways and only one of them has an agent to fold in:
-
-| Shape | Where the words come from |
+**This section holds two kinds of thing, and nothing else.** The invariants below span several
+modules, so no single header can own one. The index after them is a pointer per decision: the
+rule in a line, and the file whose own header carries the reasoning, the rejected alternative
+and the failure that produced it. The index is not a summary of those headers - it is how you
+find the one you need. **Open the file before changing anything it owns.** A rule compressed to
+one line has lost the reason it exists, and a rule without its reason is one the next person
+reverts while tidying.
+
+### Invariants no single module owns
+
+**Quiet staleness is the failure mode.** A confident indicator over state that stopped
+updating is worse than a visible outage, because you stop checking. Every rule below is a
+special case of this one. A signal silently *hidden* is the same failure wearing different
+clothes, which is why a dismissed row still says `dismissed` and an unattributable run still
+gets a card.
+
+**Indirect evidence may disprove, and may never assert.** The transcript can clear a stale
+block - a session writing records is self-evidently not sitting waiting for a human - and it
+can never announce one. A live pipeline can disprove the idle nudge and never a permission
+prompt. **The forge is the single documented exception**, and it earns it by being the
+authority on its own pull requests where every other source is somebody's recollection of one;
+it settles the state, never the identity and never the link. If you find yourself adding a
+second exception, that is the argument to have first.
+
+**Positive evidence, never absence.** Liveness is a `ping` that arrived, not an error that did
+not. A firstmate crewmate is identified by the `fm-` window firstmate pins, never by the tty it
+lacks. Claude Desktop is matched on paths only that app can occupy, never on having no
+terminal - a no-mistakes agent under the daemon is indistinguishable by that measure. Where
+there is nothing positive to read, the honest answer is no answer: a host we cannot place says
+`no window`, and a label map with no entry renders no chip.
+
+**A reading we did not get is not evidence.** An empty `ps`, an empty runs list, an empty
+session list and a failed tmux query are all *absences of a reading*, not readings of an
+absence. Nothing may be retired, pruned or released on one. This is why the poll's `release`
+and `prune` calls are guarded on a non-empty list, and why a failed forge lookup drops its
+previous reading rather than being treated as an answer.
+
+**Guards fail in the direction that is safe for what they guard, and they do not match each
+other.** `isDisplayable` fails **open** - an unrecognised run status keeps its card, because a
+card going quiet is the worst outcome here. `attentionFor` fails **soft** - only `failed` is
+coloured as a failure, because being on the page is knowledge and being red is a claim.
+`isRunOwnerCommand` and `isIdleNudge` fail **closed** - an unrecognised driving verb claims no
+run and an unrecognised notification type stays a hard block, because guessing puts a pipeline
+on the wrong card and swallows a permission prompt. **Do not "fix" any of them to match the
+others.**
+
+**The branch comes from `.git/HEAD`, and from nowhere else.** It is the checkout's own property
+or it is null - never borrowed from a run, never inferred. It gates three things at once: which
+run a session matches, which pull request a row shows, and which run a sighting may claim. A
+wrong branch is therefore a wrong pipeline *and* a confident link to the wrong review, and a
+checkout that will not say gets nothing rather than a guess.
+
+**An attribute we cannot place belongs to nobody.** Shown on every session that might own it,
+it is false on all but one with no way to tell which - and a line you learn to distrust on one
+card is one you distrust everywhere. An unattributable run gets a single card that says so.
+
+**An optional integration's absence is not a degraded state, and the rule is: say nothing about
+it, and run nothing looking for it.** no-mistakes, lavish-axi and firstmate are each somebody
+else's tool, and the hooks and the transcript answer this product's question without them. So a
+machine with none installed is a supported setup - no warning banner, no `fail` in `doctor`, no
+subprocess. `server.test.js` asserts that neither `lavish-axi` nor `no-mistakes` is ever run on
+a machine without them; that is negative evidence, so it has to be asserted or it is lost.
+
+**One answer per fact.** The page never argues with itself. Where two sources disagree the
+ranking decides and the loser is silent - a disagreement with no-mistakes is not surfaced,
+because it means only that no-mistakes' reading is older, which `observedAt` already records. A
+page that shows a second opinion teaches you to stop believing the first.
+
+### Decision index
+
+One row per decision, and the file that owns the reasoning. Where a row says a spec, the
+measurement is there and dated - `docs/tasks/` is the home for one-time captures, and specs are
+stratified on purpose, so read the whole file rather than one section.
+
+| Decision | Owner |
 | --- | --- |
-| a step running a Claude agent (review, test) | the folded agent's `activity` |
-| the CI monitor rebasing a pull request | `step.lastActivity` - it runs **inside the daemon**, with no agent session at all |
-| parked at a gate | neither; the step name and the state word above it are the whole story |
-
-The middle row is the one worth remembering. A pipeline can be doing substantial work - a
-rebase, a conflict resolution, a re-push - with no Claude session anywhere, so nothing registers
-through the hooks and there is nothing to fold. Reported as "no no-mistakes attributed to that
-session", and the answer was that `step.lastActivity` had been reaching the page all along and
-being thrown away.
-
-**Presence follows the run existing, never the activity** - the same rule as the folded agent
-marker, and for the same reason. `activity` is null between every pair of tool calls, so a line
-rendered on it blinks several times a minute and reads as the pipeline stopping and starting.
-`Pipeline.what` may be null and the line still renders: a step that has not said anything yet
-is not a pipeline that has gone away.
-
-**`step.lastActivity` arrives prefixed, and `stepActivity` reads the prefix as an allowlist.**
-The vocabulary is no-mistakes' to grow - the live database carries `status:`, `step failed:` and
-`log:` - so an unrecognised prefix is dropped rather than shown raw, which is what keeps its
-transport noise off a card. `log:` is a line the step printed and the prefix goes. `status:` is
-dropped outright, because it restates the step status the line above is already carrying.
-`step failed:` is **kept, prefix and all**: it is why a run failed, and a failed run is the one
-finished run the page deliberately keeps - dropping it left exactly the card that must not go
-quiet showing a step name and nothing else, with the reason already on the row and thrown away.
-The word stays because "push to upstream: exit status 1" without it reads as something the step
-is doing rather than how it ended.
-
-**An unattributable run gets one card, and it says so.** A run we cannot tie to any session -
-started by hand, its session gone, or simply never observed because `axi run` returns at every
-gate and `raise status` has no ownership memory at all - is the one thing on this page that is
-not a session. It earns that by admitting what it does not know: `attributable: false`, a
-count of the live sessions sharing its repository, and no `Focus ↗`, because there is nothing
-to focus.
-
-The count is of the **logical** repo, not the path. With Treehouse, `work/repo`, `1/repo` and
-`2/repo` are one repository, which is exactly what `GitBranch.checkoutFor` already resolves.
-
-**It sorts below every session, whatever state either is in** - including parked, which
-normally outranks working. The page ranks by who you can go and help, and this card cannot
-take you anywhere. `sortRows` is not enough on its own: the page builds its groups by
-filtering the whole list per attention, so a parked run landed in "Pipeline parked at a gate"
-above every working session until the page was given a trailing section of its own. If you
-change one, check the other.
-
-**no-mistakes' own agent sessions are folded into the repo's row, never given one.**
-no-mistakes runs its pipeline steps as Claude sessions in a worktree at
-`~/.no-mistakes/worktrees/<repo-hash>/<run-id>`. They carry the same hooks, so they register
-themselves - and the worktree is nowhere near the repo, so `matchRunForCwd` cannot place them.
-They arrived as a card titled with the bare run id, looking like an unrelated repo, and one
-you could never focus, because a daemon-spawned agent has no terminal.
-
-The tie is `matchRunForAgentCwd`: **the run id is a path segment of the agent's cwd.**
-(`runs.intent_session_id` looks like the obvious link and is empty on every row.) Matched as a
-whole segment against ids we already hold, never as a pattern - guessing at the shape of a
-ULID would eventually claim somebody's real directory.
-
-One row per repo, never two - and once a run has an owner, that is the owner's row, because the
-folded agent is pipeline state like the step and the parked gate. But folding must not swallow
-the one signal this tool exists to give, so **a blocked agent still makes the row blocked and
-carries its message** - an agent sitting on a permission prompt has stalled the pipeline, and
-only a human can free it.
-
-An agent's block is subject to every disproof a human session's is, and for a sharper reason:
-the hooks fall silent between the permission prompt and the end of the turn either way, but
-here a stale block pins the whole repo's row red rather than only its own. So the `Agent`
-record is built through `effectiveSessionState` - its own transcript clears it, and a live
-pipeline answers the idle nudge - and the message goes when the block does. **Only the newest
-agent of a run is kept**: a step's agent is still registered while the next one starts, and
-letting the later write win would let an older calm agent mask a newly blocked one, which is
-exactly the signal folding is not allowed to swallow.
-
-**The marker's presence never follows `Agent.activity`.** `activity` is the tool with no
-result yet, so it is null between every pair of tool calls - most seconds, on a busy agent -
-and rendering on it blinked the marker in and out several times a minute, which on a pinned
-page reads as the pipeline starting and stopping. There is no second string to fall back on
-either: **a no-mistakes agent transcript carries no `ai-title`** (Claude Code writes those for
-interactive sessions only), so `Agent.summary` is always null for one of these.
-
-**The rule survives; where it hangs has moved.** It used to hang on a never-null `Agent.what`,
-and the marker was the agent's own line. The card carries one pipeline line now, for the
-session's run and the folded agent alike, so presence follows **the run existing** and
-`Pipeline.what` is allowed to be null while the line still renders. `Agent.what` is gone
-rather than left unread - once both renderers moved to `Pipeline`, its `title || 'working'`
-fallback reached nothing. The accepted consequence: between two tool calls the line shows the
-step name alone, where the old one said "working". A step that has not spoken yet is not a
-pipeline that has gone away, which is the same statement the never-null rule was making.
-
-**`Agent` does not reach a renderer at all, and is not on `Row`.** It is how a stalled
-pipeline turns its repo's row red and lends it the message, and it is where `Pipeline.what`
-gets the tool in flight - the row carries those answers rather than the agent behind them. It
-was on `Row` until the page and then the CLI both moved to `Pipeline`, at which point it was
-unread payload crossing the event stream while looking load-bearing. What it feeds is not
-optional and has its own tests: assert the folding through the row's `attention`, `message`
-and `pipeline`, never by reaching for the agent.
-
-**A pull request has three possible sources, and they are ranked by how much they know.**
-A live no-mistakes run is being watched right now, so its `pr_state` is real *for as long as
-something is actually looking*. The database's history is branch-verified but frozen. The
-transcript is neither, and is the only one that sees a pull request no-mistakes never opened.
-
-**A fourth outranks all three, and it is the only source allowed to *assert*.** Every one of
-the above is somebody's recollection of a pull request; the forge is the authority on its own.
-So where the transcript may only ever clear a block and never announce one - indirect evidence
-gets to disprove and nothing else - `withForgeState` in `dashboard.js` replaces the state
-outright. That asymmetry is deliberate and is the answer to the reasonable question of why this
-source may do more, given how load-bearing the "only ever disprove" rule is elsewhere.
-
-It settles the *state*, never the identity: the three sources above still decide **which** pull
-request a row has, and the forge is applied to whatever they concluded. It also never touches
-the link, which the local sources are just as good at and which the row keeps in every case.
-
-**"The forge wins" must not become "the forge's last answer wins forever."** A forge reading
-carries its own `observedAt` and goes through the same `PR_STATE_FRESH_MS` gate as the
-database, so a lookup that stops answering - the network gone, the laptop asleep - stops
-asserting within five minutes and the row falls back to "was open, last checked". Without that
-this feature is RAI-10 reintroduced with a new source, which is the exact shape this file keeps
-warning about.
-
-**It has one exception and one guard, and both are the same sentence read twice: freshness
-exists because an answer can change.** `merged` is exempt, because a merged pull request cannot
-un-merge - and it is the one reading here whose `observedAt` is frozen by design, since
-`forge.js` deliberately never asks again once it has that answer. Aged through the ordinary
-gate, the one immutable fact would be the only one guaranteed to expire: the MERGED chip off
-the row five minutes later and off for the rest of the day. `open` and `closed` keep the gate,
-because both can still change.
-
-The guard is the acceptance criterion for the whole feature: **this may never leave a row less
-current than it found it.** A live no-mistakes run re-observes at about a two-minute cadence,
-so a stale forge reading replacing a fresh local one would be the forge making the page worse
-than the source it outranks - this feature's own argument inverted. Outranking is for deciding
-between two answers, not for replacing an answer with silence, so where the forge has nothing
-current to say and a local source does, the local reading stands whole. Both live in
-`withForgeState`, and a test in `dashboard.test.js` compares a row against the same row built
-with no forge readings at all, which is the property stated directly.
-
-**A disagreement with no-mistakes is not surfaced, because there is nothing in it to say.** It
-means one thing only - no-mistakes' reading is older - which `observedAt` already records. A
-page that argues with itself teaches you to stop believing it, the same failure as a confident
-wrong chip, and this codebase refuses a second opinion everywhere else it has been tempted: an
-unplaceable run gets one card that admits it rather than three that quietly disagree.
-
-**A failed lookup is not an answer, and it drops the previous reading.** No credential, no
-`gh`, no network, a private repo, a rate limit: none of these contradict anything, so the row
-returns to exactly what it showed before this existed. The old reading is dropped rather than
-left to age out - it would age out either way, but a reading we can no longer confirm is
-precisely what this page may not assert.
-
-**The Bitbucket credential lives in a file and may not come from the environment, which is the
-opposite of the intuitive answer.** `exec.js` spawns with no `env` option, so every child
-inherits Raise's whole environment - `ps`, `tmux`, `osascript`, `gh`, `lavish-axi` and
-`no-mistakes`, most of them on the one-second poll loop. A token in the environment is a token
-handed to all of them for as long as the monitor runs. Read out of a `0600` file into a
-variable and put in a header, it is in one process and in no environment at all. The tempting
-fix for the other arrangement - teach `exec.js` to filter what it passes - is the problem
-inverted to protect a secret we chose to put there, so there is deliberately **no environment
-fallback** for it.
-
-**GitHub is the asymmetry, and it is on purpose.** There is no GitHub credential here at all:
-`gh` authenticates itself, and it already reads `GH_TOKEN` and `GITHUB_TOKEN` out of the
-environment it is handed, so a token path of our own would be a second way to compute an answer
-`gh` was going to give anyway. It was ruled a hard requirement rather than one option of two:
-`gh` is the interface most likely to survive a change in GitHub's own rules. **Do not add a
-GitHub token path**, and never write a GitHub token to the config file.
-
-**An unsafe file mode refuses the whole file, the opt-in included.** ssh's rule, and it is what
-makes a documented `0600` more than a comment, since a file can be written correctly and
-chmodded later. Honouring the half of a file with no secret in it, having just called the file
-unsafe, teaches nobody to fix it - and the credential already exposed is exposed either way.
-`raise doctor` is where that is said; `readForgeConfig` sets `problem` **only** when somebody
-has evidently tried to configure this and it is not working, never for the ordinary case of no
-file at all. That silence is the same rule no-mistakes and Lavish are held to.
-
-**The config file is re-read while the monitor runs, because three surfaces have to tell one
-story.** `doctor` reads the file each time it is asked, and the README tells the user to write
-it - so a config captured when the server started meant the diagnostic reported an opt-in the
-poll loop had never seen, for as long as nobody restarted. `ForgeState` therefore takes a
-*reader* rather than a config (`watchForgeConfig`), and the one-shot CLI passes the config it
-already has. It costs one `stat` per poll: the parse is cached on what that `stat` says, and
-**only the positive case is remembered** - the same rule `nm-state.js` follows for the database
-appearing under a running monitor, since no file at all is the common case and caching that
-absence would mean a file written later was never noticed. The mode is part of the cache key as
-well as of the answer, so a `chmod 0644` after the fact stops the file being used on the next
-poll, and switching the lookup off drops the readings with it rather than leaving them to age
-out. A *changed* file also clears the schedule, backoffs included: fifteen minutes is the right
-silence for a credential nobody has touched and the wrong one for a credential just corrected.
-
-**Cadence and the two caches.** An open pull request is re-asked once a minute; a **merged** one
-is never asked again, because it cannot un-merge; a **closed** one keeps the ordinary interval,
-because it can be reopened and `closed` over a reopened review is the same quiet staleness this
-removes. A failure is cached for fifteen minutes - the failures this covers are the durable kind,
-and retrying them on the open interval is a request a minute forever for an answer that is not
-coming. The set asked about is whatever is *rendered*, fed back from `buildRows`, so it is
-bounded by the row count and a pull request that leaves the page is forgotten.
-
-**Timestamps come from the caller's clock at dispatch, never `Date.now()` on return.** Same rule
-and same reason as `lavish.js`: mixing the injected clock with the wall clock reads as working
-and quietly is not, and a test that moves the clock cannot see it. It also understates a
-reading's freshness by however long the request took, which is the safe direction for the field
-that decides whether we may assert.
-
-The first of those is `pullRequestForRun`, and it is worth knowing that it is the source a
-session card usually shows rather than a fallback - the runs query carries `pr_url` and
-`pr_state` too, so any card with a matched run takes its pull request from there. It was
-documented as mattering only on the degraded `axi status` path, and that sentence is what hid
-the freshness bug below for as long as it did.
-
-**All three are gated on the checkout's branch, the run's own included.** This was written when
-`matchRunForCwd` placed a run by repo path alone, so a finished run went on matching a session
-for the whole thirty minutes it counted as recent, long after the checkout had moved on -
-taking its pull request unconditionally put another branch's review beside `main`. The run
-match is branch-gated now and the recency window is gone, so the run can no longer *be* on
-another branch. **Keep the check anyway.** It costs nothing, it is the last line of defence on
-the source with the most to lose from being wrong, and it stops a future change to the match
-silently re-opening a confident wrong link.
-
-A checkout whose branch cannot be read gets no pull request at all, which is a change: the
-branch used to fall back to the matched run's, and there is no matched run to borrow from any
-more - a run is matched *on* the branch. Nothing is the right answer when the checkout will
-not say, because a borrowed branch was a borrowed review link.
-
-*The frozen part is the trap.* no-mistakes stops observing a pull request the moment its run
-reaches a terminal state - `pr_state_observed_at` never advances past `updated_at` - so every
-cancelled run in a real database still says `open`, days later. **The link survives the run;
-the state word does not.** `PullRequest.current` is what enforces that, and the page shows the
-state as a chip only when it is true, otherwise as "was open, last checked 3d ago" in the
-tooltip. The runs query deliberately does *not* bound pull requests by the thirty-minute
-window it uses for runs: a run is interesting for half an hour, and the review it opened is
-what you are waiting on for the rest of the day.
-
-**"The run is still going" is not "this reading is current", and the field is called `current`
-because reading it as `live` is exactly the mistake.** The rule above guards a frozen reading
-from a *finished* run and, until RAI-10, guarded nothing at all against a stale one from a
-*running* one - so a merged pull request kept a confident `OPEN` chip. Observation stops
-without the run stopping: two runs in the real database were last observed at the same second,
-a daemon restart, and then sat in the `ci` step marked `running` for a further **7h23m**
-carrying `open`. So `current` requires the run to be active **and** the reading to be no older
-than `PR_STATE_FRESH_MS`.
-
-**That threshold is measured, and the measurement is recorded beside it in `nm-state.js`.**
-no-mistakes rewrites `pr_state_observed_at` on every poll of its `ci` step rather than only on
-change, at a cadence whose worst case over 43 unbiased samples was 112s; five minutes is 2.7x
-that, so a healthy run never loses its chip. What no threshold can close is the cadence itself
-- up to about two minutes of honestly-fresh, honestly-wrong `open` between a merge and
-no-mistakes noticing. That residual is the whole remaining case for **RAI-13**, and it needs
-the forge and therefore credentials.
-
-**An observation time may never be substituted.** `pullRequestForRun` used to report
-`run.updatedAt` as `observedAt`, which is when the *run* was last touched - it advances every
-time the run does anything, so the source most likely to be on a card was also the one a
-freshness rule could not see. A source with no observation to offer says null and is not
-current: the degraded `axi status` path, and a no-mistakes too old to carry the column.
-
-*The transcript part is the sharp edge.* A session mentions plenty of pull requests that are
-not its own, and the failure is not a missing link but a confident link to the wrong review.
-Two guards, both learned the hard way: the repository in the URL must match the checkout, and
-**a record listing several pull requests is not a sighting of any of them**. The no-mistakes
-skill injects a table of the last ten runs, every row a different branch and a different PR;
-taking the first URL out of it put an unrelated review on the card. A URL on a line naming
-our branch is ours; failing that, a record mentioning exactly one is reporting it; a record
-mentioning several and none of them ours is worth nothing. This is why `summariseTranscript`
-takes a branch, and why `TranscriptReader` caches on it as well as on mtime.
-
-A third guard closes the gap between those two, and it lives in `transcriptPullRequest` rather
-than in the parser: **the database is the negative authority on ownership.** A run table whose
-other rows have not opened a pull request yet carries exactly one URL, so it reads as a
-sighting and the exactly-one rule waves it through - which is how PR #1 landed on
-`feat/session-summaries-and-typecheck` while this very branch was being built. no-mistakes
-knows which branch it opened each pull request from, so a sighting it recognises on a
-*different* branch is rejected outright. A sighting it has never heard of is untouched, and
-must stay that way: that is the entire case this source exists for. `src/transcript.js`
-reports what it saw and deliberately does not decide whose it is.
-
-**The branch comes from `.git/HEAD`, and from nowhere else.** Borrowing it from no-mistakes
-meant a session had a branch only while its pipeline run was recent, which is backwards - the
-branch belongs to the checkout. It is also load-bearing twice over now: a pull request is
-matched on it, and so is the run itself, so a wrong branch is a wrong pipeline *and* a wrong
-review link. A checkout that will not say gets null and matches neither.
-`src/git-branch.js` reads the file directly (handling a worktree's `.git` file) and caches on
-mtime; it never shells out, because nothing reachable from the poll loop may.
-
-**A session nothing has reported still gets a row, and it is the one row that refuses to say
-what a session is doing.** Every other source here is pushed: an agent fires a hook, the hook
-posts, a row exists. That is why a session started *after* `raise install-hooks` appears with no
-activity required - and why one started *before* appears not at all until its next turn. For the
-person who installed Raise that is a footnote. For a stranger it is an empty page at the exact
-moment they have the most sessions open and the least patience, and the conclusion they draw is
-that the tool does not work.
-
-So `src/untracked.js` walks the three agents' session directories for transcripts written in the
-last two hours that no registry record accounts for. The sentence the whole design follows from:
-**a hook record is evidence that a session exists; a recently-modified transcript is evidence
-only that one existed as recently as its mtime.** Every state word, every colour, the focus
-button and the pid liveness prune in `registry.list` hang off the first.
-
-**The four states worth telling apart write byte-identical files, and that is measured rather
-than assumed.** A finished turn, the sixty-second idle nudge, a session stopped at a permission
-prompt and a window closed an hour ago all leave the same records: the nudge is a timer inside
-Claude Code that writes nothing (read live from two registry records on 11/08/2026), and per
-RAI-11's capture a pending `tool_use` is not flushed until the tool resolves, so the prompt
-leaves no trace either. `working` is not the safe fallback: a dangling tool call is exactly what
-a session killed mid-tool leaves behind, and there is no pid to probe because a pid is something
-only a hook reports. So the row carries presence and identity - repo, branch, the name a human
-gave it, the `ai-title`, when it last wrote - and no `activity`, no `mode`, no pull request, no
-`Focus ↗` and no host chip. `test/untracked.test.js` **records that measurement rather than
-re-taking it**: its fixtures are hand-written copies of what was read off a real machine, so
-nothing fails on its own the day Claude Code starts flushing eagerly - the assertion fires only
-once a human has re-measured and edited the fixture, which is what stops this decision standing
-by inertia. Both readings, their dates and one line each on how to re-take them are in
-[docs/tasks/RAI-4-first-run-shows-something.md](docs/tasks/RAI-4-first-run-shows-something.md);
-a test that read a live transcript would be a real tripwire and is exactly the test this suite
-forbids.
-
-`Attention` gains `untracked`, which is the one entry in `ATTENTION_ORDER` that is not an
-attention level but the absence of one. It exists because every row needs a value there; it
-sorts last, renders `--faint`, and is excluded from the coloured groups.
-
-Six bounds keep the scan from becoming a second, worse source:
-
-- **two hours**, erring long on purpose - an over-inclusive window costs a grey row saying
-  "2h ago" at the bottom of the page, and an under-inclusive one costs the empty page this
-  exists to fix.
-- **a session we watched end is not a session nothing reported.** Its transcript stays recent for
-  hours after the window closes, so on an installed machine the scan's largest population is not
-  sessions that predate the hooks at all - it is every window the user finished today, each
-  arriving as a card saying it had never reported and advising a restart of something deliberately
-  closed. **The honesty rule cuts both ways**: it forbids asserting what we cannot know, and it
-  equally forbids contradicting what we do. So `SessionRegistry.remove` - the one place a terminal
-  event and a dead pid both pass through - keeps the transcript path as a tombstone, and
-  `reportedPaths` hands the scan the live paths and the unexpired tombstones together, as one
-  answer neither renderer assembles for itself. It is **on disk**, because a restarted server is
-  precisely when a stranger opens the page and in-memory ghosts would all come back. Retention is
-  `UNTRACKED_WINDOW_MS` itself rather than a second number, since a tombstone is worth exactly as
-  long as the scan could otherwise resurface the path. It is a suppression list and nothing more:
-  `get` and `list` do not consult it, nothing in it can become a `Session`, and no field of it
-  reaches `Row` or the frame.
-- **superseded on every tick**, matched on the transcript path rather than a derived session id,
-  so restarting a session replaces its row on the next poll and not on the next walk.
-- **no `sessionId`**, because `/focus`, `/dismiss` and `/recent` all read the registry. Null is
-  what makes the page's existing affordance rules right with no new condition.
-- **no run attribution, in either direction.** Ownership is walked up to `host.pid`, which these
-  sessions have none of, so claiming a run would be rank standing in for evidence and would put
-  a parked gate on a card nobody can focus. They are left out of `candidateSessions` too, which
-  counts *live* sessions and is only honest while it keeps meaning that.
-- **no-mistakes' own pipeline agents are excluded by path**, not by `matchRunForAgentCwd`. They
-  are the dominant population - 14 of 16 unregistered recent transcripts when measured - and each
-  would arrive as a card titled with a bare run id. The run match is the wrong tool here because a
-  run that finished half an hour ago has left the reading while its worktree transcript is still
-  inside our window: the same dead card, reached by the path that mechanism does not cover. A
-  `startsWith` against `noMistakesHome()` needs no database and never fires on a machine that has
-  no no-mistakes.
-
-**The walk is on a thirty-second interval, and the working directory is read tail-first.**
-Measured at 9.3ms across 1,396 transcripts in 261 directories, so it needs no cap on files - the
-interval is what keeps it off the one-second poll. The first scan runs on the first snapshot, so
-a page opened straight after `raise serve` is populated at once; the interval only delays
-*discovering* a session that becomes untracked later, which is a real case rather than a
-theoretical one, because Codex's hooks are trust-gated and every Codex session is untracked until
-the user approves the hook in Codex's own TUI. For the cwd: Claude Code writes one on every
-conversation record so its tail always has it and its head often does not (172KB in, on the worst
-file of 1,396); Codex and pi write exactly one, on line 1, and none in the tail. It reads **raw**
-lines rather than going through the normalisers, because `cwd` lives on precisely the metadata
-records they exist to drop. Only a positive answer is cached, the same rule `nm-state.js` follows
-for the database appearing under a running monitor. **A cwd that is no longer a directory yields
-no row at all**: `GitBranch` walks up until something answers to `.git`, so a deleted worktree
-would take an ancestor repo's branch - and on a machine where `$HOME` is a checkout, that is every
-deleted path.
-
-**A Claude Desktop session is identified by evidence, never by what it is missing.** The
-desktop app hosts a session by spawning its own bundled Claude Code with no controlling
-terminal, so it registers through the same hooks as any other session and everything that
-keys off `cwd`, `transcriptPath` or `host.pid` - the run match, the branch, the pull request,
-the Lavish gate, the pipeline scan - already works on it unchanged. The one thing it has
-none of is a window: no tty, no `TERM_PROGRAM`, no terminal UUID. So `planFocus` had nothing
-to plan with and the row rendered as a dead card, which is the worst kind on this page - it
-tells you a session wants you and offers no way to get there.
-
-`hostApp` in `process-tree.js` settles it from the ancestor walk the hook already does, on
-paths only the app can occupy: the Electron binary above the session, or the Claude Code it
-bundles under `Application Support/Claude/claude-code/`. **Never inferred from the absence of
-a terminal**, even though that absence is what makes the session distinctive - a no-mistakes
-agent under the daemon looks identical by that measure, and acting on the guess is not a
-harmless miss. Matching a path rather than the word "Claude" is the whole guard.
-
-Focusing is a branch of its own in `focus/index.js` and a sibling module, not an entry in
-`terminals.js`, because the `Terminal` interface is `{sessionUuid, tty}` and this host has
-neither. Checked before every other branch, since all of them would fall through.
-
-**A firstmate session is identified by what firstmate declares, and it is the same rule again.**
-firstmate runs a crew of agents on your behalf, each an ordinary Claude Code session in a tmux
-window and a treehouse worktree - so everything we compute already works on one unchanged, and
-that is the problem: on a page about which session needs you, there was no way to tell a session
-you started from one something else started for you.
-
-Nothing a crewmate *lacks* identifies it. No tty, a treehouse worktree and
-`--dangerously-skip-permissions` in argv are each equally true of a handoff worker and of a
-no-mistakes pipeline agent. Two positive markers hold, both of them firstmate declaring itself,
-and `src/firstmate.js` uses those and nothing else:
-
-| | Evidence |
-| --- | --- |
-| crew | the pane's tmux **window** name starts `fm-` |
-| the captain | `<session cwd>/state/.lock` exists and holds this session's `host.pid` |
-| anything else | no chip |
-
-Two near-misses are refused on purpose, and either would be the failure this exists to prevent.
-The tmux **session** name is shared by the captain and its crew, so keying on it would chip the
-captain as crew - and the captain's own *window* name is no good either, because firstmate pins
-`allow-rename off` on a crew window and leaves it *on* for its own, so Claude Code can retitle
-it and a chip that silently stops appearing is worse than one that was never there. And the
-**working directory** would chip anyone who merely has firstmate's source open: someone fixing
-firstmate is not the first mate, and the lock is exactly what separates running it from working
-on it, since an editing session's pid is not in it.
-
-One answer for both, because a secondmate goes through the same spawn path and gets an `fm-<id>`
-window; telling them apart would mean reading firstmate's private `state/<id>.meta`. The field
-is `Row.spawnedBy` - *which tool spawned this window* rather than a firstmate boolean - because
-handoff uses the same mechanism with a `handoff-` prefix and is the obvious next entry.
-
-**The cost is on the poll loop, so it is paid once per pane.** RAI-18 introduced the same
-`list-panes -a` query, but on the focus *click* path; this one builds cards. The name is pinned
-for the life of the window, so a pane is resolved when it is first seen and cached, and the read
-is fired and never awaited the way `lavish.js` does - the chip appears a tick later rather than
-the loop waiting on tmux. An empty or failed reading keeps the last answer, because a reading we
-did not get is not evidence. The pane tables are keyed by the **socket path**, through the same
-`socketPath` that `-S` is built from, because a pane id is unique only within a server: keyed on
-the raw `$TMUX` instead - whose last field is the *session* index - one server would hold a table,
-a rate limit and a `list-panes -a` per session on it, and the once-per-pane claim above would not
-be true. The lock is one small file, cached on its own mtime like
-`git-branch.js` caches HEAD; the *stat* is not cached, because the lock is written after the
-captain's session exists and caching its absence would mean the captain never got a chip at all.
-
-Nothing runs for a session with no tmux pane, and nothing anywhere looks for firstmate itself. A
-machine without it has no lock and no `fm-` window, which means no chip, no warning and no
-subprocess - the same terms no-mistakes and Lavish are held to. Backends firstmate also supports
-(herdr, cmux, zellij, orca) have no `fm-<id>` window and get nothing; guessing from a treehouse
-worktree path would chip handoff workers as crew.
-
-**Claude Desktop cannot be asked to select a session it is already hosting, and the link that
-looks like it does something else.** `claude://resume?session=<uuid>` is an *import*, and its
-only guard against doing it twice is `if (sessions.get('local_' + idFromTheUrl))`. The app
-names its own sessions after a uuid it mints itself and spawns the CLI with a *different* one
-- of 197 records in a real store, 189 had a `sessionId` and a `cliSessionId` that disagreed -
-so the id we hold is never the id that lookup wants. Resuming a natively hosted session
-therefore imported a second entry over the same transcript: two rows in the app's sidebar, one
-of them untitled, mirroring each other keystroke for keystroke, and two Claude Code processes
-resuming the same session id. Observed three times over two days before anyone connected it to
-the click.
-
-There is no other route: `claude://code/...` matches `/^(cse|session)_/`, which is cloud
-session ids, and is behind a feature flag. So **raising the app and saying so is the whole
-behaviour** - `open -b com.anthropic.claudefordesktop`, plus a `note` on the `FocusResult`
-that the page toasts.
-
-**The link is not used even where that dedupe would fire**, and this is the half that took a
-second pass to see. A record filed under the id we hold is, by those same numbers, one an
-earlier click imported - so resuming it lands on the *copy* rather than the session, and both
-such records in the real store were archived, which takes the "unarchive and reuse" branch and
-can put a second Claude Code process on the one transcript. The original symptom, reached by
-the path meant to avoid it. Consulting the app's own store to tell the two apart was tried and
-removed: nothing in a record distinguishes a prior import from the rare case where the app's
-uuid and the CLI's coincide, so there is no test that could make the link safe. **Do not
-reintroduce a precise path without one.**
-
-Two honest limits remain, and both belong on the page rather than in a comment. `open` returns
-once Launch Services accepts, so the app's own failures (expired sign-in, deleted transcript)
-surface as a toast inside it and never reach us. And the app opens wherever it left off, which
-is usually the session you clicked and sometimes is not - hence the note. `ok` here means
-*raised*, never *showing what you asked for*.
-
-**A pi session can never be `blocked`, and that is the design rather than a gap.** pi is a
-second agent this monitors, and everything that keys off `cwd`, `transcriptPath` or `host.pid`
-- the run match, the branch, the pull request, the Lavish gate, the pipeline scan, every focus
-adapter - works on it unchanged. What does not carry over is the signal the tool exists for.
-
-Claude Code asks permission before it runs a tool, so it can say *a human is needed right now*.
-pi ships no sandbox and no approval gate; its tools simply run. Nothing inside it corresponds
-to a permission prompt, so `PI_EVENT_STATES` in `registry.js` contains no `blocked` at all.
-
-The tempting inference is "the turn ended and nobody has typed since, so escalate to blocked
-after a minute" - Claude Code's idle nudge, reimplemented. It was considered and rejected: it
-would put pi rows in competition with real permission prompts on the strength of a guess, and
-red that sometimes means *nothing is wrong* is how a page stops being believed. A pi session
-still reaches the top the honest way, through its pipeline: parked, failed, or waiting on a
-review. Revisit only if pi grows a real approval gate, in which case map that and nothing else.
-
-**pi's transcript is normalised, never summarised separately.** `parseTranscriptTail` is the
-only Claude-shaped thing in `transcript.js`; everything past it takes plain records. So
-`pi-transcript.js` rewrites pi's entries into those records and `summariseTranscript` runs on
-both unchanged. A parallel summariser would fork the id-matching in-flight rule, the
-`lastActivityAt` whitelist and all three pull-request guards - and the copy that missed the
-next fix would be the one putting a confident wrong answer on the page.
-
-Three things the rename has to get right, each learned from the other agent:
-
-- **Every pi entry carries a top-level timestamp**, `model_change` and `thinking_level_change`
-  included, and those are written at startup. This is the `away_summary` trap in another
-  dialect, so anything that is not the conversation is dropped rather than passed through
-  with a timestamp attached. `compactionSummary`, `branchSummary` and extension `custom`
-  records go the same way.
-- **A tool result is a `user` record**, exactly as in Claude Code. A returning tool is the
-  session working; typing it as anything else would make a busy session look idle.
-- **Tool names are mapped, not passed through.** `describeToolUse` picks a verb by name and
-  `summariseTranscript` keys on `Bash` to notice a `lavish-axi poll`. pi's `bash` left
-  lowercase would render as a bare word and, worse, hide a review gate. pi's `path` becomes
-  `file_path` for the same reason: without it the card reads "Reading Read".
-
-**The pi reporter is an extension, so "never fail" is stricter than for the hook.**
-`raise-hook.js` is a separate process - if it throws, a subprocess dies quietly. The pi
-extension runs *inside the agent*, and pi awaits event handlers, so an exception surfaces in
-somebody's editing loop and a slow `fetch` stalls their turn. Every handler catches
-everything; the post is bounded and never awaited.
-
-Two things are easier in return, both from being in-process: the agent pid is simply
-`process.pid` rather than something to walk the process table for, and the session file comes
-from `ctx.sessionManager.getSessionFile()`. That last one **must be resolved to an absolute
-path** - pi returns it exactly as given, so a relative `--session-dir` yields a relative path
-that the server would then resolve against its own working directory.
-
-**The extension is registered by path, never copied into `~/.pi/agent/extensions/`.**
-Auto-discovery would work and is shorter, but a copied file is a fork: it goes stale the first
-time the repo is pulled, and the stale half is the one running inside the agent.
-`raise-hook.js` is registered the same way for the same reason.
-
-**Codex is a third agent and needed one new module, because its hooks are Claude Code's.**
-Uncannily so: the same event names, the same nested `{hooks: {Event: [group]}}` structure, and
-the same JSON payload on stdin, field for field - `session_id`, `transcript_path`, `cwd`,
-`hook_event_name`. So `raise-hook.js` reports for both and `mergeHooks` installs for both, each
-generalised rather than copied: a second reporter would fork the never-fail, exit-0, bounded
-rules that are the most load-bearing lines here, and a second merge would fork every obligation
-in the safe-change rules. The whole capture is in
-`docs/tasks/RAI-21-codex-sessions.md`; what follows is what a future change has to not undo.
-
-**Which agent it is comes from the installed command, not from the payload.** Codex has no
-field to say so and Claude Code never will, so `install-codex` writes
-`… raise-hook.js --agent codex` and Claude Code stays the silent default - its installed command
-is unchanged, so no existing installation reports an update it does not need. `registry.js`
-holds the list of agents that may declare themselves and treats anything else as silence,
-because the value picks a state table and it arrives over a socket.
-
-**A Codex row may go red, and it will never say why.** `PermissionRequest` is a genuine
-approval gate, so the block is positive evidence - the difference from pi, in the direction that
-matters. But Codex has **no `Notification` of any kind**, which costs two things. There is no
-reason text: `PermissionRequest` does carry a human sentence, and it carries it inside
-`tool_input`, which is the one field `REPORTABLE_FIELDS` exists to drop because for a `Write` it
-is the contents of the file. RAI-11's test is whether the page can do its job without it, and it
-can, so the boundary does not move. And there is no idle nudge, which is not reintroduced:
-`SessionEnd` fires on close *or* after thirty minutes idle, which is a session going away rather
-than a session asking for you. A Codex block is therefore never dismissible either - `isIdleNudge`
-fails closed, so the `Not for me` control correctly never appears on one.
-
-**A stale Codex block is cleared by the transcript and by nothing else**, which makes
-`codex-transcript.js` load-bearing for correctness rather than only for the summary line. Codex
-has no event for an approval being answered, exactly as Claude Code has none, and
-`blockDisproved` already handles that. What makes it work at all is that **Codex writes a tool
-call record when the call is issued, not when it returns** - measured on a 25-second command, the
-call at T+1s and its output at T+12s. The `status` field on that record says `completed` from the
-moment it is written and is a lie about progress; the id match against the output is the only
-truth, which is the rule everywhere else here.
-
-**Codex's own hooks are trust-gated, and writing the file is only half an install.** Codex
-records a hash per hook entry in its `config.toml` and **silently runs a hook it has no hash
-for** - measured: the file is parsed, warnings about it are printed, and nothing fires. Raise
-writes `hooks.json` and says out loud that Codex will ask. It must never write `config.toml`:
-that file is the record of what the *user* agreed to run, and a monitor that forges a consent
-hash has installed a silent executable on somebody's behalf. `--dangerously-bypass-hook-trust`
-is the user's flag, never ours to suggest. `doctor` reports what Raise wrote and says nothing
-about trust, which it cannot see without guessing at somebody else's consent record.
-
-**`SessionEnd` is installed asking for three seconds**, because Codex clamps it to that and
-prints a warning on *every session start* while an entry asks for more. Our reporter is bounded
-at two seconds internally, so the rest was never used - and causing a warning in somebody's
-editing loop, forever, to ask for time we do not want is what `raise-hook.js`'s rules exist to
-prevent.
-
-**Codex writes no title of any kind.** `threads.title` in its own `state_5.sqlite` is the first
-user message verbatim - identical to `first_user_message` on every session checked - and no
-rollout record carries one. So a Codex card shows no summary line and is carried by its activity
-line, exactly as a pi card is. This is also the last word on reading that database: the one
-field that looked like a reward for it is raw prompt text, which is above the altitude a card
-may show.
-
-**`codex-transcript.js` is a normaliser, and its whitelist is one outer type.** Every rollout
-line carries a timestamp, session metadata included - the `away_summary` trap in a third
-dialect - and `event_msg` is the sharp edge, because it *restates* the conversation with
-timestamps of its own. Admitting it would count every turn twice. Only `response_item` is the
-conversation; `role: "developer"` inside it is Codex talking to itself and goes too.
-
-**Every Codex tool goes through one `exec` tool**, whose `input` is a JavaScript snippet calling
-`tools.exec_command({cmd})` and friends - 0.147.0 runs in "code mode". The shell command is
-lifted out of the snippet, or a Codex session sitting in a `lavish-axi poll` is invisible and
-every card reads the same bare word. `function_call` is the other shape and is a plain name with
-JSON arguments.
-
-**The host terminal for a tmux session is deliberately not stored.** A tmux session can be
-detached and reattached in a different terminal entirely, so it is resolved fresh on every
-click.
-
-**tmux control mode (`tmux -CC`) is matched on pane title, not tty.** Control mode is how
-iTerm2 hosts tmux, and it breaks every other assumption: each tmux window becomes a native
-iTerm2 tab the tmux client knows nothing about, iTerm2 reports `tty` as `missing value` for
-all of them, and the client's own tty belongs to the idle tab where you typed `tmux -CC`.
-Focusing that tty - correct for ordinary tmux - raises that one tab no matter which session
-you clicked. Title is the one handle both sides share, since iTerm2 names each tab after the
-tmux pane title. The leading status glyph is stripped first, because Claude Code animates a
-braille spinner through it and the two sides are read a moment apart. On a title collision
-Raise says so rather than raising an arbitrary window, and nothing is selected inside tmux -
-iTerm2 does not follow tmux's selection in control mode, so doing it anyway would just move
-the user's active window for no visible reason.
-
-**A tmux window can belong to more than one session, so "the session owning this pane" is not
-a question with one answer.** `link-window` puts one window in several sessions and a grouped
-session does the same; `display-message -p -t %356 '#{session_name}'` then returns an arbitrary
-one of them, and `select-window -t %356` acts on an arbitrary one of them. The `handoff` skill
-builds exactly that shape - a worker runs in a window of a parent session and is then linked
-into a per-worker viewer session whose tab is the one you are looking at - so focusing a worker
-raised the *parent's* tab and switched that client's current window to the worker's,
-permanently. Two clients then displayed one window at different sizes, and tmux sizes a window
-to its smallest client, so the real tab drew half width filled with dots until the mouse made
-it "latest" again. Seen on all four of four workers.
-
-**Which session tmux names varies with time, which is why the symptom is intermittent.** An
-hour after the four readings above, the same panes on the same server resolved to the *viewer*
-instead - nothing had changed but which session was most recently active. So the failure comes
-and goes with nothing the user did to explain it, and a bug report saying "sometimes" is the
-expected shape of this one rather than a sign of something else.
-
-So the pane is resolved to *every* session it lives in (`list-panes -a`), every client is
-weighed against those (`list-clients`, deliberately without `-t`, which prefix-matches on
-names), and one client is chosen: **the one whose session already displays the window**, because
-raising it moves nothing - tmux keeps no per-client current window, so that rule tells candidate
-sessions apart and never two clients on one session, which is exactly what it is needed for;
-failing that, the one on the session holding **fewest windows**, because a
-session holding only this window is a viewer dedicated to it while a session holding five is
-somebody's working view that happens to be parked here. Everything after that is aimed at that
-client's session by id - `select-window -t '$204:@349'`, never `-t %356`. There is no
-"already there, skip it" flag: tmux's `session_set_current` is a no-op when the window is
-already current, so the guard would be state to keep true for nothing.
-
-**Two picks come out of that one ranking, not one.** The best client overall is what the ranking
-is for; the best **plain** client answers *which tty do I raise, and in which session do I
-select*. They are the same client in every ordinary case, and collapsing them loses the
-plain-tty fallback that a control mode session with a second, ordinary `tmux attach` depends on.
-
-**`controlMode` is a property of the ranked set, not of either pick**, because the question -
-*is this pane living in a native terminal tab tmux cannot see* - is about any client that could
-be showing it. Reading it off the top-ranked client was nondeterministic for the reason above:
-two clients on one session tie on both keys, so the winner is attach order, and a plain
-`tmux attach` that got there first would suppress the pane-title path entirely. The set is
-already narrowed to the pane's candidate sessions, which is what keeps this from being the old
-`clients.some(...)` over one arbitrarily-chosen session's clients.
-
-**No `-t` target is ever a session name**, and the one name that still reaches a human - the
-`tmux attach` hint - is shell-quoted. Names are user data: a bell plugin renames sessions to
-`hv-sls-86-fb9d 🔔` here, `-t hv-sls-7` really does match it, and the unquoted hint was two
-shell arguments. tmux forbids `:` and `.` in a session name, so `$204:@349` cannot mis-split.
+| no-mistakes is optional; `absent` is a third mode, decided by the file not existing | `src/nm-state.js` |
+| the mode is re-decided every read, and only `sqlite` is ever remembered | `src/nm-state.js` |
+| the `stat` reads identity (`dev`/`ino`), not existence - a replaced database raises no error | `src/nm-state.js` |
+| a database carrying no tables is `absent`, not a version mismatch | `src/nm-state.js` |
+| a frozen `pr_state` is not a current one; `PR_STATE_FRESH_MS` and its measurement | `src/nm-state.js` |
+| polling SQLite rather than the daemon's private socket | `src/server.js` |
+| the keepalive is a named SSE `event`, never a comment | `src/server.js`, `public/connection.js` |
+| `release` and `prune` are skipped on an empty reading | `src/server.js` |
+| `server.json` is not the source of truth for "is it running" - `/health` is | `src/health.js` |
+| a session's summary is read from its transcript, not reported by the hook | `src/transcript.js` |
+| the tool in flight is the one with no result yet; match on ids, never position | `src/transcript.js` |
+| `lastActivityAt` is a whitelist of `assistant` and `user` - the `away_summary` regression | `src/transcript.js` |
+| the name survives the 128KB tail only because Claude Code re-appends it | `src/transcript.js` (`TAIL_BYTES`) |
+| the tail read is cached on mtime, branch and agent | `src/transcript-reader.js` |
+| both agents' session names normalise onto `custom-title` | `src/pi-transcript.js` |
+| a recorded block is disbelieved once the transcript runs past it | `src/dashboard.js` (`blockDisproved`) |
+| `PostToolUse` / `PostToolBatch` rejected - the one-line change and why not | `src/hooks.js` (`HOOK_EVENTS`) |
+| `PermissionRequest` is the one per-tool-shaped hook worth installing | `src/hooks.js` |
+| `Notification` means two things; `notification_type` says which, and the message is the fallback | `src/dashboard.js` (`isIdleNudge`) |
+| one block announced twice needs two timestamps - `stateSince` vs `blockAnnouncedAt` | `src/registry.js` |
+| a dismissal answers one announcement; the key must be something that moves | `src/registry.js` (`dismissBlock`) |
+| only the idle nudge is dismissible; a permission prompt gets no control | `src/dashboard.js` (`isDismissibleBlock`) |
+| `dismissed` is on the row only while the dismissal is what quietened it | `src/dashboard.js` (`Row`) |
+| a `lavish-axi poll` is a human gate wearing work clothes, and is never on the poll path | `src/lavish.js` |
+| a live poll process, not the transcript, settles whether a review is open | `src/poll-watch.js` |
+| a pipeline is matched on the executable, never the word in argv; the daemon is excluded | `src/poll-watch.js` |
+| which verbs count as driving: `isRunOwnerCommand` is an allowlist, scanned rather than positional | `src/poll-watch.js` |
+| a run belongs to the session driving it, not to every session in the repo | `src/run-owner.js` |
+| `RunOwners` is a memory because `axi run` returns at every gate | `src/run-owner.js` |
+| ownership never changes hands between live sessions, and is released when the owner is gone | `src/run-owner.js` |
+| a worktree's run is registered against the main checkout; only `.git` says so | `src/git-branch.js` |
+| ownership of a *running* run decides which run a card shows; rank is the fallback | `src/dashboard.js` (`buildRows`) |
+| the preference ends when the run does, and identity keeps the session's own path | `src/dashboard.js` (`buildRows`) |
+| no-mistakes' own agents are folded into the repo's row; only the newest is kept | `src/dashboard.js` (`buildRows`) |
+| `Agent` reaches no renderer; presence follows the run existing, never `activity` | `src/dashboard.js` (`Agent`) |
+| `step.lastActivity` prefixes are an allowlist; `step failed:` is kept whole | `src/dashboard.js` (`stepActivity`) |
+| an unattributable run gets one card, counts its candidates, and sorts below every session | `src/dashboard.js` (`Row`, `sortRows`) |
+| a run that ended quietly leaves the page; `FINISHED_QUIETLY` names the two endings | `src/dashboard.js` (`isDisplayable`) |
+| three local pull-request sources, ranked, all gated on the checkout's branch | `src/dashboard.js` (`buildRows`) |
+| an observation time may never be substituted for a run's `updatedAt` | `src/dashboard.js` (`pullRequestForRun`) |
+| a record listing several pull requests is not a sighting; the database is the negative authority | `src/dashboard.js` (`transcriptPullRequest`) |
+| the forge asserts, ages through the same gate, `merged` is exempt, and it may never leave a row less current | `src/dashboard.js` (`withForgeState`) |
+| a failed lookup drops the previous reading; cadence and the two caches | `src/forge.js` |
+| timestamps come from the caller's clock at dispatch, never `Date.now()` on return | `src/forge.js` |
+| the Bitbucket credential lives in a `0600` file and never in the environment | `src/forge-config.js` |
+| GitHub goes through `gh` and holds no credential here - do not add a token path | `src/forge-config.js`, `src/forge.js` |
+| an unsafe mode refuses the whole file, opt-in included; `problem` is for `doctor` only | `src/forge-config.js` |
+| the config is re-read while the monitor runs; the mode is part of the cache key | `src/forge-config.js` (`watchForgeConfig`) |
+| a session nothing reported gets a row that refuses to say what it is doing | `src/untracked.js` |
+| the four states worth telling apart write byte-identical files | `src/untracked.js`, `docs/tasks/RAI-4-first-run-shows-something.md` |
+| the six bounds on the scan: window, tombstones, superseding, no id, no run, no pipeline agents | `src/untracked.js` |
+| thirty-second interval, cwd read tail-first, only a positive answer cached | `src/untracked.js` |
+| Claude Desktop is identified by paths only it can occupy | `src/process-tree.js` (`DESKTOP_APP`) |
+| the resume link is an import and is not used; raising the app is the whole behaviour | `src/focus/claude-desktop.js` |
+| a firstmate crewmate is the `fm-` window; the captain is the lock holding its pid | `src/firstmate.js` |
+| the pane table is keyed by socket path, resolved once per pane, never awaited | `src/firstmate.js` |
+| a pi session can never be `blocked`, because pi has no approval gate | `src/registry.js` |
+| a Codex row may go red and will never say why - no `Notification` at all | `src/registry.js` |
+| pi's transcript is normalised, never summarised separately | `src/pi-transcript.js` |
+| the pi reporter runs in-process, so "never fail" is stricter than for the hook | `hooks/raise-pi-extension.js` |
+| the extension is registered by path, never copied | `src/pi-extension.js` |
+| one reporter for Claude Code and Codex; the agent is declared by the installed command | `hooks/raise-hook.js`, `src/hook-payload.js` |
+| Codex's hooks are trust-gated; Raise never writes `config.toml` | `bin/raise.js` (`install-codex`), `src/hooks.js` |
+| Codex writes no title of any kind, and its `state_5.sqlite` is raw prompt text | `src/codex-transcript.js` |
+| `codex-transcript.js` whitelists one outer type; `event_msg` would double-count | `src/codex-transcript.js` |
+| a Codex tool call is written when issued; `status: completed` is a lie about progress | `src/codex-transcript.js` |
+| every Codex tool goes through one `exec` tool, so the command is lifted from a snippet | `src/codex-transcript.js` |
+| the host terminal for a tmux session is resolved at click time, never stored | `src/focus/tmux.js` |
+| a pane can belong to several sessions; rank the clients and target by id | `src/focus/tmux.js` (`chooseTmuxClient`) |
+| which session tmux names varies with time, so the symptom is intermittent | `src/focus/tmux.js` |
+| control mode is matched on pane title, not tty; the glyph is stripped, a collision refuses | `src/focus/tmux.js`, `src/focus/index.js` (`titleNeedle`) |
+| two picks from one ranking, and `controlMode` is a property of the ranked set | `src/focus/tmux.js` (`chooseTmuxClient`) |
+| no `-t` target is ever a session name, and the `tmux attach` hint is shell-quoted | `src/focus/tmux.js` (`shellQuote`) |
+| a new terminal is one entry, and nothing else in the codebase changes | `src/focus/terminals.js` |
+| the hook may never fail and never block; every path exits 0 within the timeout | `hooks/raise-hook.js` |
+| recording the wrong agent pid is worse than recording none | `src/process-tree.js` |
+| the hook payload is an allowlist, and why it must be | `src/hook-payload.js` |
+| what `tool_name` would have bought, and why the boundary did not move for it | `docs/tasks/RAI-11-question-vs-permission.md` |
+| localhost is not a boundary: token, `Host` and `Origin` are all three load-bearing | `src/security.js` |
+| the merge shows a diff, asks first, backs up, and is safe to run twice | `src/hooks.js`, `src/pi-extension.js` |
+| `raise serve` asks the port rather than a file; `/health` needs no token | `src/health.js` |
+| the no-mistakes signature check is a convention check, and not a required check | `.github/workflows/no-mistakes-required.yml`, `docs/tasks/7-require-no-mistakes.md` |
+| two Node versions in CI, and why coverage is not a job | `.github/workflows/ci.yml` |
+| the gate reads the branch name only, and the unkeyed-branch gap is deliberate | `scripts/task-gate.js`, `docs/tasks/9-gate-passes-an-unkeyed-branch.md` |
 
 ## Coding Conventions
 
@@ -1529,7 +480,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 793 tests, no network, no dependencies, ~9s
+npm test          # 799 tests, no network, no dependencies, ~9s
 npm run lint      # oxlint over src, bin, hooks, public, test, scripts
 npm run typecheck # tsc --noEmit over src, bin, hooks, public, scripts
 ```
@@ -1683,79 +634,24 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 **[GitHub issues][board] own ordering and state; this repo owns the specification.** Each work
 item is one issue plus one spec file named for it, `docs/tasks/<issue>-<short-name>.md`. The
 issue says what and why; the file says how. There is no ordered list of work in the repo -
-what to do next is the **[project board](https://github.com/users/mattwwatson/projects/1)**, top down.
+what to do next is the **[project board](https://github.com/users/mattwwatson/projects/1)**, top
+down, because GitHub's issue list sorts but does not rank.
 
-**The board is where the order lives, and the issue list cannot be.** GitHub sorts issues by
-newest, oldest, most-commented or recently-updated; nothing there ranks one item above another.
-Only a project does. This said "the backlog, top down" for a few hours after the move off Jira,
-carried over from a tracker that did have a rank, and named an ordering that did not exist.
+Branch as `<ISSUE>-<short-name>`, with the number starting the branch name or a path element of
+it - `23-stale-page-code` or `fix/23-stale-page-code`. The PR that ships an item sets
+`status: shipped` and `shipped:` in its spec and adds `## Implementation notes`. A branch
+shipping no tracked item needs neither an issue nor a spec.
 
-**Both halves are public now, and that is the change.** Until 12/08/2026 the board was a
-private Jira and the link only worked for the maintainer, so the specs in `docs/tasks/` were
-the only part a reader could see. The argument for Jira was that it held ordering for a
-private project; once the project is public that argument inverts, because the board is where
-somebody looks to find out whether anything is happening.
+```sh
+npm run tasks                  # the board from docs/tasks/
+npm run tasks:links            # every docs/tasks reference resolves - runs on every build
+npm run tasks:gate             # this branch's spec says shipped - pull requests only
+npm run tasks:validate         # how disk and the issues differ - needs an authenticated `gh`
+```
 
-**Two key namespaces, and the split is history rather than a design.** Items tracked under
-Jira are keyed `RAI-12` and keep those keys - renumbering 21 shipped specs would rewrite what
-those items were *called* while they were built. Everything since is keyed by its issue
-number. `RAI-12` and `12` are different keys and cannot collide, which is what lets both live
-in one directory. Do not "tidy" the old ones.
-
-Branch as `<ISSUE>-<short-name>`, with the number starting the branch name or a path element
-of it - `23-stale-page-code` or `fix/23-stale-page-code`. GitHub links a branch to its issue
-from the **pull request**, not from the branch name, so this is our convention rather than its
-constraint - and **nothing enforces it**, `npm run tasks:gate` included. What the gate checks is
-narrower: a branch whose key *is* in an anchored position must have a spec that says `shipped`.
-The PR that ships an item sets `status: shipped` and `shipped:` in its spec file and adds
-`## Implementation notes`.
-
-**The gate gives two answers, and the branch name is all it reads.** A branch with the key in an
-anchored position is held to its spec exactly as before - the file must exist and say `shipped`.
-**Every other branch passes**, `fix/some-typo` and `wip-23-stale-page-code` alike: failing the
-first made a one-line spec correction cost an issue, a spec, a branch and a pipeline run.
-
-**That the second one passes is a known gap, and closing it was tried twice and abandoned.**
-Do not rebuild it - the reasoning is in the comment in `gateBranch` and in full in
-[docs/tasks/9-gate-passes-an-unkeyed-branch.md](docs/tasks/9-gate-passes-an-unkeyed-branch.md).
-Matching the *shape* of a misplaced key cannot separate `23_stale_page_code` from
-`bump-node-24`; asking the spec set whether the number is a real item fails `release/v1.2.3` and
-`3d-render`, grows a new false failure with every issue filed, and collides a legacy key with the
-bare issue sharing its number - `wip-RAI-7-x` was reported as issue 7, whose spec is shipped, so
-following its own rename advice would have turned the gate green while RAI-7's spec still said
-`in-progress`. What the gate protects against is **forgetting** to mark an item shipped, which
-needs a correctly named branch anyway; a misnamed one still goes through review.
-
-An epic gets a spec too, and it carries the shared background for everything under it -
-`docs/tasks/RAI-1-open-source-release.md` holds the reasoning behind the whole open-source
-push, so its children need their own file only when one is picked up. **No branch shipping a
-tracked item without its spec file** - a branch shipping no tracked item needs neither an issue
-nor a spec, which is the whole of what changed here.
-
-`scripts/` holds four commands over all this - `npm run tasks`, `tasks:links`, `tasks:gate`
-and `tasks:validate`. Two of them run in CI, and which two is the design:
-
-- **`tasks:links` on every build.** A spec filename is rewritten when its item is captured,
-  so a reference to the old name goes stale in silence - and is as broken on `main` as on a
-  branch.
-- **`tasks:gate` on pull requests only**, conditioned on the `pull_request` event. It asks a
-  question about *merging*, and `push` fires on every commit including work in progress,
-  where the spec correctly still says `in-progress`. It also needs `GITHUB_HEAD_REF`, a
-  `pull_request` checkout being a detached merge commit.
-- **`tasks:validate` never.** It is the only one that talks to the tracker, and the other two
-  stay disk-only so neither can go red because something outside the repository was
-  unavailable. It *could* now run in CI - `gh` authenticates itself, so unlike the Jira client
-  it replaced there is no credential to hold - and it is still not there, because it is a
-  report rather than a gate and a report that fails a build is a gate.
-
-**What `validate` can no longer check is worth knowing before trusting it.** Jira carried four
-workflow states; an issue is open or closed. So `backlog` and `in-progress` are
-indistinguishable from the tracker and are counted and skipped rather than guessed between.
-What remains checked is the pair that actually goes wrong: a spec saying `shipped` over an
-open issue, and a closed issue over a spec saying the work never finished.
-
-Full workflow - capturing, picking up, shipping, the tracker-vs-disk rules and what each
-command reports - is the [roadmap-workflow skill](.claude/skills/roadmap-workflow/SKILL.md).
+Everything else - the two key namespaces and why not to tidy them, capturing an item, picking
+one up, epics, what each command can and cannot check, and why `validate` never runs in CI - is
+the [roadmap-workflow skill](.claude/skills/roadmap-workflow/SKILL.md).
 **Load it before creating an issue or touching anything under `docs/tasks/`.**
 
 [board]: https://github.com/mattwwatson/raise/issues
@@ -1763,7 +659,7 @@ command reports - is the [roadmap-workflow skill](.claude/skills/roadmap-workflo
 ## Commands
 
 ```sh
-npm test                       # 793 tests, ~9s
+npm test                       # 799 tests, ~9s
 npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
@@ -1787,7 +683,36 @@ running installation.
 
 ## Maintaining this file
 
-Keep this file for knowledge useful to almost every future agent session in this project.
-Do not repeat what the codebase already shows; point to the authoritative file or command instead.
-Prefer rewriting or pruning existing entries over appending new ones.
-When updating this file, preserve this bar for all agents and keep entries concise.
+This file was 1793 lines and roughly 33k tokens, paid on every session whether the work touched
+one module or none. Most of that was a second statement of what the owning module's own header
+already said. It grew that way structurally rather than carelessly: when an item ships its
+reasoning has to go somewhere, and nothing said where, so everything landed here.
+
+**So the placement rule is the maintenance rule, and it decides every sentence:**
+
+| The sentence is… | Goes to | Because |
+| --- | --- | --- |
+| a rule one module owns | **that module's header**, plus a row in the [decision index](#decision-index) | opening the file delivers it at the moment it is needed |
+| a rejected alternative or superseded design tied to one module | **that module's header**, beside the tempting edit | the warning is worth nothing anywhere else |
+| an invariant spanning several modules | **[Invariants no single module owns](#invariants-no-single-module-owns)** | no single header can own it |
+| a layout or rendering rule with one site in `public/index.html` | **a comment at that site** | the page carries per-rule comments and reads like the modules do - the `.name` identity rule sits on `.name` |
+| a page-wide UI rule with no single site, or a product rule | **[UI Rules](#ui-rules)**, here | nothing owns it, so a comment on one selector would be a claim about the rest of the page |
+| a safe-change rule | **stays here** | it must be known *before* you choose which file to open, so a comment inside the file is already too late |
+| a measurement or one-time capture | **its spec in `docs/tasks/`**, cited from wherever it is relied on | already written, and dated |
+
+Two things that keep the rule honest, both learned from the state this file was in:
+
+- **Never delete a sentence on the assumption a header covers it.** Open the module, find the
+  covering sentence, and only then cut. Where the header does not say it, the header gains it -
+  nothing is dropped, things are relocated to where they are read.
+- **Compression is rewriting, not summarising. A rule that survives must keep its reason.**
+  *"Only `sqlite` is remembered"* without *"because the daemon creates the database on first
+  use, long after a monitor was left running"* is a rule the next tidy-up reverts.
+
+`test/docs-claims.test.js` checks that every source path named here, in `CONTRIBUTING.md` and
+in `README.md` exists, because an index of pointers is only worth having if a pointer cannot
+rot. It is not covered by `npm run tasks:links`, which resolves references into `docs/tasks/`
+only.
+
+Prefer rewriting or pruning an existing entry over appending a new one, and keep entries
+concise. Adding a section here is a decision, not a default.

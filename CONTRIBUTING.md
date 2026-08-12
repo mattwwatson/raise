@@ -4,9 +4,11 @@ Yes, contributions are welcome, and the answer was decided before publishing rat
 pressure afterwards. What follows is the bar, stated specifically enough that you can tell
 before you start whether a change will land.
 
-Read [AGENTS.md](AGENTS.md) first. It is the architecture, the conventions, and - in *Design
-decisions worth knowing* - the reasoning behind the decisions that are easy to undo by
-accident. Most review comments here would be quotations from it.
+Read [AGENTS.md](AGENTS.md) first. It is the architecture, the conventions, the invariants that
+span several modules, and - in *Design decisions worth knowing* - an index naming the file that
+owns each decision that is easy to undo by accident. The reasoning itself lives in those files'
+own header comments, so open the one you are changing. Most review comments here would be
+quotations from one or the other.
 
 ## The one thing to understand before changing anything
 
@@ -152,14 +154,16 @@ Both at **https://github.com/mattwwatson/raise**.
 bug with a failing test - is welcome straight as a pull request. Anything that touches how a
 row is ranked, what a source is allowed to assert, or the shape of the state frame is worth a
 conversation first, because those decisions usually have reasoning behind them that is written
-down in `AGENTS.md` and easy to undo by accident.
+down in the header of the module that owns them - `AGENTS.md`'s index says which - and easy to
+undo by accident.
 
 **Planning happens in [the issues](https://github.com/mattwwatson/raise/issues), ordered on
 [the board](https://github.com/users/mattwwatson/projects/1)**, and the
 specifications live beside the code: every item that has been picked up has one in
 [docs/tasks/](docs/tasks/), saying what was built and why. If you want to know how something got
-the way it is, that and `AGENTS.md` are the two places to look. You are not expected to write a
-spec for a contribution - that is the maintainer's job.
+the way it is, that is one place to look; the other is the header of the module itself, which
+`AGENTS.md` indexes and where the reasoning behind a single module's decisions lives. You are
+not expected to write a spec for a contribution - that is the maintainer's job.
 
 Security issues do **not** go in an issue - see [SECURITY.md](SECURITY.md).
 

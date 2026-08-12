@@ -35,6 +35,15 @@
  * quirk to tidy: a returning tool is the session working, and typing it as
  * anything else would make a busy session look idle to the one rule this tool
  * exists to get right.
+ *
+ * **pi's `/name` normalises onto Claude Code's `custom-title` record**, for the
+ * same reason the rest of this module exists: one concept, one field, one place
+ * on the card. Both agents let a human name a session, and that name is the
+ * only thing distinguishing two sessions on the same repo *and* the same
+ * branch. It was briefly rewritten as an `ai-title` for want of anywhere better
+ * - pi generates no title of its own - which put a human's statement of intent
+ * in the field that holds a machine's guess at one. `title` for a pi session is
+ * correctly null.
  */
 
 /**
