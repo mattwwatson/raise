@@ -283,11 +283,14 @@ restructured, not rewritten.
 
 ### 3.1 README changes
 
-**Shipped 12/08/2026 as RAI-6.** The restructure below is what was built.
+**Shipped 12/08/2026 as RAI-6.** The list below is the plan as it was written beforehand;
+where it and the shipped README differ, the README is what was built.
+[`RAI-6-readme-for-a-stranger.md`](RAI-6-readme-for-a-stranger.md) is the record of what
+actually landed and why.
 
 1. **Open with the generic sentence**, not with no-mistakes. First screenful: what it is, the
    GIF, the constraint (macOS for focusing), the install.
-2. **Requirements shrinks to Node 22.5+ and one supported harness.** no-mistakes, lavish-axi
+2. **Requirements shrinks to Node 22.13+ and one supported harness.** no-mistakes, lavish-axi
    and pi move to an "Optional signals" section that says plainly what each adds and that
    nothing breaks without them.
 3. **macOS-only focusing moves up**, stated in the first screenful. Finding out three minutes
