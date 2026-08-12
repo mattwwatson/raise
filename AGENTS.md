@@ -159,7 +159,7 @@ nothing has reported* below.
 | `public/connection.js` | the liveness rule (pure, no DOM, injected clock) |
 
 `scripts/` is **not** part of the product. It holds this repository's own roadmap tooling -
-the board, the link check, the shipped-spec CI gate and the Jira reconciliation - and is
+the board, the link check, the shipped-spec CI gate and the issue reconciliation - and is
 absent from `files` in `package.json` for that reason, so none of it ships. `scripts/` may
 import from `src/`, as the gate does for `GitBranch`; `src/` must never import from
 `scripts/`.
@@ -1529,7 +1529,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 786 tests, no network, no dependencies, ~9s
+npm test          # 787 tests, no network, no dependencies, ~9s
 npm run lint      # oxlint over src, bin, hooks, public, test, scripts
 npm run typecheck # tsc --noEmit over src, bin, hooks, public, scripts
 ```
@@ -1649,24 +1649,30 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 
 ## Roadmap and task tracking
 
-**Jira project [RAI][board] owns ordering and workflow state; this repo owns the
-specification.** Each work item is one ticket plus one spec file named for it,
-`docs/tasks/RAI-12-stale-page-code.md`. The ticket says what and why; the file says how.
-There is no ordered list of work in the repo - what to do next is the backlog, top down.
+**[GitHub issues][board] own ordering and state; this repo owns the specification.** Each work
+item is one issue plus one spec file named for it, `docs/tasks/<issue>-<short-name>.md`. The
+issue says what and why; the file says how. There is no ordered list of work in the repo -
+what to do next is the backlog, top down.
 
-**That board is private, and the link below only works for the maintainer.** The specifications
-are not: they are in `docs/tasks/`, which is why the README points a reader there instead. If
-you are working here without access to the board, the specs plus `npm run tasks` are the whole
-picture bar the ordering.
+**Both halves are public now, and that is the change.** Until 12/08/2026 the board was a
+private Jira and the link only worked for the maintainer, so the specs in `docs/tasks/` were
+the only part a reader could see. The argument for Jira was that it held ordering for a
+private project; once the project is public that argument inverts, because the board is where
+somebody looks to find out whether anything is happening.
 
-Branch as `<KEY>-<short-name>`, with the key starting the branch name or a path element of
-it - `RAI-12-stale-page-code` or `fix/RAI-12-stale-page-code`. Jira finds the key **anywhere**
-in a branch name, so this is our convention rather than its constraint, and
-`npm run tasks:gate` is what enforces it. Move the ticket to In Progress by hand when you
-pick it up, because nothing transitions until a branch exists. The PR that ships an item
-sets `status: shipped` and `shipped:` in its spec file and adds `## Implementation notes`.
+**Two key namespaces, and the split is history rather than a design.** Items tracked under
+Jira are keyed `RAI-12` and keep those keys - renumbering 21 shipped specs would rewrite what
+those items were *called* while they were built. Everything since is keyed by its issue
+number. `RAI-12` and `12` are different keys and cannot collide, which is what lets both live
+in one directory. Do not "tidy" the old ones.
 
-An Epic gets a spec too, and it carries the shared background for everything under it -
+Branch as `<ISSUE>-<short-name>`, with the number starting the branch name or a path element
+of it - `23-stale-page-code` or `fix/23-stale-page-code`. GitHub links a branch to its issue
+from the **pull request**, not from the branch name, so this is our convention rather than its
+constraint, and `npm run tasks:gate` is what enforces it. The PR that ships an item sets
+`status: shipped` and `shipped:` in its spec file and adds `## Implementation notes`.
+
+An epic gets a spec too, and it carries the shared background for everything under it -
 `docs/tasks/RAI-1-open-source-release.md` holds the reasoning behind the whole open-source
 push, so its children need their own file only when one is picked up. **No branch without a
 spec file.**
@@ -1677,23 +1683,32 @@ and `tasks:validate`. Two of them run in CI, and which two is the design:
 - **`tasks:links` on every build.** A spec filename is rewritten when its item is captured,
   so a reference to the old name goes stale in silence - and is as broken on `main` as on a
   branch.
-- **`tasks:gate` on pull requests only**, guarded by `BITBUCKET_PR_ID`. It asks a question
-  about *merging*, and the `default` pipeline fires on every push including work in progress,
-  where the spec correctly still says `in-progress`.
-- **`tasks:validate` never**, because it is the only one that talks to Jira and no pipeline
-  should hold a credential. That is also why the other two are disk-only: neither can go red
-  because a token expired.
+- **`tasks:gate` on pull requests only**, conditioned on the `pull_request` event. It asks a
+  question about *merging*, and `push` fires on every commit including work in progress,
+  where the spec correctly still says `in-progress`. It also needs `GITHUB_HEAD_REF`, a
+  `pull_request` checkout being a detached merge commit.
+- **`tasks:validate` never.** It is the only one that talks to the tracker, and the other two
+  stay disk-only so neither can go red because something outside the repository was
+  unavailable. It *could* now run in CI - `gh` authenticates itself, so unlike the Jira client
+  it replaced there is no credential to hold - and it is still not there, because it is a
+  report rather than a gate and a report that fails a build is a gate.
 
-Full workflow - capturing, picking up, shipping, the Jira-vs-disk rules and what each command
-reports - is the [roadmap-workflow skill](.claude/skills/roadmap-workflow/SKILL.md). **Load it
-before creating a ticket or touching anything under `docs/tasks/`.**
+**What `validate` can no longer check is worth knowing before trusting it.** Jira carried four
+workflow states; an issue is open or closed. So `backlog` and `in-progress` are
+indistinguishable from the tracker and are counted and skipped rather than guessed between.
+What remains checked is the pair that actually goes wrong: a spec saying `shipped` over an
+open issue, and a closed issue over a spec saying the work never finished.
 
-[board]: https://mattwwatson.atlassian.net/jira/software/c/projects/RAI/boards/6
+Full workflow - capturing, picking up, shipping, the tracker-vs-disk rules and what each
+command reports - is the [roadmap-workflow skill](.claude/skills/roadmap-workflow/SKILL.md).
+**Load it before creating an issue or touching anything under `docs/tasks/`.**
+
+[board]: https://github.com/mattwwatson/raise/issues
 
 ## Commands
 
 ```sh
-npm test                       # 786 tests, ~9s
+npm test                       # 787 tests, ~9s
 npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
@@ -1706,7 +1721,7 @@ The roadmap tooling, which is this repository's own workflow rather than part of
 npm run tasks                  # the board from docs/tasks/
 npm run tasks:links            # every docs/tasks reference resolves
 npm run tasks:gate             # this branch's spec says shipped
-npm run tasks:validate         # how disk and Jira differ - needs JIRA_EMAIL and JIRA_TOKEN
+npm run tasks:validate         # how disk and the issues differ - needs an authenticated `gh`
 ```
 
 The `raise` commands themselves, and their flags, are documented in
