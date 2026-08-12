@@ -662,9 +662,9 @@ contribution the architecture was shaped for. Security reports go through
 
 ## Roadmap
 
-Every item has a written spec in [docs/tasks/](docs/tasks/), in this repository - what was
-built, and the reasoning behind it. `npm run tasks` prints the board from those files, which is
-the same board without the ordering.
+Every item that has been picked up has a written spec in [docs/tasks/](docs/tasks/), in this
+repository - what was built, and the reasoning behind it. `npm run tasks` prints the board from
+those files, which is the same board without the ordering.
 
 **The items are [issues](https://github.com/mattwwatson/raise/issues) and their order is
 [the board](https://github.com/users/mattwwatson/projects/1)**, top down - the order being the only

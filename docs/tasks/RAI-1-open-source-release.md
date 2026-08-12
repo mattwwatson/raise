@@ -283,6 +283,8 @@ restructured, not rewritten.
 
 ### 3.1 README changes
 
+**Shipped 12/08/2026 as RAI-6.** The restructure below is what was built.
+
 1. **Open with the generic sentence**, not with no-mistakes. First screenful: what it is, the
    GIF, the constraint (macOS for focusing), the install.
 2. **Requirements shrinks to Node 22.5+ and one supported harness.** no-mistakes, lavish-axi
@@ -318,6 +320,8 @@ What remains here, after the rename has landed:
 Everything in "Design decisions worth knowing" stays exactly as it is, in both passes.
 
 ### 3.3 A "related tools" section, written generously
+
+**Shipped 12/08/2026 as RAI-7.**
 
 Acknowledge the neighbours in the README rather than pretending the space is empty. They work
 in a similar *space* while doing a genuinely different *job*, and saying so plainly is both
@@ -356,6 +360,10 @@ Three rules for this section:
   comparison wearing a disguise, and readers can tell.
 
 ### 3.4 New files
+
+**`CONTRIBUTING.md` and `SECURITY.md` shipped 12/08/2026 as RAI-8**, which also settled that
+`SECURITY.md` was in scope rather than merely worth considering. `LICENSE` landed earlier, in
+RAI-3's packaging pass.
 
 - `LICENSE` (MIT)
 - `CONTRIBUTING.md` - the terminal adapter bar from 0.3, the test/typecheck gate, the
@@ -423,4 +431,8 @@ expect and is the one that reads as "someone thought about this".
    Withdrawn 08/08/2026: the name is not going to carry a site, so a domain buys nothing the
    npm name does not, and leaving it here would block a later reader on a requirement nobody
    intends to meet. The npm half stands - that is what `bin: { raise: ... }` needs.
-5. Decide 0.3 and 0.4 - terminal PRs yes/no, Linux at launch yes/no.
+5. ~~Decide 0.3 and 0.4 - terminal PRs yes/no, Linux at launch yes/no.~~ **Both decided
+   12/08/2026 as RAI-8.** 0.3 landed as yes with a stated bar, written out in
+   `CONTRIBUTING.md`. 0.4 landed as the same reasoning applied to a Linux focus path: macOS-only
+   for focusing, stated in the first screenful, with the path itself welcome from somebody
+   running it rather than built speculatively - now carried in `AGENTS.md`.
