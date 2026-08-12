@@ -135,7 +135,9 @@ loose document.
    `wip-23-stale-page-code` would upset nothing upstream. This is our convention, so that a
    branch list can be scanned by issue: the number starts the branch name or a path element of
    it - `23-stale-page-code` or `fix/23-stale-page-code`, never `wip-23-stale-page-code`.
-   `npm run tasks:gate` enforces it.
+   `npm run tasks:gate` enforces it, and enforces exactly that: a misplaced key fails, while a
+   branch with no key **anywhere** in its name passes as an untracked change. So the gate is not
+   a way of finding out that you forgot to name this one after its issue.
 
    The anchoring matters more than it did for `RAI-12`, which announced itself. A bare number
    does not, so `feat/v2-rewrite` deliberately does **not** name issue 2.
@@ -194,6 +196,11 @@ file claiming the work never started. It runs on **pull requests only**: a work-
 push makes no claim to be mergeable, so failing it would only paint CI red all day. It reads
 `GITHUB_HEAD_REF`, because a `pull_request` checkout is a detached merge commit with no branch
 name in `.git/HEAD`.
+
+Its three answers, because the first two are easy to confuse: a branch with **no** key-shaped
+token anywhere passes, shipping no tracked item; a branch carrying one outside an anchored
+position fails and is told how to name itself; a correctly keyed branch fails unless its spec
+says `shipped`. See [docs/tasks/9-gate-passes-an-unkeyed-branch.md](../../../docs/tasks/9-gate-passes-an-unkeyed-branch.md).
 
 **`tasks:links`** runs on every build, a dangling reference being just as broken on `main`.
 

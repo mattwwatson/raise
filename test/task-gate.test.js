@@ -96,6 +96,46 @@ test('a branch with no issue number passes, because it ships no tracked item', (
   const result = gateBranch('tidy-up', indexed([spec()]));
   assert.equal(result.outcome, 'untracked');
   assert.equal(result.exitCode, 0);
+
+  const prefixed = gateBranch('fix/some-typo', indexed([spec()]));
+  assert.equal(prefixed.outcome, 'untracked');
+  assert.equal(prefixed.exitCode, 0);
+});
+
+test('a branch that carries a key in the wrong place still fails', () => {
+  // The two ways of finding no ticket mean opposite things. No key anywhere is
+  // a change that ships no tracked item. A key sitting somewhere the convention
+  // does not put it is the forgetting this gate exists to catch - the key is
+  // right there in the name - so passing it would be the exact failure the
+  // untracked pass must not be read as licensing.
+  for (const branch of ['wip-23-tooling', 'revertRAI-14', 'rai-14-roadmap-tooling']) {
+    const result = gateBranch(branch, indexed([spec()]));
+    assert.equal(result.outcome, 'no-key', branch);
+    assert.equal(result.exitCode, 1, branch);
+  }
+});
+
+test('the misplaced-key failure explains the naming rule, on stderr', () => {
+  const rendered = renderGate(gateBranch('wip-23-tooling', indexed([spec()])));
+  assert.deepEqual(rendered.out, []);
+  const err = rendered.err.join('\n');
+  assert.ok(err.includes('23-roadmap-tooling'));
+  assert.ok(err.includes('fix/23-roadmap-tooling'));
+  // Saying otherwise sends somebody looking for an upstream automation rule
+  // that was never the reason: GitHub links a branch to its issue from the
+  // pull request, and Jira before it found the key anywhere in the name.
+  assert.ok(err.includes('our'));
+  assert.ok(err.includes('convention'));
+  assert.ok(err.includes('pull request'));
+});
+
+test('a digit inside a word is not a misplaced key, so that branch passes', () => {
+  // `BRANCH_KEY_PATTERN` already refuses to read the "2" in v2-rewrite as issue
+  // 2. Failing it here would undo that from the other side, and would fail
+  // every branch whose name happens to contain a digit.
+  const result = gateBranch('feat/v2-rewrite', indexed([spec()]));
+  assert.equal(result.outcome, 'untracked');
+  assert.equal(result.exitCode, 0);
 });
 
 test('passing without a key says so rather than passing silently', () => {

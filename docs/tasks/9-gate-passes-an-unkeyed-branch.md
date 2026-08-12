@@ -24,9 +24,18 @@ It asserts exactly one thing: **the pull request that ships a tracked item must 
 `status: shipped` in that item's spec**, or `main` lands with a closed issue and a file claiming
 the work never started.
 
-That is a statement about *items*. A branch carrying no issue number is not shipping one, so
-there is nothing to assert and nothing being protected. `no-key` is now `untracked`, and it
-passes.
+That is a statement about *items*. A branch carrying no issue number **anywhere** is not
+shipping one, so there is nothing to assert and nothing being protected. That case is the new
+`untracked` outcome, and it passes.
+
+**A branch that has a key and has misplaced it is a different case, and it still fails as
+`no-key`.** `wip-23-tooling`, `revertRAI-14` and `rai-14-roadmap-tooling` all carry a key-shaped
+token that `BRANCH_KEY_PATTERN`'s anchors refuse, and the key being right there in the name is
+what rules out the explanation the pass is for: you did not forget to track this, you misnamed
+the branch. Collapsing the two would have waved through precisely the case this gate exists to
+catch, so `MISPLACED_KEY_PATTERN` tells them apart - the same two key shapes, unanchored, with
+a bare number still needing a hyphen in front of it so the `2` in `feat/v2-rewrite` stays a
+character inside a word rather than becoming a misplaced issue 2.
 
 **Nothing about a keyed branch changes.** Its spec must exist and must say `shipped`, exactly as
 before - `wont-do` included, since an item abandoned on a branch being merged is still a
@@ -54,16 +63,18 @@ that still fails.
   removed. `enforce_admins` stays on, so `CONTRIBUTING.md`'s claim that the rule binds the
   maintainer too stays true.
 
-## The dead branch is removed rather than left
+## The naming failure stays, and says one more thing
 
 `no-key`'s failure text - four lines about branch naming and what GitHub does and does not
-enforce - is unreachable once nothing produces that outcome. AGENTS.md forbids dead code, and an
-unreachable failure message is the kind that gets read as live documentation of behaviour that
-no longer exists.
+enforce - is still reached, by the branch that has a key in the wrong place. It gains a closing
+line saying that a branch with no issue number anywhere passes instead, because the reader now
+has two outcomes to tell apart and the failure is where they will be standing when they need to.
 
 ## Acceptance
 
-- An unkeyed branch exits 0 and says why, on stdout.
+- A branch with no key-shaped token anywhere exits 0 and says why, on stdout.
+- A branch carrying a key outside an anchored position still fails as `no-key`, with the
+  branch-naming guidance.
 - A keyed branch whose spec is missing or not `shipped` still fails.
 - `npm run lint`, `npm test`, `npm run typecheck` green.
 
@@ -76,6 +87,12 @@ deleting.** `the pass line goes to stdout and every failure to stderr` used `tid
 example of a failure - which is now the untracked *pass*. The test's intent was sound, so its
 failing case became a keyed branch with no spec (`99-mystery`); deleting it would have dropped a
 real assertion about where output goes.
+
+**One branch shape cannot be told from a misplaced key and fails.** `release-2026-08-12` is
+`-2026-` in a name, which is `wip-23-tooling`'s shape exactly; nothing in the string separates
+them. It fails, which is what it did before any of this, and the failure names the convention to
+follow. The alternative - dropping the hyphen requirement in front of a bare number - would fail
+every branch whose name contains a digit at all, and is the far larger error.
 
 **This was the first change pushed through `no-mistakes` to a GitHub remote**, and so doubles as
 the trial that [#7](https://github.com/mattwwatson/raise/issues/7) left open - whether the
