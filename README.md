@@ -172,10 +172,10 @@ gave the session, if you gave it one.
 ## Every row says what it is about
 
 "Working" across four repos tells you nothing about which one to look at. Every row a session
-has reported shows the agent's own name for the session and the tool it is running this second -
-the quiet rows for [sessions that never reported](#install) are the one exception - and when
-no-mistakes is driving, what the pipeline is doing gets a line of its own beneath, because the
-two are happening at once:
+has reported shows the name its agent wrote for the session, where the agent writes one, and the
+tool it is running this second - the quiet rows for [sessions that never reported](#install) are
+the one exception - and when no-mistakes is driving, what the pipeline is doing gets a line of
+its own beneath, because the two are happening at once:
 
 ```
 WAITING FOR YOU

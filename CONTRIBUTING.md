@@ -39,9 +39,10 @@ export const ghostty = {
 ```
 
 `focusByTitle` is required only if your terminal can host tmux in control mode (`tmux -CC`) -
-iTerm2 is the only implementer today. `focusByPaneTitle` skips any adapter without it, and for
-a control-mode pane that is the only path there is, so an adapter lacking it cannot focus those
-panes and says nothing about why. A terminal that never hosts control mode does not need it.
+iTerm2 is the only implementer today. A control-mode pane is tried by title first and
+`focusByPaneTitle` skips any adapter without it, leaving only the ordinary tty path - which is
+there for such a pane only when a plain client happens to be attached as well. A terminal that
+never hosts control mode does not need it.
 
 Then add it to `ALL_TERMINALS`. Three conditions:
 
