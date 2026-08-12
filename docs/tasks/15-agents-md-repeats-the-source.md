@@ -193,14 +193,22 @@ Built 12/08/2026 on `15-agents-md-repeats-the-source`, against the tree at `633b
 **The brief's figures were re-measured first and they hold at that tree**: 1793 lines, 132KB,
 107 bolded headlines, `## Design decisions worth knowing` at lines 189-1409 (68% of the file).
 The issue body's "1743 lines / ~103 headlines" is from an earlier draft and is the number to
-distrust. Result: **1793 lines to 714**, a 60% cut, and roughly 33k tokens to ~13k.
+distrust. Result: **1793 lines to 716**, a 60% cut, and roughly 33k tokens to ~13k.
 
-**714 rather than the ~620 the brief estimated, and the difference is all index.** The estimate
-assumed ~45 index rows; there are 83. Rows were split wherever one row would have covered two
+**716 rather than the ~620 the brief estimated, and the difference is all index.** The estimate
+assumed ~45 index rows; there are 84. Rows were split wherever one row would have covered two
 headlines, because the acceptance test is that a reviewer can pick any headline and find where
 it went - a coarser index passes the line count and fails the walk. Nothing was retained for
-length: every section the brief said to keep whole is byte-identical, and the assembly was done
-by slicing those ranges out of the old file rather than retyping them.
+length: the assembly was done by slicing the kept ranges out of the old file rather than
+retyping them, so no wording drifted.
+
+**One kept section is not byte-identical, and the exception is worth more than the rule.**
+§ Architecture ended its `src/untracked.js` paragraph with *"See *A session nothing has
+reported* below"* - a pointer at a headline this change relocated into that module. Slicing the
+section out whole is exactly what preserved it: a section kept byte-identical went on referring
+to one that was deleted, and a reader following it would have concluded the rule was dropped
+rather than moved. It now reads *"See the header of `src/untracked.js`"*. Nothing else in that
+section moved, and the other kept sections are byte-identical apart from the test count.
 
 ### The 9-of-11 measurement was checked and holds
 
@@ -390,11 +398,14 @@ places to look". Both now name the owning module's header as where the reasoning
 pointed at "the note in AGENTS.md" about there being no GitHub token path, which now lives in
 `src/forge-config.js`. `README.md:678` claimed `AGENTS.md` says what each `tasks*` command
 reports, which is the skill's job now. `src/registry.js` no longer cites `AGENTS.md` for a rule
-it states itself. The rest of the brief's list - `README.md:658`,
-`.github/workflows/ci.yml:6,27`, `scripts/tasks.js:86`, `src/hooks.js:15`, `src/nm-state.js:259`
-- were each re-read and still read true, because every section they point at was kept whole.
+it states itself. `src/hooks.js:46` cited "the 'recorded block is disbelieved' note in
+AGENTS.md" for how a granted permission is settled, and now names `blockDisproved` in
+`dashboard.js`, which is where that reasoning went. The rest of the brief's list -
+`README.md:658`, `.github/workflows/ci.yml:6,27`, `scripts/tasks.js:86`, `src/hooks.js:15` and
+`src/nm-state.js:259` - were each re-read and still read true, because every section they point
+at was kept.
 
 ### Verification
 
-`npm test` (798, up from 793 - the five new ones), `npm run lint`, `npm run typecheck`,
+`npm test` (799, up from 793 - the six new ones), `npm run lint`, `npm run typecheck`,
 `npm run tasks:links` and `npm run tasks:gate` all pass.

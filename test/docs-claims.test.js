@@ -126,9 +126,19 @@ test('AGENTS.md names a real file for every row of the decision index', () => {
   assert.ok(index, 'AGENTS.md has no decision index - the split has been undone');
   // Every row is `| decision | owner |`, and the owner column is the whole
   // point of the row: a row that names no file is a rule with nowhere to go.
+  //
+  // The header is skipped by anchoring on the start of the line, never by
+  // asking whether the word `Owner` appears anywhere in it. The substring
+  // version read correctly and quietly exempted two real rows - the ones
+  // naming `isRunOwnerCommand` and `RunOwners` - from the assertion below,
+  // which is a guard that silently stops guarding exactly where a decision is
+  // about ownership.
   const rows = index
     .split('\n')
-    .filter((line) => line.startsWith('|') && !line.startsWith('| ---') && !line.includes('Owner'));
+    .filter(
+      (line) =>
+        line.startsWith('|') && !line.startsWith('| ---') && !line.startsWith('| Decision'),
+    );
   assert.ok(rows.length > 40, `expected a populated index, found ${rows.length} rows`);
   const ownerless = rows.filter((row) => pathsIn(row.split('|')[2] || '').size === 0);
   assert.deepEqual(ownerless, [], 'index rows naming no owning file');

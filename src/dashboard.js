@@ -39,7 +39,7 @@
  * going quiet is the worst thing this page can do. `attentionFor` fails
  * **soft** - only `failed` is coloured as a failure, because being on the page
  * is knowledge and being red is a claim. `isRunOwnerCommand` (in
- * `run-owner.js`) fails **closed** - an unrecognised driving verb refuses to
+ * `poll-watch.js`) fails **closed** - an unrecognised driving verb refuses to
  * claim a run, because guessing puts a pipeline on the wrong card. Each fails
  * in the direction that is safe for the thing it guards. **Do not "fix" any of
  * them to match the others.**

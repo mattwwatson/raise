@@ -299,7 +299,8 @@ stratified on purpose, so read the whole file rather than one section.
 | a `lavish-axi poll` is a human gate wearing work clothes, and is never on the poll path | `src/lavish.js` |
 | a live poll process, not the transcript, settles whether a review is open | `src/poll-watch.js` |
 | a pipeline is matched on the executable, never the word in argv; the daemon is excluded | `src/poll-watch.js` |
-| a run belongs to the session driving it; `isRunOwnerCommand` is an allowlist | `src/run-owner.js` |
+| which verbs count as driving: `isRunOwnerCommand` is an allowlist, scanned rather than positional | `src/poll-watch.js` |
+| a run belongs to the session driving it, not to every session in the repo | `src/run-owner.js` |
 | `RunOwners` is a memory because `axi run` returns at every gate | `src/run-owner.js` |
 | ownership never changes hands between live sessions, and is released when the owner is gone | `src/run-owner.js` |
 | a worktree's run is registered against the main checkout; only `.git` says so | `src/git-branch.js` |
@@ -479,7 +480,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 798 tests, no network, no dependencies, ~9s
+npm test          # 799 tests, no network, no dependencies, ~9s
 npm run lint      # oxlint over src, bin, hooks, public, test, scripts
 npm run typecheck # tsc --noEmit over src, bin, hooks, public, scripts
 ```
@@ -658,7 +659,7 @@ the [roadmap-workflow skill](.claude/skills/roadmap-workflow/SKILL.md).
 ## Commands
 
 ```sh
-npm test                       # 798 tests, ~9s
+npm test                       # 799 tests, ~9s
 npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
