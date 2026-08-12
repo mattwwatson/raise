@@ -38,7 +38,7 @@ three latent bugs in the original, plus one claim in its own error text that is 
 | --- | --- | --- |
 | `npm run tasks` | what is ready, what is blocked, what shipped | none |
 | `npm run tasks:links` | does every `docs/tasks/` reference in the tree still resolve | none |
-| `npm run tasks:gate` | does this branch's spec say `shipped` | none |
+| `npm run tasks:gate` | does this branch's spec say `shipped` (a branch naming no item passes - [issue 9](9-gate-passes-an-unkeyed-branch.md)) | none |
 | `npm run tasks:validate` | do disk and Jira agree | one read-only Jira query |
 
 Three of the four are disk-only, and that is the point rather than an accident: the two that
@@ -178,6 +178,14 @@ What we are protecting is a branch list that can be scanned by key. Precisely be
 not care, `tasks:gate` is the only thing that can hold the convention, which is a better reason
 to check it than if Jira had been doing it for us.
 
+> **Superseded 12/08/2026 by [issue 9](9-gate-passes-an-unkeyed-branch.md).** The gate no longer
+> holds the convention and cannot: a branch with no key in the anchored position - including
+> `wip-RAI-14-roadmap-tooling` above - now passes as `untracked` rather than failing. Two
+> mechanisms were built to keep catching a misplaced key and both were removed for producing
+> confident wrong answers in opposite directions; spec 9 records them so a third is not
+> attempted. The convention still stands, and nothing enforces it. The reasoning here is kept
+> because it is why the convention exists, which has not changed.
+
 Two smaller departures. The board groups by `phase`, a field this repo's frontmatter does not
 have, and sorts by `legacy-id`, which it also does not have - ported literally every row lands in
 one `?` group in arbitrary order. Sections here are the row *state*, in a fixed order, sorted by
@@ -307,3 +315,5 @@ reported a green definition of done that had never read the code it added.
 name *because the Jira automation is anchored there*. It is not - Jira finds a key anywhere in a
 branch name. The convention stands on its own terms instead, and `tasks:gate` is the only thing
 that can hold it, which is a better reason to check it than if Jira had been doing it for us.
+(No longer true of the tooling - see the note above and
+[issue 9](9-gate-passes-an-unkeyed-branch.md). The convention stands; nothing checks it.)
