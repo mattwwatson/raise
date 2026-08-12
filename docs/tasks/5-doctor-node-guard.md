@@ -144,7 +144,7 @@ Three files carry the change, and one of them is a move.
   `MIN_NODE_MAJOR`, `MIN_NODE_MINOR`. Its emptiest property is its most important one: an import
   here - a Node builtin included - puts the guard back behind a graph, silently, on the versions
   nobody will test. The header says so.
-- **`bin/raise.js`** is now 49 lines: import the guard, refuse, or `await import('../src/cli.js')`
+- **`bin/raise.js`** is now 61 lines: import the guard, refuse, or `await import('../src/cli.js')`
   and run `main`. The `main().catch` error handler stayed here rather than moving, because the
   entry point is the only thing still running when the CLI fails to load.
 - **`src/cli.js`** is the old `bin/raise.js`, moved with `git mv` so the history follows it.
@@ -176,4 +176,35 @@ The fourth test in that file is the other side of the control: `raise --version`
 actually running the suite must exit 0. Without it, a guard that refused *every* version would
 satisfy everything above it.
 
-Twelve tests were added, 799 to 811.
+Thirteen tests were added, 799 to 812.
+
+### Two findings from the pipeline review, both taken
+
+Both were info-level and neither gated, but the first is a real defect in the one line this
+change exists to deliver, so both were fixed rather than waved through.
+
+**The guard set `process.exit(1)` immediately after `console.log`.** On macOS a piped stdout is
+asynchronous, and `process.exit()` does not flush pending writes - it cuts them off at the pipe
+buffer, measured at 64KB on this machine (`console.log('X'.repeat(200000))` delivers 65,536 bytes
+under `process.exit()` and all 200,001 under `process.exitCode`). **This is shape, not a
+reproduced drop**: the real message is around 120 bytes, fits the buffer, and would survive in
+practice. It is still worth changing, because the sentence this file exists to print must not
+depend on being small enough, and the failure would be silent - the exact outcome the whole issue
+is about. The guard now sets `process.exitCode = 1` and lets the process end naturally.
+
+`process.exit()` **stays** in the `main().catch` handler, and the asymmetry is deliberate: a
+failed `serve` may hold the loop open with a listening server or a poll timer, so that path has
+to end regardless, and losing the tail of a stack trace is a smaller cost than not exiting. The
+comment beside each says which reasoning applies.
+
+**The reproduction spawned the entry point with no arguments** while being named for `raise
+doctor`, which is also what the acceptance criterion above says. The guard fires before argv is
+parsed, so it was not a false pass - but a test exercising something adjacent to its own title is
+one nobody can check. It now passes `doctor`, and a fifth test runs the guard through a real
+shell pipeline, since `execFile` gives the child a pipe but `raise doctor | tee` is what a user
+types.
+
+One unrelated tidy-up came out of running it: `module.register` is deprecated from Node 26
+(DEP0205) and printed a warning on every suite run. The harness now prefers `registerHooks` and
+falls back to `register`, because `registerHooks` only arrived in 22.15 and `engines` floors us
+at 22.13 - the floor does not get raised to suit a test fixture.

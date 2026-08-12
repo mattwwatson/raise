@@ -38,12 +38,24 @@ if (problem) {
   // the user is about to ask `raise doctor`, not a crash report, and it is read
   // by somebody whose setup is already misbehaving.
   console.log(`Raise cannot run on this Node.\n\n  Node ${problem}\n`);
-  process.exit(1);
+  // `process.exitCode` and a natural end, never `process.exit()`. On macOS a
+  // piped stdout is asynchronous, and `process.exit()` does not flush pending
+  // writes - it cuts them off at the pipe buffer, measured at 64KB here. This
+  // message is far short of that and would survive in practice, so this is
+  // shape rather than a reproduced drop; the point is that the one sentence
+  // this file exists to deliver must not depend on being small enough. There is
+  // nothing else pending, so returning ends the process on its own.
+  process.exitCode = 1;
+} else {
+  const { main } = await import('../src/cli.js');
+
+  main().catch((err) => {
+    console.error(`\x1b[31m${err.stack || err.message}\x1b[0m`);
+    // `process.exit` is right here and wrong above: a failed `serve` may have a
+    // listening server or a poll timer holding the loop open, and this has to
+    // end regardless. Stderr loses the same race, which is the accepted cost of
+    // guaranteeing the exit - and a stack trace is not the message the product
+    // promises.
+    process.exit(1);
+  });
 }
-
-const { main } = await import('../src/cli.js');
-
-main().catch((err) => {
-  console.error(`\x1b[31m${err.stack || err.message}\x1b[0m`);
-  process.exit(1);
-});

@@ -38,13 +38,14 @@ const IMPORTS_SQLITE = join(HERE, 'fixtures', 'imports-sqlite.mjs');
  * error object. Failure is data here, so it is returned rather than thrown.
  *
  * @param {string} script absolute path to run as the entry point
+ * @param {string[]} [args] arguments for the script itself
  * @returns {Promise<{code: number|null, stdout: string, stderr: string}>}
  */
-function runOnOldNode(script) {
+function runOnOldNode(script, args = []) {
   return new Promise((resolve) => {
     execFile(
       process.execPath,
-      ['--import', HARNESS, script],
+      ['--import', HARNESS, script, ...args],
       // The CLI must not read the developer's own installation, and `doctor`
       // reaches for every one of these. A directory that does not exist is the
       // honest answer for all of them - nothing is installed on a machine this
@@ -75,7 +76,11 @@ test('the harness really does make node:sqlite unavailable', async () => {
 });
 
 test('raise doctor on a Node in the 22.5-22.12 gap explains itself instead of dying', async () => {
-  const { stdout, stderr } = await runOnOldNode(CLI);
+  // `doctor` by name, not a bare entry point. The guard fires before argv is
+  // parsed, so any arguments reproduce this - but `doctor` is the command the
+  // issue and the spec's acceptance criterion both name, and a test that
+  // exercises something adjacent to its own title is one nobody can check.
+  const { stdout, stderr } = await runOnOldNode(CLI, ['doctor']);
 
   // The bug. Before the entry point became a shim this was the whole output: a
   // link-time throw from a module the user never asked for.
@@ -91,10 +96,28 @@ test('raise doctor on a Node in the 22.5-22.12 gap explains itself instead of dy
 test('the refusal is an error exit, so a script calling raise can act on it', async () => {
   // Not part of the reproduction - a link-time crash exits 1 as well, so this
   // passed before the fix too. It is here because the exit code is the half of
-  // the contract a caller sees, and it would be easy to lose while making the
-  // message nicer.
-  const { code } = await runOnOldNode(CLI);
+  // the contract a caller sees, and the guard sets `process.exitCode` and lets
+  // the process end naturally rather than calling `process.exit()`, which is
+  // exactly the sort of change that could drop it to 0 without anything else
+  // noticing.
+  const { code } = await runOnOldNode(CLI, ['doctor']);
   assert.equal(code, 1);
+});
+
+test('the refusal survives a piped stdout, which is where process.exit() loses it', async () => {
+  // The finding behind the `process.exitCode` above: on macOS a piped stdout is
+  // asynchronous, and `process.exit()` truncates it at the pipe buffer. 120
+  // bytes fit, so this passes either way today and is not a reproduction - it
+  // pins the guarantee at the boundary that matters, since `execFile` above
+  // gives the child a pipe but a shell pipeline is what a user actually types.
+  const { stdout } = await new Promise((resolve) => {
+    execFile(
+      'sh',
+      ['-c', `"${process.execPath}" --import "${HARNESS}" "${CLI}" doctor | cat`],
+      (error, out) => resolve({ stdout: out }),
+    );
+  });
+  assert.match(stdout, /22\.13 or newer/);
 });
 
 test('a supported Node reaches the CLI, so the guard is not simply refusing everything', async () => {

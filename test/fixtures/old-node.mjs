@@ -27,7 +27,9 @@
  * is worse than no reproduction at all.
  */
 
-import { register } from 'node:module';
+import { register, registerHooks } from 'node:module';
+
+import { resolve } from './no-sqlite-hook.mjs';
 
 // Writable and configurable on every Node this runs on; if that ever stops
 // being true the control test fails loudly rather than the guard silently
@@ -38,4 +40,11 @@ Object.defineProperty(process.versions, 'node', {
   writable: true,
 });
 
-register('./no-sqlite-hook.mjs', import.meta.url);
+// `registerHooks` runs the hook synchronously in this thread and is the
+// supported API; `register` is deprecated from Node 26 (DEP0205) and prints a
+// warning on every run, which is noise the suite should not teach anyone to
+// skim past. But `registerHooks` only arrived in 22.15, and `engines` floors us
+// at 22.13 - so the deprecated path stays as the fallback for the two versions
+// in between rather than the floor being quietly raised to suit a test.
+if (typeof registerHooks === 'function') registerHooks({ resolve });
+else register('./no-sqlite-hook.mjs', import.meta.url);
