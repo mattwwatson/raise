@@ -860,14 +860,14 @@ async function cmdDoctor() {
     ok('Pull request state', 'enabled for GitHub through gh; no Bitbucket credential configured');
   }
 
-  // The other outbound request, reported on the same terms - and, unlike every
-  // other check here, reported without being *made*. `doctor` reads what `serve`
-  // last wrote and never asks the registry itself: this is where you come when
-  // something is already wrong, which is frequently with no network, and a
-  // diagnostic that pauses to time out a request nobody is blocked on is one
-  // people stop running. It also keeps the promise the README makes about how
-  // often this contacts anybody a function of elapsed time rather than of how
-  // many commands you typed.
+  // The other outbound request, reported on the same terms as the forge above -
+  // and, alone among the checks here, reported off a reading it declines to take
+  // itself. `doctor` prints what `serve` last wrote and never asks the registry:
+  // this is where you come when something is already wrong, which is frequently
+  // with no network, and a diagnostic that pauses to time out a request nobody
+  // is blocked on is one people stop running. It also keeps the promise the
+  // README makes about how often this contacts anybody a function of elapsed
+  // time rather than of how many commands you typed.
   const updateConfig = readUpdateConfig();
   const version = packageVersion();
   if (updateConfig.problem) {
