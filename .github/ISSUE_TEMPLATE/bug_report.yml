@@ -1,0 +1,61 @@
+# The fields are chosen for what this tool actually gets wrong. Raise's failures
+# are almost never crashes - they are a row asserting something that is not true,
+# or a row that should exist and does not. So the two required fields are what
+# the row said and what was true, which is the whole shape of a report here.
+name: Bug report
+description: A row said something that was not true, or something is missing from the page
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Not for security problems - use
+        [the private advisory form](https://github.com/mattwwatson/raise/security/advisories/new)
+        instead.
+
+  - type: textarea
+    id: what-it-said
+    attributes:
+      label: What the page or CLI said
+      description: The row as you saw it. A screenshot of the card is ideal; `raise status` output is fine too.
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-was-true
+    attributes:
+      label: What was actually true
+      description: |
+        What the session was really doing at that moment. This is the half that
+        makes a report actionable - a wrong answer and the right answer beside it.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `raise --version`, or the commit if you are running from a checkout.
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: raise doctor
+      description: |
+        Output of `raise doctor`. It reports which agents and optional integrations
+        are present, which is usually the difference between two machines.
+      render: text
+
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Which agent was in the session
+      multiple: true
+      options:
+        - Claude Code
+        - Claude Desktop
+        - Codex
+        - pi
+        - Not sure

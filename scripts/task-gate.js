@@ -114,8 +114,9 @@ export function renderGate(result, { colour = false, today = '' } = {}) {
   if (result.outcome === 'no-branch') {
     err.push(`${label} - ${paint(ANSI.red, 'could not read a branch name.')}`);
     err.push('');
-    err.push('  Set BITBUCKET_BRANCH, or run this inside a checkout that is on a');
-    err.push('  branch. A detached HEAD has no ticket to check.');
+    err.push('  Set GITHUB_HEAD_REF, or run this inside a checkout that is on a');
+    err.push('  branch. A detached HEAD has no ticket to check - which is what a');
+    err.push('  pull-request build is, since it checks out the merge commit.');
   } else if (result.outcome === 'no-key') {
     err.push(`${label} - ${paint(ANSI.red, `branch "${result.branch}" carries no ticket key.`)}`);
     err.push('');

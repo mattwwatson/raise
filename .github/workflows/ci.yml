@@ -1,0 +1,101 @@
+# Why this exists: nothing else checks a pull request. It replaces
+# `bitbucket-pipelines.yml` one-for-one when the project moved to GitHub under
+# RAI-5, and the reasoning below is that file's, kept because none of it was
+# about Bitbucket.
+#
+# It runs exactly what AGENTS.md calls mandatory: `npm run lint`, `npm test` and
+# `npm run typecheck`. Coverage is deliberately left out - nothing enforces a
+# threshold, so it would produce a number nobody reads and a minute nobody gets
+# back.
+#
+# Two Node versions, and each earns its place. 24 is what the docs tell a
+# contributor to install for coverage, so it is the version they are most likely
+# on. 22 is the floor `engines` promises, and a promise nothing tests is a guess
+# - especially this one, which turns on `node:sqlite` being importable without
+# `--experimental-sqlite`. That flag came off in 22.13.0, which is exactly why
+# the floor says 22.13 and not the 22.5 the module was added in.
+#
+# The `22` line tracks the latest 22.x, so this job proves the line still works
+# rather than proving the floor itself. If it ever goes red on a `node:sqlite`
+# import, Node has moved, not us.
+#
+# Lint and typecheck run on 24 only: neither is version-dependent, so a second
+# copy would buy nothing but a minute.
+#
+# `actions/checkout` and `actions/setup-node` are the only third-party things in
+# this repository, and they are CI rather than product - the zero-runtime-
+# dependency rule in AGENTS.md is about what `npm install raise-cli` pulls down,
+# which is still nothing. They are pinned to major versions, which is what
+# GitHub's own docs recommend and what keeps a security fix arriving without a
+# pull request.
+
+name: CI
+
+# Both triggers, on purpose, and they are not the same build.
+#
+# `push` builds the branch head as it stands. `pull_request` builds its merge
+# with the base, which is what catches a branch that passes alone and fails
+# against `main`. Once a pull request is open both fire on every push; that
+# duplication is the point rather than an oversight.
+#
+# `push` with no branch filter is also the backstop for what neither of the
+# others is guaranteed to see: a branch with no open pull request, and a pull
+# request whose merge with `main` cannot be produced - a `pull_request` build
+# constructs that merge, so the conflicted branch this file exists to catch is
+# exactly the case that might otherwise register no check at all.
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint-test-typecheck:
+    name: Lint, tests and typecheck (Node 24)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run typecheck
+
+      # The two roadmap gates. Both are disk-only, so neither can go red
+      # because a Jira token expired - which is also why `tasks:validate`, the
+      # one command that talks to a tracker over the network, is deliberately
+      # not here.
+      #
+      # `tasks:links` runs everywhere: a spec filename is rewritten when its
+      # item is captured, and a reference left pointing at the old name is just
+      # as broken on `main` as on a branch.
+      - run: npm run tasks:links
+
+      # `tasks:gate` runs on pull requests ONLY. It asserts that this branch's
+      # spec says `shipped`, because merging is what closes the item and `main`
+      # must not land carrying work whose file claims it never started. That is
+      # a question about *merging*, and `push` fires on every commit including
+      # work in progress - where the spec correctly still says `in-progress`.
+      # Running it there would paint CI red all day on branches making no claim
+      # to be mergeable.
+      #
+      # This is the one line that could not be carried across by renaming a
+      # variable. Bitbucket set `BITBUCKET_PR_ID` on pull-request builds and
+      # nowhere else, so a shell test on it was the whole condition. Here the
+      # equivalent is the *event*, and `scripts/tasks.js` needs
+      # `GITHUB_HEAD_REF` besides - on a `pull_request` build the checkout is a
+      # detached merge commit, so reading `.git/HEAD` would find no branch at
+      # all and fail the gate it is meant to enforce.
+      - if: github.event_name == 'pull_request'
+        run: npm run tasks:gate
+
+  test-floor:
+    name: Tests on the engines floor (Node 22)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm test

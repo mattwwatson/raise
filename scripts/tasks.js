@@ -55,15 +55,27 @@ function usage() {
 /**
  * The branch this checkout is on.
  *
- * `BITBUCKET_BRANCH` first, because on a pull-request build it is the source
- * branch and the checkout may not be on it. Otherwise `.git/HEAD`, read through
- * the module the server already uses - which handles a linked worktree and
- * costs no subprocess. A detached HEAD has no branch, and the gate says so.
+ * The environment first, because on a pull-request build the checkout is **not**
+ * on the branch: GitHub checks out the merge commit, so `.git/HEAD` is detached
+ * and reading it alone would make the gate report `no-branch` and fail every
+ * pull request it was written to guard. `GITHUB_HEAD_REF` is set only on
+ * `pull_request` events and holds the *source* branch, which is the one carrying
+ * the ticket key; `GITHUB_REF_NAME` is the branch on an ordinary push.
+ *
+ * This is why the Bitbucket-to-GitHub move could not be a rename of
+ * `BITBUCKET_BRANCH`. That variable was set on every Bitbucket build, so one
+ * name did both jobs; here they are two different events with two different
+ * variables, and the fallback order is what tells them apart.
+ *
+ * Otherwise `.git/HEAD`, read through the module the server already uses - which
+ * handles a linked worktree and costs no subprocess. A detached HEAD with no
+ * environment to go on has no branch, and the gate says so.
  *
  * @returns {string|null}
  */
 function currentBranch() {
-  if (process.env.BITBUCKET_BRANCH) return process.env.BITBUCKET_BRANCH;
+  if (process.env.GITHUB_HEAD_REF) return process.env.GITHUB_HEAD_REF;
+  if (process.env.GITHUB_REF_NAME) return process.env.GITHUB_REF_NAME;
   return new GitBranch().checkoutFor(repoRoot()).branch;
 }
 

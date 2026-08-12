@@ -1534,12 +1534,18 @@ npm run lint      # oxlint over src, bin, hooks, public, test, scripts
 npm run typecheck # tsc --noEmit over src, bin, hooks, public, scripts
 ```
 
-All three must pass before anything is done, and `bitbucket-pipelines.yml` runs them on every
-pull request, on `main`, and on any other branch push. Tests run again on Node 22 to hold the
-`engines` floor honest; lint and typecheck do not, being version-independent. Why there is no
-coverage job, and what the two Node versions are each for, is in that file's own comments;
-renaming any npm script it invokes - these three, or either roadmap gate below - means
-changing it there too.
+All three must pass before anything is done, and `.github/workflows/ci.yml` runs them on every
+pull request and on every push. Tests run again on Node 22 to hold the `engines` floor honest;
+lint and typecheck do not, being version-independent. Why there is no coverage job, and what
+the two Node versions are each for, is in that file's own comments; renaming any npm script it
+invokes - these three, or either roadmap gate below - means changing it there too.
+
+**A pull request and a push are two different builds and both run.** The push builds the
+branch head; the pull request builds its merge with the base, which is what catches a branch
+that passes alone and fails against `main`. The gate that is *not* on both is `tasks:gate`,
+which asks a question about merging - see the comments in that file, and note that it needs
+`GITHUB_HEAD_REF` because a `pull_request` checkout is a detached merge commit with no branch
+in `.git/HEAD` to read.
 
 - **Reproduce a bug as a test first**, then fix what the test exposes.
 - Tests are `node:test` + `node:assert/strict`, one file per module, named after the

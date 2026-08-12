@@ -1,0 +1,20 @@
+# The `contact_links` entry is the point of this file: it intercepts somebody
+# about to file a vulnerability as a public issue, on the chooser page, rather
+# than relying on their having read SECURITY.md first. By the time they are
+# typing into a public box, that document has already failed.
+#
+# `blank_issues_enabled` stays true. This is a small project and forcing every
+# report through a template would lose the ones that do not fit one, which are
+# usually the interesting reports.
+#
+# The templates beside this file are not decoration. GitHub documents
+# `contact_links` as rendering "in the template chooser" and does not say
+# whether the chooser appears at all for a repository that has a config and no
+# templates - so a config on its own might silently never be shown. Shipping
+# real templates makes the chooser certain. Do not delete the last one and
+# leave this behind.
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/mattwwatson/raise/security/advisories/new
+    about: Please report privately rather than in a public issue. See SECURITY.md.
