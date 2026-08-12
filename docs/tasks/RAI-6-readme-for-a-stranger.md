@@ -148,9 +148,10 @@ main checkout and a worktree of it, and branch names in both of the shapes peopl
 ## Implementation notes
 
 Landed as planned - a reorder, a support matrix and a name sweep, with the register untouched.
-The README went from 632 lines to 633: forty lines of `nmmon` came out, the matrix and the
-optional-signals split went in. Four things are worth recording because the plan did not predict
-them.
+The README went from 632 lines to 633 in this item's own commit: forty lines of `nmmon` came
+out, the matrix and the optional-signals split went in. It is longer than that on the branch as
+merged, because [RAI-7] and [RAI-8] add to the same file after this. Four things are worth
+recording because the plan did not predict them.
 
 **The install command was broken, not merely stale.** Anticipated as a rename leftover and found
 to be worse: `git clone …/no-mistakes-monitor.git` names a repository that does not exist under
