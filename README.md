@@ -605,6 +605,30 @@ at all is silent by design - see [Optional signals](#optional-signals).
 then Raise is looking in `~/.no-mistakes/state.sqlite` and finding nothing, which is the
 supported no-no-mistakes setup rather than a fault. `NM_HOME` moves where it looks.
 
+## Related tools
+
+Other people are working on this, and so is Anthropic. All of them are worth your time.
+
+**[`claude agents`](https://code.claude.com/docs/en/agent-view)** is inside Claude Code
+already - one screen for the sessions it is running in the background, grouped by what is
+running, what needs your input and what is done. Nothing to install, and it dispatches new
+sessions as well as watching them, which is a job this does not do at all.
+
+**[Switchboard](https://github.com/doctly/switchboard)** is a desktop app for browsing and
+searching every Claude Code session you have ever had. Its full-text search - find the session
+by what was discussed, not by when it happened - does something nothing here does, and it runs
+on Linux and Windows as well as macOS.
+
+**[signalbox](https://github.com/dwmkerr/signalbox)** is a menubar jumplist across Cursor,
+Claude Code, Codex, OpenCode and pi. It reaches further than this does: there is an iOS app,
+and a remote hub that can forward several machines' events onto one board.
+
+This one is a page you leave pinned on a second monitor. It watches the sessions you have open
+yourself, in your own terminal tabs, across Claude Code, Codex and pi, and it is built around
+one question: **which of them has stopped and needs a human - and take me to that window.**
+
+*Checked 12/08/2026. All three are actively developed, so some of the above will age.*
+
 ## Development
 
 ```sh
