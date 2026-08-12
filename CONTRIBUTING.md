@@ -165,6 +165,12 @@ the way it is, that is one place to look; the other is the header of the module 
 `AGENTS.md` indexes and where the reasoning behind a single module's decisions lives. You are
 not expected to write a spec for a contribution - that is the maintainer's job.
 
+**A pull request that ships an issue names it with a closing keyword in the description** -
+`Closes #15`, `Fixes #15`, `Resolves #15`. A plain `#15` reads the same to a person and is not
+the link the tracker acts on, so without a keyword the issue stays open over merged work - which
+is what happened to [issue 15](https://github.com/mattwwatson/raise/issues/15), whose pull
+request merged carrying no closing reference and which had to be closed by hand afterwards.
+
 Security issues do **not** go in an issue - see [SECURITY.md](SECURITY.md).
 
 By contributing you agree that your work is published under the project's MIT licence.
