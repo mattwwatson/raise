@@ -102,40 +102,86 @@ test('a branch with no issue number passes, because it ships no tracked item', (
   assert.equal(prefixed.exitCode, 0);
 });
 
-test('a branch that carries a key in the wrong place still fails', () => {
-  // The two ways of finding no ticket mean opposite things. No key anywhere is
-  // a change that ships no tracked item. A key sitting somewhere the convention
-  // does not put it is the forgetting this gate exists to catch - the key is
-  // right there in the name - so passing it would be the exact failure the
-  // untracked pass must not be read as licensing.
-  for (const branch of ['wip-23-tooling', 'revertRAI-14', 'rai-14-roadmap-tooling']) {
-    const result = gateBranch(branch, indexed([spec()]));
+// The items the misplaced names below refer to, so that what decides the
+// outcome is demonstrably the spec set and not the shape of the string: the
+// same names against a set without these keys are ordinary untracked branches.
+const known = () => indexed([spec(), spec({ file: '23-stale-page-code.md', ticket: '23' })]);
+
+test('a branch that names a known item in the wrong place still fails', () => {
+  // The two ways of finding no ticket mean opposite things. Naming no item at
+  // all is a change that ships nothing tracked. Naming one somewhere the
+  // convention does not put it is the forgetting this gate exists to catch -
+  // the key is right there in the name - so passing it would be the exact
+  // failure the untracked pass must not be read as licensing.
+  //
+  // Every separator, because a key with the wrong one is the likeliest real
+  // typo of the lot: it is correctly positioned and still unreadable to the
+  // gate.
+  const misplaced = {
+    'wip-23-tooling': '23',
+    '23_stale_page_code': '23',
+    '23/stale-page-code': '23',
+    'revertRAI-14': 'RAI-14',
+    'rai-14-roadmap-tooling': 'RAI-14',
+    'RAI-14_tooling': 'RAI-14',
+    'RAI-14x': 'RAI-14',
+  };
+  for (const [branch, ticket] of Object.entries(misplaced)) {
+    const result = gateBranch(branch, known());
     assert.equal(result.outcome, 'no-key', branch);
     assert.equal(result.exitCode, 1, branch);
+    assert.equal(result.ticket, ticket, branch);
   }
 });
 
-test('the misplaced-key failure explains the naming rule, on stderr', () => {
-  const rendered = renderGate(gateBranch('wip-23-tooling', indexed([spec()])));
+test('digits that name no item are digits, so those branches pass', () => {
+  // The reason the decision is made against the spec set rather than against a
+  // looser pattern. These are shaped exactly like the misplaced names above -
+  // a number at a token boundary - and they are ordinary branches. No
+  // arrangement of separators tells them apart, because the difference is not
+  // in the shape: 2026, 24, 22 and 2 name no item.
+  for (const branch of ['release-2026-08-12', 'bump-node-24', 'fix/readme-node-22']) {
+    const result = gateBranch(branch, known());
+    assert.equal(result.outcome, 'untracked', branch);
+    assert.equal(result.exitCode, 0, branch);
+  }
+});
+
+test('the same name answers differently depending only on whether the item exists', () => {
+  // The property stated directly, in both directions: nothing about the string
+  // decides this. `wip-23-tooling` is a misnaming when 23 is an item and an
+  // ordinary branch when it is not.
+  assert.equal(gateBranch('wip-23-tooling', indexed([spec()])).outcome, 'untracked');
+  assert.equal(gateBranch('wip-23-tooling', known()).outcome, 'no-key');
+});
+
+test('the residue is accepted and is the honest half of that trade', () => {
+  // `feat/v2-rewrite` is an ordinary branch until issue 2 exists, at which
+  // point nothing in the name says which of the two it meant and it is read as
+  // a misnaming. That is a rename away from passing, where the shape-matching
+  // version this replaced got the same case wrong for names carrying no key at
+  // all. `BRANCH_KEY_PATTERN` still refuses to read it as issue 2 outright.
+  assert.equal(ticketFromBranch('feat/v2-rewrite'), null);
+  assert.equal(gateBranch('feat/v2-rewrite', known()).outcome, 'untracked');
+
+  const withIssueTwo = indexed([spec({ file: '2-identity.md', ticket: '2' })]);
+  assert.equal(gateBranch('feat/v2-rewrite', withIssueTwo).outcome, 'no-key');
+});
+
+test('the misplaced-key failure names the item and explains the rule, on stderr', () => {
+  const rendered = renderGate(gateBranch('wip-23-tooling', known()));
   assert.deepEqual(rendered.out, []);
   const err = rendered.err.join('\n');
-  assert.ok(err.includes('23-roadmap-tooling'));
-  assert.ok(err.includes('fix/23-roadmap-tooling'));
+  // Naming the item is what makes the message true of every branch that
+  // reaches it - the gate now knows which item, so it says which.
+  assert.ok(err.includes('names 23'));
+  assert.ok(err.includes('23-<short-name>'));
   // Saying otherwise sends somebody looking for an upstream automation rule
   // that was never the reason: GitHub links a branch to its issue from the
   // pull request, and Jira before it found the key anywhere in the name.
   assert.ok(err.includes('our'));
   assert.ok(err.includes('convention'));
   assert.ok(err.includes('pull request'));
-});
-
-test('a digit inside a word is not a misplaced key, so that branch passes', () => {
-  // `BRANCH_KEY_PATTERN` already refuses to read the "2" in v2-rewrite as issue
-  // 2. Failing it here would undo that from the other side, and would fail
-  // every branch whose name happens to contain a digit.
-  const result = gateBranch('feat/v2-rewrite', indexed([spec()]));
-  assert.equal(result.outcome, 'untracked');
-  assert.equal(result.exitCode, 0);
 });
 
 test('passing without a key says so rather than passing silently', () => {

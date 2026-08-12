@@ -1699,18 +1699,27 @@ from the **pull request**, not from the branch name, so this is our convention r
 constraint, and `npm run tasks:gate` is what enforces it. The PR that ships an item sets
 `status: shipped` and `shipped:` in its spec file and adds `## Implementation notes`.
 
-**The gate gives three answers, not two, and the split is the point.** A branch carrying no
-key-shaped token anywhere - `fix/some-typo` - **passes**: it ships no tracked item, so there is
-nothing to assert, and failing it made a one-line spec correction cost an issue, a spec, a
-branch and a pipeline run. A branch carrying a key somewhere the convention does not put it -
+**The gate gives three answers, not two, and the split is the point.** A branch naming no item
+anywhere - `fix/some-typo` - **passes**: it ships nothing tracked, so there is nothing to
+assert, and failing it made a one-line spec correction cost an issue, a spec, a branch and a
+pipeline run. A branch naming one somewhere the convention does not put it -
 `wip-23-stale-page-code`, `rai-14-tooling` - **fails**, because the key is in the name and so
 forgetting is not the explanation; that is the case the naming rule exists for. A correctly
 keyed branch fails unless its spec exists and says `shipped`.
 
+**Which of the first two it is comes from the spec set, not from the shape of the name**, and
+that is what makes the split hold. `23_stale_page_code` fails while issue 23 exists;
+`bump-node-24` passes because nothing is issue 24. A looser second pattern was tried and cannot
+work - the two are the same shape, and every widening that admits a real misnaming fails an
+ordinary branch. What follows is the honest limit: **the gate cannot see a branch that never
+mentions its item**, so `fix/whatever` shipping tracked work slips past, exactly as it always
+could. It guards against forgetting, never against evasion.
+
 An epic gets a spec too, and it carries the shared background for everything under it -
 `docs/tasks/RAI-1-open-source-release.md` holds the reasoning behind the whole open-source
-push, so its children need their own file only when one is picked up. **No branch without a
-spec file.**
+push, so its children need their own file only when one is picked up. **No branch shipping a
+tracked item without its spec file** - a branch shipping no tracked item needs neither an issue
+nor a spec, which is the whole of what changed here.
 
 `scripts/` holds four commands over all this - `npm run tasks`, `tasks:links`, `tasks:gate`
 and `tasks:validate`. Two of them run in CI, and which two is the design:

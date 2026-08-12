@@ -45,8 +45,8 @@ import { ANSI, painter } from './task-format.js';
  * What we want is a branch list that can be scanned by key, so the key starts
  * the branch name or a path element of it. A key buried mid-segment has stopped
  * naming the branch and become a substring inside a word, so it names no ticket
- * here - and `MISPLACED_KEY_PATTERN` below is what stops that being mistaken for
- * a branch carrying no key at all, which is a pass.
+ * here - and `misplacedKey` below is what stops that being mistaken for a branch
+ * naming no item at all, which is a pass.
  *
  * **The bare-number alternative is anchored, and has to be.** A legacy key is
  * self-announcing - `RAI-14` cannot be mistaken for anything else - but a plain
@@ -61,34 +61,6 @@ import { ANSI, painter } from './task-format.js';
 export const BRANCH_KEY_PATTERN = /(?:^|\/)([A-Z][A-Z0-9]+-\d+|\d+)(?:-|$)/;
 
 /**
- * A key-shaped token sitting where the convention does not put one.
- *
- * The gate has two ways to find no ticket in a branch name and they mean
- * opposite things. `fix/some-typo` carries no key **anywhere**, so it ships no
- * tracked item and passes. `wip-23-tooling` carries one and has misplaced it -
- * the key is right there in the name, so forgetting cannot be the explanation,
- * and passing it would be the gate waving through precisely the case it exists
- * to catch. Telling the two apart is the whole job of this pattern.
- *
- * It is the same two shapes as `BRANCH_KEY_PATTERN` with the leading anchor
- * traded for a weaker one, and both halves of that matter:
- *
- * - the legacy shape needs no anchor at all, being self-announcing, and drops
- *   the case requirement so `rai-14-roadmap-tooling` is read as the misnamed
- *   branch it is rather than as an untracked change.
- * - a bare number keeps a **token** boundary in front of it - a hyphen - so
- *   `-23-` in `wip-23-tooling` is a misplaced key while the `2` in
- *   `feat/v2-rewrite` is a character inside a word, exactly as
- *   `BRANCH_KEY_PATTERN` already refuses to read it as issue 2. Dropping that
- *   boundary would fail every branch whose name happens to contain a digit.
- *
- * The residue is a branch like `release-2026-08-12`, which is shaped like a
- * misplaced key and cannot be told from one. It fails, which is what it did
- * before any of this, and the failure names the convention it should follow.
- */
-export const MISPLACED_KEY_PATTERN = /(?:[A-Za-z][A-Za-z0-9]*)?-\d+(?:-|$)/;
-
-/**
  * @param {string|null} branch
  * @returns {string|null}
  */
@@ -98,13 +70,52 @@ export function ticketFromBranch(branch) {
 }
 
 /**
- * Does this branch carry a key-shaped token that `ticketFromBranch` refused?
+ * The key of a known item named somewhere the convention does not put it.
+ *
+ * The gate has two ways to find no ticket in a branch name and they mean
+ * opposite things. `fix/some-typo` names no item **anywhere**, so it ships
+ * nothing tracked and passes. `wip-23-tooling` names one and has misplaced it -
+ * the key is right there, so forgetting cannot be the explanation, and passing
+ * it would wave through precisely the case the naming rule exists for. Telling
+ * those apart is the whole job of this function.
+ *
+ * **It asks the spec set rather than the string, and that is the design.** The
+ * obvious move is a second, looser regex - the same key shapes with the anchors
+ * relaxed - and it does not work, because "looks like a key" and "is a key" are
+ * different questions and only the second one has an answer. Every widening of
+ * such a pattern buys a few real misnamings and costs a few ordinary branches:
+ * `23_stale_page_code` and `RAI-14x` need admitting, while `release-2026-08-12`,
+ * `bump-node-24` and `fix/readme-node-22` are digits in a name and nothing more.
+ * No arrangement of separators separates them, because the difference is not in
+ * the shape.
+ *
+ * `byTicket` is the set of items that exist, and the gate is already holding it.
+ * So a branch names an item when it contains that item's key with the number
+ * intact - `RAI-14` case-insensitively, since `rai-14-roadmap-tooling` is a
+ * misnaming rather than an unrelated change, and a bare `23` bounded so it is
+ * not a slice of `2026`. Nothing has to be guessed and no separator has to be
+ * enumerated: `23_stale_page_code`, `23/stale-page-code`, `RAI-14_tooling` and
+ * `RAI-14x` all fail while 2026, 24 and 22 name no item and pass.
+ *
+ * The residue is real and is the honest version of this trade: a branch like
+ * `fix/typo-on-line-9` fails while issue 9 exists, because there is genuinely
+ * nothing in the name to say which of the two it meant. It is a rename away
+ * from passing and the failure says so, where the shape-matching version got
+ * that same case wrong for names carrying no key at all.
  *
  * @param {string|null} branch
- * @returns {boolean}
+ * @param {Map<string, Spec>} byTicket
+ * @returns {string|null}
  */
-export function hasMisplacedKey(branch) {
-  return MISPLACED_KEY_PATTERN.test(String(branch || ''));
+export function misplacedKey(branch, byTicket) {
+  const name = String(branch || '');
+  if (!name) return null;
+
+  for (const ticket of byTicket.keys()) {
+    const escaped = ticket.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (new RegExp(`(?<![0-9])${escaped}(?![0-9])`, 'i').test(name)) return ticket;
+  }
+  return null;
 }
 
 /**
@@ -137,7 +148,8 @@ export function gateBranch(branch, byTicket) {
   // different answer from no key, and still fails.
   const ticket = ticketFromBranch(branch);
   if (!ticket) {
-    if (hasMisplacedKey(branch)) return { ...base, outcome: 'no-key' };
+    const misplaced = misplacedKey(branch, byTicket);
+    if (misplaced) return { ...base, outcome: 'no-key', ticket: misplaced };
     return { ...base, outcome: 'untracked', exitCode: 0 };
   }
 
@@ -197,10 +209,10 @@ export function renderGate(result, { colour = false, today = '' } = {}) {
     err.push('  branch. A detached HEAD has no ticket to check - which is what a');
     err.push('  pull-request build is, since it checks out the merge commit.');
   } else if (result.outcome === 'no-key') {
-    err.push(`${label} - ${paint(ANSI.red, `branch "${result.branch}" carries an issue number, but not where the convention puts it.`)}`);
+    err.push(`${label} - ${paint(ANSI.red, `branch "${result.branch}" names ${result.ticket}, but not where the convention puts it.`)}`);
     err.push('');
-    err.push('  Branches are named <ISSUE>-<short-name>, with the number starting');
-    err.push('  the branch name or a path element of it - 23-roadmap-tooling and');
+    err.push('  Branches are named <ISSUE>-<short-name>, with the key starting the');
+    err.push('  branch name or a path element of it - 23-roadmap-tooling and');
     err.push('  fix/23-roadmap-tooling both work.');
     err.push('');
     err.push('  GitHub links the branch from the pull request rather than from its');
@@ -208,8 +220,9 @@ export function renderGate(result, { colour = false, today = '' } = {}) {
     err.push('  convention, so that a branch list can be scanned by issue, and this');
     err.push('  check is what enforces it.');
     err.push('');
-    err.push('  A branch carrying no issue number anywhere passes instead, because');
-    err.push('  it ships no tracked item. This one has one, so it is a name to fix.');
+    err.push('  A branch naming no tracked item at all passes instead, having');
+    err.push(`  nothing to mark shipped. This one names ${result.ticket}, so rename it -`);
+    err.push(`  ${result.ticket}-<short-name>, or fix/${result.ticket}-<short-name>.`);
   } else if (result.outcome === 'no-spec') {
     err.push(`${label} - ${paint(ANSI.red, `no spec in docs/tasks/ has "issue: ${result.ticket}".`)}`);
     err.push('');
