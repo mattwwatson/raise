@@ -254,11 +254,21 @@ than doing them was the first useful act. `LICENSE` existed and `package.json` a
 roadmap skill already pointed at GitHub. Only the README install block was genuinely
 outstanding.
 
-**`doctor` was still on Node 22.5**, which the plan found rather than anticipated and which is
-the sharpest bug in the whole change. It is not a stale string: on 22.5 through 22.12 `engines`
-refuses the install while `doctor`, run from a checkout where nothing enforces `engines`,
-reports Node **ok in green** - and the tool then dies importing `node:sqlite`. Every other
-surface had been corrected to 22.13; the one that *tells a user their setup is fine* had not.
+**`doctor` was still on Node 22.5**, which the plan found rather than anticipated. It is not a
+stale string: on 22.5 through 22.12 `engines` refuses the install while `doctor`, run from a
+checkout where nothing enforces `engines`, would report Node **ok in green** - and the tool then
+dies importing `node:sqlite`. Every other surface had been corrected to 22.13; the one that
+*tells a user their setup is fine* had not.
+
+> **This was called the sharpest bug in the change, and it was half of one.** The no-mistakes
+> review on the RAI-6 branch found the other half while this was being written: `bin/raise.js`
+> statically imports `src/nm-state.js`, which statically imports `node:sqlite`, so on 22.5 to
+> 22.12 the process dies while the module graph is being evaluated and `main()` never runs. The
+> corrected message is on a line that cannot execute on the versions it is about. Fixing the
+> threshold was right and did not fix the user-visible behaviour at all, which is a good example
+> of a correct change to unreachable code reading as a fix. It is
+> [issue #5](https://github.com/mattwwatson/raise/issues/5), and the non-obvious part is that ES
+> module hoisting means moving the check to the top of the file does not work.
 
 **`tasks:gate` would have failed every pull request on GitHub, and nothing about the workflow
 file would have shown it.** The hand-over comment said `BITBUCKET_PR_ID` needed "a real
