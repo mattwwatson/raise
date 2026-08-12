@@ -109,8 +109,18 @@ export const SIZE_WIDTH = 2;
  */
 export const TITLE_WIDTH = 58;
 
-/** Where the ordering actually lives, printed under every board. */
-export const BOARD_URL = 'https://github.com/mattwwatson/raise/issues';
+/**
+ * Where the ordering actually lives, printed under every board.
+ *
+ * The **project**, not the issue list, and the difference is the whole reason
+ * this constant exists. An issue list has no manual order - GitHub sorts it by
+ * newest, oldest, most-commented or recently-updated, and offers no way to rank
+ * one item above another. Only a project board does, so only a project board can
+ * answer the question this line is pointing at. It is public, like everything
+ * else here; a private board would hand a stranger a login wall under every
+ * board they print.
+ */
+export const BOARD_URL = 'https://github.com/users/mattwwatson/projects/1';
 
 /**
  * What stands between a spec and being ready.

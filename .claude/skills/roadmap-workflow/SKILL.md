@@ -214,8 +214,15 @@ it is a report, and a report that fails a build has become a gate.
 
 ## What to work on next
 
-Read the **[issue list](https://github.com/mattwwatson/raise/issues)**, top down. It is the
+Read the **[project board](https://github.com/users/mattwwatson/projects/1)**, top down. It is the
 priority order; the repo does not encode one and must not start.
+
+**The board rather than the issue list, and this is a real distinction rather than a
+preference.** The issues hold the items; the board holds their *order*. GitHub sorts an issue
+list by newest, oldest, most-commented or recently-updated and gives you no way to rank one
+item above another, so "read the issues top down" is an instruction that cannot be followed -
+it was written that way when this moved off Jira, whose backlog did have a rank, and it was
+wrong for as long as it stood. An item on no board has been captured and not yet ordered.
 
 Then read the spec before committing to it:
 

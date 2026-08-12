@@ -117,7 +117,8 @@ row is ranked, what a source is allowed to assert, or the shape of the state fra
 conversation first, because those decisions usually have reasoning behind them that is written
 down in `AGENTS.md` and easy to undo by accident.
 
-**Planning happens in [the issues](https://github.com/mattwwatson/raise/issues)**, and the
+**Planning happens in [the issues](https://github.com/mattwwatson/raise/issues), ordered on
+[the board](https://github.com/users/mattwwatson/projects/1)**, and the
 specifications live beside the code: every item that has been picked up has one in
 [docs/tasks/](docs/tasks/), saying what was built and why. If you want to know how something got
 the way it is, that and `AGENTS.md` are the two places to look. You are not expected to write a

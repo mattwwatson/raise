@@ -1652,7 +1652,12 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 **[GitHub issues][board] own ordering and state; this repo owns the specification.** Each work
 item is one issue plus one spec file named for it, `docs/tasks/<issue>-<short-name>.md`. The
 issue says what and why; the file says how. There is no ordered list of work in the repo -
-what to do next is the backlog, top down.
+what to do next is the **[project board](https://github.com/users/mattwwatson/projects/1)**, top down.
+
+**The board is where the order lives, and the issue list cannot be.** GitHub sorts issues by
+newest, oldest, most-commented or recently-updated; nothing there ranks one item above another.
+Only a project does. This said "the backlog, top down" for a few hours after the move off Jira,
+carried over from a tracker that did have a rank, and named an ordering that did not exist.
 
 **Both halves are public now, and that is the change.** Until 12/08/2026 the board was a
 private Jira and the link only worked for the maintainer, so the specs in `docs/tasks/` were
