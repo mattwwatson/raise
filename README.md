@@ -641,17 +641,22 @@ Every pull request runs all three, plus the two roadmap checks below, and the te
 Node 22 to keep the version requirement above honest.
 
 Architecture, conventions, the file layout and the design decisions behind them are in
-[AGENTS.md](AGENTS.md).
+[AGENTS.md](AGENTS.md). What a contribution has to clear is in
+[CONTRIBUTING.md](CONTRIBUTING.md) - a new terminal is one entry and a test, and that is the
+contribution the architecture was shaped for. Security reports go through
+[SECURITY.md](SECURITY.md) rather than an issue.
 
 ## Roadmap
 
-Planned work lives in
-[Jira RAI](https://mattwwatson.atlassian.net/jira/software/c/projects/RAI/boards/6) - the
-backlog, top down, is the priority order. Each item's written spec is in
-[docs/tasks/](docs/tasks/): the ticket says what and why, the file says how.
+Every item has a written spec in [docs/tasks/](docs/tasks/), in this repository - what was
+built, and the reasoning behind it. `npm run tasks` prints the board from those files, which is
+the same board without the ordering.
 
-`npm run tasks` prints the same board from those files. `npm run tasks:links` and
-`npm run tasks:gate` are the two checks CI runs over them, the second asserting that the spec
-for a pull request's item already says `shipped`. What each command reports, and why only
-those two run in CI, is in
+**The ordering itself lives in a tracker that is not public**, so it is not linked here rather
+than linked and locked. That is the only part of this that a reader cannot see; the
+specifications are the part worth reading anyway.
+
+`npm run tasks:links` and `npm run tasks:gate` are the two checks CI runs over the specs, the
+second asserting that the spec for a pull request's item already says `shipped`. What each
+command reports, and why only those two run in CI, is in
 [AGENTS.md](AGENTS.md#roadmap-and-task-tracking).

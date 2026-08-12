@@ -51,6 +51,14 @@ terminal is one entry, per the rule under [Architecture](#architecture). What is
 writing is an adapter for a terminal or a platform nobody is on: it cannot be exercised against
 a real session, so it is guesswork in the shape of support.
 
+**Read as a contribution policy that says the opposite of what it means, so read it carefully.**
+The objection is to support nobody can exercise, never to the terminal - and somebody adding
+Ghostty is by definition somebody who is on Ghostty. It is therefore a requirement on whoever
+writes the adapter, not a reason to decline one, and the same holds for a Linux focus path that
+Phase 0.4 declined to build *speculatively*. The terms are in
+[CONTRIBUTING.md](CONTRIBUTING.md); the boundaries in the paragraph above are the ones that
+genuinely stay closed.
+
 ## Tech Stack
 
 - Node **22.13+**, ESM only (`"type": "module"`). CI runs the suite on 22 as well as 24, so
@@ -167,6 +175,8 @@ Rules:
 - **A new terminal is one entry in `src/focus/terminals.js`** - an availability check and a
   focus function, and nothing else in the codebase changes. If adding terminal support
   touches anything else, the abstraction is being broken; say so rather than working around it.
+  This is the contribution the architecture was shaped for, and the bar an outside one has to
+  clear is written out in [CONTRIBUTING.md](CONTRIBUTING.md).
 - Config, paths and ports resolve through `src/config.js` and are env-overridable
   (`RAISE_HOME`, `NM_HOME`, `RAISE_PORT`) so tests never touch a real installation.
 
@@ -1631,6 +1641,11 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
 specification.** Each work item is one ticket plus one spec file named for it,
 `docs/tasks/RAI-12-stale-page-code.md`. The ticket says what and why; the file says how.
 There is no ordered list of work in the repo - what to do next is the backlog, top down.
+
+**That board is private, and the link below only works for the maintainer.** The specifications
+are not: they are in `docs/tasks/`, which is why the README points a reader there instead. If
+you are working here without access to the board, the specs plus `npm run tasks` are the whole
+picture bar the ordering.
 
 Branch as `<KEY>-<short-name>`, with the key starting the branch name or a path element of
 it - `RAI-12-stale-page-code` or `fix/RAI-12-stale-page-code`. Jira finds the key **anywhere**
