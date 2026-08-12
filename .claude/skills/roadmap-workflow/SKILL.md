@@ -204,16 +204,24 @@ loose document.
    the automation acts on. (Linking the issue from the pull request's Development panel works
    too, but the keyword is the one that survives being written down.)
 
-   > **The pipeline composes the pull request body, and it keeps a closing keyword you gave
-   > it.** Pull request 18 carries both a standalone `Closes #5` and the pipeline's own
-   > `## Pipeline` section, and issue 5 reached In Review off that link with no `gh pr edit`
-   > anywhere in it - so write the keyword into the description you hand the pipeline rather
-   > than planning to repair the body afterwards. What actually goes wrong is the keyword never
-   > being written at all: issue 9 shipped in a merged pull request and stayed open, and issue
-   > 15 did the same and sat in Todo through its own shipping. Check after merging; the failure
-   > is silent and looks exactly like an item nobody finished. For one that merged without the
-   > keyword, close the issue by hand and say which pull request shipped it - closing by hand
-   > does land the item in Done.
+   > **A keyword in a commit message is not a substitute for one in the description.** GitHub
+   > closes the issue when that commit merges but does not list the pull request as a linked
+   > one, so the item arrives in Done through the `Item closed` workflow having never passed
+   > through In Review. The description is the only place the link comes from.
+   >
+   > **The pipeline composes that description rather than leaving you one to write**, so the
+   > keyword has to travel in the intent it composes into `## Intent`. Pull request 18 carries
+   > a standalone `Closes #5` beside the pipeline's own `## Pipeline` section, with issue 5
+   > linked and In Review off it, and that is the one route demonstrated to work. What a bare
+   > `git push no-mistakes` does with an intent nobody wrote is **not** established here, so
+   > read the body when the pull request opens rather than assuming either way - that is while
+   > a fix is still cheap.
+   >
+   > **If it merged without one, close the issue by hand and say which pull request shipped
+   > it.** Issue 9 shipped in a merged pull request and stayed open; issue 15 did the same off
+   > pull request 17, which carried no keyword anywhere, and sat in Todo through its own
+   > shipping. A hand close does reach Done, but it skips In Review, and the failure that made
+   > it necessary is silent - it looks exactly like an item nobody finished.
 7. **In the PR, set the spec's `status: shipped` and `shipped: <date>`**, and add the
    `## Implementation notes` section. Merging closes the issue; only the PR can set the file.
 
