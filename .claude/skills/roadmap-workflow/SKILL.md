@@ -169,11 +169,38 @@ loose document.
 1. **Move the item to In Progress on the board when you pick it up** - before the branch,
    before the spec edit, first thing. The board's Status field runs Todo → In Progress → In
    Review → Done, and this is the **only** one of those transitions a human has to make: the
-   other two are project workflows keyed off a linked pull request (step 6). GitHub has no
-   signal for *somebody started*, so an item left in Todo is indistinguishable from one nobody
-   has touched. Assign the issue to yourself in the same pass - the status says the work is
-   live, the assignee says whose it is. The spec's `status: in-progress` is the authoritative
-   copy on disk; do not invent a label taxonomy on top of either.
+   other two both follow from the closing keyword in step 6. GitHub has no signal for *somebody
+   started*, so an item left in Todo is indistinguishable from one nobody has touched. Assign
+   the issue to yourself in the same pass - the status says the work is live, the assignee says
+   whose it is. The spec's `status: in-progress` is the authoritative copy on disk; do not
+   invent a label taxonomy on top of either.
+
+   A human needs none of what follows - two clicks on the board set the field. An agent session
+   with no browser needs two calls, because the mutation takes ids rather than names and **the
+   ids are specific to this project**, so resolve them rather than pasting them:
+
+   ```sh
+   # 1. the project id, the Status field and its option ids, and the items with their issue numbers
+   gh api graphql -f query='
+     query($owner: String!, $number: Int!) {
+       user(login: $owner) { projectV2(number: $number) {
+         id
+         field(name: "Status") {
+           ... on ProjectV2SingleSelectField { id options { id name } }
+         }
+         items(first: 100) { nodes { id content { ... on Issue { number } } } }
+       } }
+     }' -f owner=mattwwatson -F number=1
+
+   # 2. write it, with the item id whose content.number is your issue and the In Progress option id
+   gh api graphql -f query='
+     mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
+       updateProjectV2ItemFieldValue(input: {
+         projectId: $project, itemId: $item, fieldId: $field,
+         value: { singleSelectOptionId: $option }
+       }) { projectV2Item { id } }
+     }' -f project=<project id> -f item=<item id> -f field=<field id> -f option=<option id>
+   ```
 2. **Branch off `main` as `<ISSUE>-<short-name>`** - e.g. `23-stale-page-code`.
 
    GitHub links a branch to its issue from the **pull request**, not from the branch name, so
@@ -196,10 +223,15 @@ loose document.
    (`no-mistakes(review): …`) which will not carry it - that is fine, because what links the
    work to the issue is the closing keyword in the pull request body, once step 6 has made sure
    one is actually there.
-6. **Put `Closes #23` in the pull request description.** It is what *links* the pull request to
-   the issue, and that link is what the rest of the automation runs on: the item moves itself
-   to In Review when the pull request is linked and to Done when it merges, and the issue
-   closes with it. A plain `#23` with no keyword is not the link the board reads - it
+6. **Put `Closes #23` in the pull request description.** Both remaining transitions hang off
+   that one keyword, and the chain is worth knowing exactly: the keyword *links* the pull
+   request to the issue, `Pull request linked to issue` moves the item to In Review the moment
+   the pull request **opens**, and on merge the keyword closes the issue, which is what fires
+   `Item closed` and lands it in Done. Not *"merging moves it to Done"* - the outcome is the
+   same and the mechanism is not, and the difference is the whole of the failure below: with no
+   keyword the merge closes nothing, so Done never arrives. `Pull request merged` is enabled
+   and has nothing to act on here, every item on the board being an issue and no pull request
+   being on it at all. A plain `#23` with no keyword is not the link the board reads - it
    cross-references the issue on its timeline, which looks the same to a person and is nothing
    the automation acts on. (Linking the issue from the pull request's Development panel works
    too, but the keyword is the one that survives being written down.)
@@ -209,13 +241,15 @@ loose document.
    > one, so the item arrives in Done through the `Item closed` workflow having never passed
    > through In Review. The description is the only place the link comes from.
    >
-   > **The pipeline composes that description rather than leaving you one to write**, so the
-   > keyword has to travel in the intent it composes into `## Intent`. Pull request 18 carries
-   > a standalone `Closes #5` beside the pipeline's own `## Pipeline` section, with issue 5
-   > linked and In Review off it, and that is the one route demonstrated to work. What a bare
-   > `git push no-mistakes` does with an intent nobody wrote is **not** established here, so
-   > read the body when the pull request opens rather than assuming either way - that is while
-   > a fix is still cheap.
+   > **The pipeline composes that description; you do not write it**, so the keyword lands
+   > there only if the pipeline is told to keep it. Pull request 18 is the one worked example,
+   > and it demonstrates exactly that and no more: on 13/08/2026 it was open with issue 5
+   > linked and In Review off it, its `## Intent` carrying the instruction *"The PR body
+   > already carries `Closes #5` and must keep it"* and the standalone `Closes #5` coming out
+   > under `## What Changed`. A keyword dropped into the intent text and left to find its own
+   > way is a route nothing here has demonstrated, and what a bare `git push no-mistakes` does
+   > with an intent nobody wrote is **not** established either. So read the body when the pull
+   > request opens rather than assuming - that is while a fix is still cheap.
    >
    > **If it merged without one, close the issue by hand and say which pull request shipped
    > it.** Issue 9 shipped in a merged pull request and stayed open; issue 15 did the same off
@@ -235,10 +269,9 @@ and whatever the branch is called. Unlike Jira's branch-anchored rules, **there 
 GitHub reads the keyword and acts on it.
 
 **The close is the later half of it, and the board moves first.** The link exists as soon as
-the pull request is *opened*, so the `Pull request linked to issue` workflow puts that item
-into In Review there and then - issue 5 sits there now off pull request 18, which has not
-merged. A stray keyword therefore announces that somebody is reviewing an item nobody has
-started, and it does so long before the close that would eventually explain it.
+the pull request is *opened*, so `Pull request linked to issue` puts that item into In Review
+there and then. A stray keyword therefore announces that somebody is reviewing an item nobody
+has started, and it does so long before the close that would eventually explain it.
 
 - **Only your own issue gets a closing keyword.**
 - **To reference another item without closing it, write it as a plain link or as `#21`
