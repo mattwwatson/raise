@@ -204,8 +204,14 @@ Consequences, in the order they have to be resolved:
   GitHub specs; with Jira retiring it is work on something being switched off. This is a
   deliberate reversal of an instruction in the hand-over comment, on grounds that arrived after
   it was written.
-- **The four open bugs move**: RAI-12, RAI-15, RAI-16, RAI-17 become GitHub issues, carrying
-  their descriptions and a link to their spec file.
+- **The four open bugs move**: RAI-12, RAI-15, RAI-16 and RAI-17 become issues #1 to #4,
+  carrying their descriptions and a link to their spec file. **Their specs are rekeyed and
+  renamed with them** - `1-stale-page-code.md`, `issue: 1` - which is narrower than it looks
+  and follows from what the frozen namespace is actually protecting. `RAI-N` is frozen
+  because renumbering the *shipped* record would rewrite what those items were called while
+  they were built. An unstarted backlog item has no such record: no branch, no pull request,
+  nothing referring to it but a planning note. Left on a dead key it would also be a
+  permanent orphan in `validate`, an issue with no spec that nobody can ever reconcile.
 - **`.github/ISSUE_TEMPLATE/`** gets `config.yml` with a `contact_links` entry pointing at the
   private advisory form, **plus at least one real template**. The real template is not
   decoration: GitHub documents `contact_links` as rendering "in the template chooser" and does

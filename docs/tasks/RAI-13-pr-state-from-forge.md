@@ -403,7 +403,7 @@ the existing chain has already identified, rather than being a fourth entry in t
 `withForgeState` wraps the chain's result. Identifying *which* pull request a row has is
 branch-gated, slug-checked local work that a forge lookup has nothing to add to - and making it
 a fourth source would have meant the forge deciding identity, which is the failure mode the
-three-source ranking spent RAI-15 and RAI-16 learning to avoid.
+three-source ranking spent RAI-15 and RAI-16 - now issues #2 and #3 - learning to avoid.
 
 ### Two things the building changed
 

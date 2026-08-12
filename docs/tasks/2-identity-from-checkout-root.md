@@ -1,10 +1,10 @@
 ---
-ticket: RAI-15
+issue: 2
 status: backlog
 size: S
 depends: -
 ---
-# RAI-15 - A card renames itself when a pipeline run ages out
+# 2 - A card renames itself when a pipeline run ages out
 
 **Self-contained brief.** No prior conversation needed. Written 06/08/2026.
 

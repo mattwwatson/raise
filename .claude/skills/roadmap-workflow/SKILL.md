@@ -25,7 +25,7 @@ that names its children; a standalone bug or task needs no parent.
 Work was tracked in a private Jira until 12/08/2026. Those 21 items are keyed **`RAI-12`** and
 keep those keys forever. Everything since is keyed by its **GitHub issue number**, `23`.
 
-- `docs/tasks/RAI-12-stale-page-code.md` (a real one) - frontmatter `ticket: RAI-12`
+- `docs/tasks/RAI-13-pr-state-from-forge.md` - frontmatter `ticket: RAI-13`
 - `docs/tasks/<issue>-<short-name>.md` - frontmatter `issue: 23`
 
 **Do not renumber the old ones.** It would rewrite the record of what those items were called
@@ -227,12 +227,12 @@ Then read the spec before committing to it:
 
 Known interactions to watch, all independent in substance and conflicting in the file:
 
-- **`src/dashboard.js`** is the busy one - **RAI-15** (a card renames itself) and **RAI-16**
-  (two sessions claiming one pipeline) both change it, and sit closest together: both are
-  about how a row is matched to a run, and RAI-15 moves the identity match out of that code
-  entirely, so whichever lands second should re-read the other's spec rather than assume its
-  own still describes the file.
-- **RAI-17** (a pipeline agent that never registers) is the exception - it lives in
+- **`src/dashboard.js`** is the busy one - **#2** (a card renames itself) and **#3** (two
+  sessions claiming one pipeline) both change it, and sit closest together: both are about
+  how a row is matched to a run, and #2 moves the identity match out of that code entirely,
+  so whichever lands second should re-read the other's spec rather than assume its own still
+  describes the file.
+- **#4** (a pipeline agent that never registers) is the exception - it lives in
   `src/registry.js`, `src/server.js` and the hooks, so it can run alongside any of the above.
 
 Add to this list as more are found.

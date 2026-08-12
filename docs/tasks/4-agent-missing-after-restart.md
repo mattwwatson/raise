@@ -1,10 +1,10 @@
 ---
-ticket: RAI-17
+issue: 4
 status: backlog
 size: S
 depends: -
 ---
-# RAI-17 - A pipeline step ran for six minutes and nothing on the card said so
+# 4 - A pipeline step ran for six minutes and nothing on the card said so
 
 **Self-contained brief.** No prior conversation needed. Written 06/08/2026.
 

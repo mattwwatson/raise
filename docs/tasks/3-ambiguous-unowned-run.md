@@ -1,10 +1,10 @@
 ---
-ticket: RAI-16
+issue: 3
 status: backlog
 size: S
 depends: -
 ---
-# RAI-16 - Two sessions on one branch both claim the same pipeline
+# 3 - Two sessions on one branch both claim the same pipeline
 
 **Self-contained brief.** No prior conversation needed. Written 06/08/2026.
 

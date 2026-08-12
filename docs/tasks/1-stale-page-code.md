@@ -1,10 +1,10 @@
 ---
-ticket: RAI-12
+issue: 1
 status: backlog
 size: M
 depends: -
 ---
-# RAI-12 - A pinned dashboard never picks up UI changes
+# 1 - A pinned dashboard never picks up UI changes
 
 **The immediate symptom has a one-key fix. The underlying gap is a real design problem** and is
 the reason this is a ticket rather than a note.
