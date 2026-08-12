@@ -1,6 +1,7 @@
 ---
 ticket: RAI-6
-status: in-progress
+status: shipped
+shipped: 2026-08-12
 size: M
 depends: RAI-2, RAI-3
 branch: RAI-6-readme-for-a-stranger
@@ -143,6 +144,43 @@ main checkout and a worktree of it, and branch names in both of the shapes peopl
 - `npm test`, `npm run lint`, `npm run typecheck` are untouched by this work - it is
   documentation only, so any movement in them means something has gone wrong.
 - `npm run tasks:links` passes.
+
+## Implementation notes
+
+Landed as planned - a reorder, a support matrix and a name sweep, with the register untouched.
+The README went from 632 lines to 633: forty lines of `nmmon` came out, the matrix and the
+optional-signals split went in. Four things are worth recording because the plan did not predict
+them.
+
+**The install command was broken, not merely stale.** Anticipated as a rename leftover and found
+to be worse: `git clone …/no-mistakes-monitor.git` names a repository that does not exist under
+that name, so the very first command in the README failed for anybody who tried it. It is fixed
+to `raise.git`. The wider point is that nothing in this repository's gates could have caught it -
+`tasks:links` checks `docs/tasks` references and there is no check that a documented command
+runs, which remains true.
+
+**pi and Codex were miscategorised mid-restructure, by this work.** Moving the optional-signals
+table out of Requirements pulled the `### pi sessions` and `### Codex sessions` subsections under
+`## Optional signals` with it, which says they are integrations you can do without. They are
+supported agents. Caught on a read-through rather than by any check, and fixed with a
+`## Setting up Codex and pi` section of their own. Worth knowing that a heading move can change a
+claim without touching a word.
+
+**The opening lost a sentence and needed a replacement.** The old first paragraph ended *"If you
+use `no-mistakes`, each session also shows what its pipeline is doing"*, which is exactly the
+framing item 1 removes - but the sample block directly beneath it shows two `NO-MISTAKES` lines,
+which were then unexplained on the first screenful. One line under the sample now says they are
+an optional signal and that nothing else changes without it. Removing a framing sentence is not
+free when the thing it framed is still on the page.
+
+**Every claim in the matrix was checked against `src/registry.js`**, not against the prose it
+replaced. `EVENT_STATES`, `PI_EVENT_STATES` and `CODEX_EVENT_STATES` are the authority for the
+`blocked` rows, `CODEX_HOOK_EVENTS` for the count of five, and `HOOK_EVENTS` for the count of
+six. This is the discipline the spec asked for and it is cheap; the alternative is a table that
+inherits an error nobody re-reads.
+
+**Not attempted, and still open:** the demo. [RAI-9] fills the slot directly beneath the problem
+paragraph, above the sample block.
 
 [RAI-5]: https://mattwwatson.atlassian.net/browse/RAI-5
 [RAI-7]: https://mattwwatson.atlassian.net/browse/RAI-7

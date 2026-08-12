@@ -1,6 +1,7 @@
 ---
 ticket: RAI-7
-status: in-progress
+status: shipped
+shipped: 2026-08-12
 size: S
 depends: RAI-6
 branch: RAI-6-readme-for-a-stranger
@@ -122,3 +123,36 @@ quoting someone's own hedge back at them in your README is a deficiency claim we
 - The check date is on the page.
 - `npm run tasks:links` passes; `npm test`, `npm run lint` and `npm run typecheck` are untouched,
   this being documentation only.
+
+## Implementation notes
+
+Four short paragraphs and a date line, after Troubleshooting and before Development. The writing
+took minutes; the checking is what this ticket actually was, and it changed the output twice.
+
+**The section names three tools where the ticket assumed two.** `claude agents` was not in the
+epic, this ticket or anybody's plan - it surfaced from a single search run to confirm no obvious
+neighbour was being omitted, which is the check that nearly did not happen because two neighbours
+were already named and the section looked complete. A related-tools section that omits the
+first-party answer is the evasion the ticket exists to prevent, and it would have been the first
+comment on any launch post.
+
+**Verified rather than read about**, because a search snippet is not evidence. `claude agents
+--json` was run against the installed 2.1.228 and returned seven sessions across four checkouts,
+correctly marking one in this repository as `waiting`. The two differences the section leans on -
+that the list is background sessions until you background an interactive one, and that attaching
+replaces agent view rather than raising an external window - are quoted from the documentation,
+and neither is stated in the README as something Agent View lacks.
+
+**The Switchboard correction is the whole argument for the rule**, and it is recorded above
+rather than here because it is the reasoning, not the outcome: eight days between a private note
+saying no attention mechanism could be found and a README advertising exactly that. Nothing from
+that private read reached the page.
+
+**The date line was not asked for and is the one addition beyond the ticket.** It exists because
+this section is a claim about software that changes weekly, and the product's own answer to that
+problem is `observedAt` and *"was open, last checked 3d ago"*. A README that states when it
+checked is the same idea applied to itself. It also gives the next person a reason to re-check
+rather than assuming the words are current.
+
+**Placement** is the conventional tail slot, chosen over putting it early: a reader who wants an
+archive is sent on their way either way, and the tail is where people look for it.

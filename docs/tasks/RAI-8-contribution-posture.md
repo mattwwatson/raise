@@ -1,6 +1,7 @@
 ---
 ticket: RAI-8
-status: in-progress
+status: shipped
+shipped: 2026-08-12
 size: S
 depends: RAI-6
 branch: RAI-6-readme-for-a-stranger
@@ -126,6 +127,40 @@ no-mistakes push target and the spec-link convention - none of which is this tic
   except the GitHub repository itself, which is [RAI-5]'s to create.
 - `npm test`, `npm run lint`, `npm run typecheck` and `npm run tasks:links` all pass, and the
   first three are untouched, this being documentation only.
+
+## Implementation notes
+
+`CONTRIBUTING.md` and `SECURITY.md` landed as specified, along with the two `AGENTS.md`
+amendments. Three things happened that the spec did not anticipate, and one of them is a defect
+this ticket fixed on the way past.
+
+**The README's roadmap link was a dead end, and it was found by asking rather than assuming.**
+The section invited every reader to a Jira board on a personal Atlassian site. The board URL
+returns HTTP 200 to anyone, because Jira serves a single-page shell before it checks anything -
+so a casual look says the link is fine. The project API underneath returns
+`No project could be found with key 'RAI'` anonymously, which is what settles it. **A 200 is not
+evidence that a page works**, and that is worth carrying: this is the documentation equivalent of
+the liveness rule the product itself is built on, where the absence of an error is never taken
+for positive evidence.
+
+**Private vulnerability reporting was off, so `SECURITY.md` documented a route that 404'd.**
+Enabled by Matt during the work and verified `{"enabled": true}` rather than assumed. It requires
+the repository to stay public, which is now a standing condition on a file in the repository -
+noted here because nothing in the codebase can check it.
+
+**The spec-link convention turned out never to have worked**, discovered while attaching the
+links this ticket's own spec would need. 14 tickets carry one; 13 name the pre-rename slug and
+would 404 for the maintainer, and all 14 point into a private Bitbucket repository that answers
+404 anonymously. Not one has ever resolved for a reader. The rule the skill was missing - the
+link follows the *spec*, not the ticket, so an epic child correctly has none until it is picked
+up - is now written down, along with an instruction not to add Bitbucket links while the move is
+pending. Rewriting the set is [RAI-5]'s, on the GitHub URL that makes them resolve.
+
+**The `contact_links` idea was raised, explained and parked.** It would intercept somebody about
+to file a vulnerability as a public issue, which is the one reader `SECURITY.md` cannot reach.
+It is on [RAI-5] with the caveat that decides its shape: GitHub does not document whether the
+chooser it renders in appears at all for a repository with a `config.yml` and no templates, so it
+needs a real template beside it and cannot be verified until the code is on GitHub.
 
 [RAI-2]: https://mattwwatson.atlassian.net/browse/RAI-2
 [RAI-5]: https://mattwwatson.atlassian.net/browse/RAI-5
