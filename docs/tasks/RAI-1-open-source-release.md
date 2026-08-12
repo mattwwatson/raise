@@ -261,18 +261,24 @@ Done in the same pass: `"private": true` removed, `"license": "UNLICENSED"` → 
 `LICENSE` file, and the `files` array checked against the renames. The package is `raise-cli`
 with `bin: { raise: ... }`, because `raise` is squatted on npm.
 
-Outstanding:
+**Both of the items that stood here shipped 12/08/2026 as RAI-5**, and the bullets are kept
+below rather than deleted, because each was answered in a way its own wording did not expect.
+[`RAI-5-package-for-public-release.md`](RAI-5-package-for-public-release.md) is the record.
 
-- Publish to npm so install is `npx raise-cli serve` rather than a Bitbucket clone. The
-  Bitbucket repository has since been renamed and the README clones
-  `git@bitbucket.org:mattw_watson/raise.git`; RAI-6 found the old name broken rather than merely
-  stale. It stays on Bitbucket until the move, because an install command that does not work is
-  worse than one naming a host we are leaving.
-- The move itself. `github.com/mattwwatson/raise` already exists, is public and has private
-  vulnerability reporting enabled, so what remains is pushing the code there, publishing to npm
-  and retiring Bitbucket. Decide whether to carry the git history across - it is good history
-  and the commit messages are readable, but check it for anything repo-private first. RAI-5
-  carries the detail in two comments.
+- ~~Publish to npm so install is `npx raise-cli serve` rather than a Bitbucket clone.~~
+  **Published, but not as `npx`, and that reversal is the useful part.** `install-hooks` writes
+  the hook script's absolute path into the user's agent settings and `bin/raise.js` resolves it
+  relative to the package - so under `npx` it points into a cache npm later deletes, every
+  session silently stops reporting, and the page carries on looking healthy. This tool's
+  defining failure, caused by installing it. The README says `npm install -g raise-cli` and
+  says why `npx` is not offered.
+- ~~The move itself.~~ **Done.** The history was carried across rather than squashed, after an
+  audit found no credential ever committed; the 23 Bitbucket-generated merge commits authored
+  from the work account were rewritten to the personal address first, so the public history
+  carries one identity. Bitbucket is retired rather than mirrored. What the move also took with
+  it, and what nobody had listed here: CI had to be rebuilt on GitHub Actions, and Jira retired
+  in the same pass, because a private board is invisible to exactly the reader this whole epic
+  is for.
 
 ---
 
