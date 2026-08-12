@@ -9,7 +9,8 @@ description: How work items flow between GitHub issues and this repo - capturing
 an issue plus one spec file in `docs/tasks/` named for it. Neither half repeats the other:
 the issue says *what and why*, the file says *how*.
 
-Board - https://github.com/mattwwatson/raise/issues
+Board - https://github.com/users/mattwwatson/projects/1
+Issue list - https://github.com/mattwwatson/raise/issues
 
 | | The issue | `docs/tasks/<KEY>-<name>.md` |
 |---|---|---|
@@ -165,10 +166,47 @@ loose document.
 
 ## Working on an item
 
-1. **Assign the issue to yourself when you pick it up.** That is the whole of "in progress" on
-   the tracker - there is no workflow state to move through, and inventing a label taxonomy to
-   simulate one would be two records of the same fact. The spec's `status: in-progress` is the
-   authoritative copy; the assignment is what makes it visible on the board.
+1. **Move the item to In Progress on the board when you pick it up** - before the branch,
+   before the spec edit, first thing. The board's Status field runs Todo → In Progress → In
+   Review → Done, and this is the **only** one of those transitions a human has to make: the
+   other two both follow from the closing keyword in step 6, and **no** workflow can set In
+   Progress, none of them having anything to read that says somebody started. So an item left
+   in Todo reads as one nobody has picked up. Assign the issue to yourself in the same pass -
+   the status says the work is live, the assignee says whose it is. The spec's
+   `status: in-progress` is the authoritative copy on disk; do not invent a label taxonomy on
+   top of either.
+
+   A human needs none of what follows - two clicks on the board set the field. An agent session
+   with no browser needs two calls, because the mutation takes ids rather than names and **the
+   ids are specific to this project**, so resolve them rather than pasting them:
+
+   ```sh
+   # 1. the project id, the Status field and its option ids, and the items with their issue numbers
+   gh api graphql -f query='
+     query($owner: String!, $number: Int!) {
+       user(login: $owner) { projectV2(number: $number) {
+         id
+         field(name: "Status") {
+           ... on ProjectV2SingleSelectField { id options { id name } }
+         }
+         items(first: 100) { nodes { id content { ... on Issue { number } } } }
+       } }
+     }' -f owner=mattwwatson -F number=1
+
+   # 2. write it, with the item id whose content.number is your issue and the In Progress option id
+   gh api graphql -f query='
+     mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
+       updateProjectV2ItemFieldValue(input: {
+         projectId: $project, itemId: $item, fieldId: $field,
+         value: { singleSelectOptionId: $option }
+       }) { projectV2Item { id } }
+     }' -f project=<project id> -f item=<item id> -f field=<field id> -f option=<option id>
+   ```
+
+   If that first query returns no node for your issue, the issue is not on the board and there
+   is no field to set. `Auto-add to project` is enabled, so anything captured through the
+   section above lands there on creation; an older issue that predates it needs
+   `addProjectV2ItemById` before the mutation has an item to write to.
 2. **Branch off `main` as `<ISSUE>-<short-name>`** - e.g. `23-stale-page-code`.
 
    GitHub links a branch to its issue from the **pull request**, not from the branch name, so
@@ -188,18 +226,52 @@ loose document.
    lives only in the diff is one a future session will undo.
 5. **Start every commit message you write by hand with the key**: `23: state the build the
    page loaded with`. The no-mistakes pipeline generates its own subjects
-   (`no-mistakes(review): …`) which will not carry it - that is fine, because the pull request
-   is what links the work to the issue.
-6. **Put `Closes #23` in the pull request description.** This is what closes the issue on
-   merge, and it is the one piece of automation in the whole workflow. Without it the issue
-   stays open over merged work, which is the tracker and `main` telling different stories.
+   (`no-mistakes(review): …`) which will not carry it - that is fine, because what links the
+   work to the issue is the closing keyword in the pull request body, once step 6 has made sure
+   one is actually there.
+6. **Put `Closes #23` in the pull request description.** Both remaining transitions hang off
+   that one keyword, and the chain is worth knowing exactly: the keyword *links* the pull
+   request to the issue, `Pull request linked to issue` moves the item to In Review the moment
+   the pull request **opens**, and on merge the keyword closes the issue, which is what fires
+   `Item closed` and lands it in Done. Not *"merging moves it to Done"* - the outcome is the
+   same and the mechanism is not, and the difference is the whole of the failure below: with no
+   keyword the merge closes nothing, so Done never arrives. `Pull request merged` is enabled
+   and has nothing to act on here, every item on the board being an issue and no pull request
+   being on it at all. A plain `#23` with no keyword is not the link the board reads - it
+   cross-references the issue on its timeline, which looks the same to a person and is nothing
+   the automation acts on. (Linking the issue from the pull request's Development panel is a
+   real second route to the link - see the remedy below - but the keyword is the one that
+   survives being written down.)
 
-   > **The pipeline writes the pull request body itself, so this line does not survive
-   > `git push no-mistakes`.** Issue 9 shipped in a merged pull request and stayed open,
-   > because nothing put a closing keyword in a body `no-mistakes` had authored. Either add it
-   > to the body afterwards with `gh pr edit --body`, or close the issue by hand and say which
-   > pull request shipped it. Check after merging; the failure is silent and looks exactly like
-   > an item nobody finished.
+   > **A keyword in a commit message is not a substitute for one in the description.** GitHub
+   > closes the issue when that commit merges but does not list the pull request as a linked
+   > one, so the item arrives in Done through the `Item closed` workflow having never passed
+   > through In Review. Of the two places you can write a keyword, the description is the one
+   > that links.
+   >
+   > **The pipeline composes that description; you do not write it**, so the keyword lands
+   > there only if the pipeline is told to keep it. Pull request 18 is the one worked example,
+   > and it demonstrates exactly that and no more: on 13/08/2026 it was open with issue 5
+   > linked and In Review off it, its `## Intent` carrying the instruction *"The PR body
+   > already carries `Closes #5` and must keep it"* and the standalone `Closes #5` coming out
+   > under `## What Changed`. A keyword dropped into the intent text and left to find its own
+   > way is a route nothing here has demonstrated, and what a bare `git push no-mistakes` does
+   > with an intent nobody wrote is **not** established either. So read the body when the pull
+   > request opens rather than assuming.
+   >
+   > **If it opened without a keyword, link the issue from the pull request's Development
+   > panel.** That is the cheap fix, and it is cheap because it edits no body text: it cannot
+   > disturb the `## Pipeline` section the signature check reads, which is why it is here and
+   > `gh pr edit --body` is not. It creates a genuine linked pull request, so the item moves to
+   > In Review - and that is all it is claimed to buy. Whether merging a manually linked pull
+   > request also closes the issue is not established here, so for Done as well the keyword in
+   > the description is the route evidenced end to end.
+   >
+   > **If it merged without one, close the issue by hand and say which pull request shipped
+   > it.** Issue 9 shipped in a merged pull request and stayed open; issue 15 did the same off
+   > pull request 17, which carried no keyword anywhere, and sat in Todo through its own
+   > shipping. A hand close does reach Done, but it skips In Review, and the failure that made
+   > it necessary is silent - it looks exactly like an item nobody finished.
 7. **In the PR, set the spec's `status: shipped` and `shipped: <date>`**, and add the
    `## Implementation notes` section. Merging closes the issue; only the PR can set the file.
 
@@ -212,13 +284,19 @@ the issue's own timeline already holds every commit and pull request that touche
 and whatever the branch is called. Unlike Jira's branch-anchored rules, **there is no guard**:
 GitHub reads the keyword and acts on it.
 
+**The close is the later half of it, and the board moves first.** The link exists as soon as
+the pull request is *opened*, so `Pull request linked to issue` puts that item into In Review
+there and then. A stray keyword therefore announces that somebody is reviewing an item nobody
+has started, and it does so long before the close that would eventually explain it.
+
 - **Only your own issue gets a closing keyword.**
 - **To reference another item without closing it, write it as a plain link or as `#21`
   without a keyword** - `see #21` links and closes nothing. The keywords that close are
   `close`, `closes`, `closed`, `fix`, `fixes`, `fixed`, `resolve`, `resolves`, `resolved`.
 - **Naming another item's spec file is always safe** - a path is not an issue reference.
 
-If an item unexpectedly closes, a keyword in a pull request body is the first thing to check.
+If an item unexpectedly moves to In Review or closes, a keyword in a pull request body is the
+first thing to check.
 
 ## Tooling
 
@@ -260,12 +338,12 @@ green over the wrong item's spec. It guards against forgetting, not against evas
 merged *here* while the tracker describes where the workflow is. Divergence exits 0; only a
 spec naming an issue that does not exist fails.
 
-**Know what it cannot check.** Jira carried four workflow states; an issue is open or closed.
-So `backlog` and `in-progress` are indistinguishable from the tracker and are counted and
-skipped rather than guessed between. What is still checked is the pair that actually goes
-wrong: a spec saying `shipped` over an open issue, and a closed issue over a spec saying the
-work never finished. Legacy `RAI-N` specs are exempt - they have no issue and are not expected
-to.
+**Know what it cannot check.** It asks `gh` for `number,title,state,stateReason` and nothing
+else, so the board's Status field never reaches it: `backlog` and `in-progress` are
+indistinguishable from here and are counted and skipped rather than guessed between. What is
+still checked is the pair that actually goes wrong: a spec saying `shipped` over an open issue,
+and a closed issue over a spec saying the work never finished. Legacy `RAI-N` specs are exempt -
+they have no issue and are not expected to.
 
 It is not in CI. It *could* be, `gh` needing no credential of ours, and it is deliberately not:
 it is a report, and a report that fails a build has become a gate.
