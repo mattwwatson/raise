@@ -36,7 +36,16 @@ import { pullRequestKey } from './forge.js';
  * `isDisplayable`, whose condition is the exact complement of the one that
  * would have produced it.
  *
- * @typedef {'blocked'|'review'|'parked'|'failed'|'idle'|'working'} Attention
+ * `untracked` is the one entry here that is **not** an attention level: it is
+ * the absence of evidence for one. A session nothing has ever reported has no
+ * state that can honestly be read - the four worth telling apart (finished, at a
+ * permission prompt, on the sixty-second nudge, and closed an hour ago) all
+ * write byte-identical transcripts - so rather than pick one it says so. Every
+ * row needs a value here, since it drives the sort and the card's class, which
+ * is why the absence has to be spelled rather than left null. It sorts last,
+ * renders faint, and is excluded from the coloured groups on the page.
+ *
+ * @typedef {'blocked'|'review'|'parked'|'failed'|'idle'|'working'|'untracked'} Attention
  */
 
 /**
@@ -46,8 +55,12 @@ import { pullRequestKey } from './forge.js';
  *
  * @typedef {object} Row
  * @property {string} id stable across polls, so the page can diff on it
- * @property {'session'|'run'} kind
- * @property {string|null} sessionId null for a run with no session attached
+ * @property {'session'|'run'|'untracked'} kind `untracked` is a session found on
+ *   disk that no hook has ever reported - it carries where it is and what it was
+ *   about, and deliberately nothing about what it is doing
+ * @property {string|null} sessionId null for a run with no session attached, and
+ *   for an untracked session, which is not in the registry that `/focus`,
+ *   `/dismiss` and `/recent` all read
  * @property {string|null} cwd
  * @property {string} title the repo name, grown into a path only on collision
  * @property {string|null} titlePath the path `title` was derived from, which is
@@ -139,6 +152,7 @@ export const ATTENTION_ORDER = [
   'failed',
   'idle',
   'working',
+  'untracked',
 ];
 
 const ATTENTION_LABELS = {
@@ -148,6 +162,8 @@ const ATTENTION_LABELS = {
   failed: 'Failed',
   idle: 'Idle',
   working: 'Working',
+  // Not what the session is doing - what we know about it, which is nothing.
+  untracked: 'Not tracked',
 };
 
 /** @param {Attention} attention */
@@ -802,6 +818,14 @@ export function attentionFor({
  * `.git` read as `branches`, which is not only a saving: through the link the
  * branch is what picks which of that checkout's runs belongs to this worktree.
  *
+ * `untracked` arrives the same way again: finding a transcript nothing has
+ * reported means walking three directory trees, which is filesystem work. Its
+ * entries are keyed into `summaries`, `branches` and `mainCheckouts` by their
+ * transcript path rather than by a session id - a session id is
+ * `[A-Za-z0-9_-]{1,128}` and a path contains `/`, so the two key spaces cannot
+ * collide, and reusing the maps means the transcript cache, the `.git` cache and
+ * both prunes work on these rows unchanged.
+ *
  * @param {{sessions: Session[], runs: Run[], now?: number,
  *          summaries?: Map<string, import('./transcript.js').TranscriptSummary>,
  *          reviewUrls?: Map<string, string|null>,
@@ -811,6 +835,7 @@ export function attentionFor({
  *          pipelines?: Set<string>,
  *          runOwners?: Map<string, string>,
  *          forgeStates?: Map<string, ForgeReading>,
+ *          untracked?: import('./untracked.js').UntrackedSession[],
  *          spawnedBy?: Map<string, import('./firstmate.js').SpawnedBy|null>}} input
  * @returns {Row[]}
  */
@@ -826,6 +851,7 @@ export function buildRows({
   pipelines = new Set(),
   runOwners = new Map(),
   forgeStates = new Map(),
+  untracked = [],
   spawnedBy = new Map(),
 }) {
   /** @type {Row[]} */
@@ -1180,6 +1206,81 @@ export function buildRows({
     });
   }
 
+  // A session found on disk that nothing has ever reported - almost always one
+  // that was already running when the hooks were installed. Without these the
+  // first page a stranger sees is blank, which reads as a tool that does not
+  // work rather than as a tool waiting to be told about anything.
+  //
+  // It carries where it is, what a human called it, what it was about and when
+  // it last wrote, and **nothing about what it is doing**. There is no honest
+  // answer to that: finished, stopped at a permission prompt, sitting on the
+  // sixty-second nudge and closed an hour ago all write the same transcript, so
+  // a state word here would be a one-in-four guess presented as a fact. Even
+  // `working` is unsafe - a dangling tool call is what a session killed mid-tool
+  // leaves behind for ever, and the pid probe that saves every other row from
+  // that is a thing only a hook reports.
+  //
+  // It claims no run either, in either direction. Ownership comes from walking
+  // the process table up to `host.pid`, which this session by definition has
+  // none of, so attaching a pipeline here would be rank standing in for
+  // evidence - and it would put a parked gate on a card nobody can focus. A run
+  // no session can be shown to own already has a card that says so.
+  for (const session of untracked) {
+    const summary = summaries.get(session.key) || null;
+    rows.push({
+      id: `untracked:${session.key}`,
+      kind: 'untracked',
+      // Nothing in the registry to focus, dismiss or expand, and every one of
+      // those endpoints reads the registry. Null keeps the page's existing
+      // affordance rules right without a single new condition.
+      sessionId: null,
+      cwd: session.cwd,
+      // Its own directory, always: matching a run would be attributing one.
+      title: basename(session.cwd) || 'unknown',
+      titlePath: session.cwd,
+      // Identity rather than state, and the only thing telling two of these
+      // apart on one repo.
+      sessionName: summary?.sessionName || null,
+      branch: branches.get(session.key) || null,
+      attention: 'untracked',
+      attentionLabel: attentionLabel('untracked'),
+      message: null,
+      sessionState: null,
+      sessionStateSince: null,
+      waitingForMs: null,
+      dismissible: false,
+      dismissed: false,
+      focusable: false,
+      // Not `unknown`, which the page renders as "no window". This session
+      // almost certainly has one; we simply have no handle on it, and saying
+      // otherwise would be the confident wrong claim `HOST_LABELS` dropped its
+      // fallback to avoid. No chip at all is the honest answer.
+      hostKind: null,
+      agentKind: session.agent,
+      spawnedBy: null,
+      run: null,
+      updatedAt: session.lastSeenAt,
+      // Past tense and safe. Null for pi and Codex, neither of which writes a
+      // title of any kind, exactly as on their tracked cards.
+      summary: summary?.title || null,
+      pipeline: null,
+      // It *is* attributed - to itself. This is a session, not a run we failed
+      // to place, and the page's unattributable section is not where it goes.
+      attributable: true,
+      candidateSessions: null,
+      // Deliberately absent, both of them: "Running Bash" and "plan" are claims
+      // about right now, and beside "restart this session to track it" they
+      // contradict the row they sit on.
+      activity: null,
+      mode: null,
+      reviewUrl: null,
+      // Honest, and beside the point. Every extra attribute invites this row to
+      // be read as a tracked one, which is the opposite of what it is for.
+      pr: null,
+      lastActivityAt: summary?.lastActivityAt ?? session.lastSeenAt,
+    });
+  }
+
   return sortRows(disambiguateTitles(rows));
 }
 
@@ -1429,17 +1530,27 @@ export function disambiguateTitles(rows) {
 }
 
 /**
+ * Which kinds of row sort above which, whatever state either is in.
+ *
+ * An unattributable run sorts below every session - including when it is parked,
+ * which normally outranks working. The page ranks by who you can go and help,
+ * and that card cannot take you to anyone: it has no window behind it. Letting a
+ * gate nobody can answer sit above a session you could act on inverts the one
+ * thing the ordering is for.
+ *
+ * An untracked session sorts below even that. The unplaceable run may still have
+ * a gate somebody has to answer; an untracked row is, by construction, waiting
+ * on nothing we can name.
+ */
+const KIND_ORDER = { session: 0, run: 1, untracked: 2 };
+
+/**
  * @param {Row[]} rows
  * @returns {Row[]}
  */
 export function sortRows(rows) {
   return [...rows].sort((a, b) => {
-    // An unattributable run sorts below every session, whatever either of them
-    // is doing - including parked, which normally outranks working. The page
-    // ranks by who needs a human, and this card cannot take you to one: it has
-    // no window behind it. Letting a gate nobody can answer sit above a session
-    // you could act on inverts the one thing the ordering is for.
-    const byKind = (a.kind === 'run' ? 1 : 0) - (b.kind === 'run' ? 1 : 0);
+    const byKind = (KIND_ORDER[a.kind] ?? 0) - (KIND_ORDER[b.kind] ?? 0);
     if (byKind !== 0) return byKind;
     const byAttention =
       ATTENTION_ORDER.indexOf(a.attention) - ATTENTION_ORDER.indexOf(b.attention);

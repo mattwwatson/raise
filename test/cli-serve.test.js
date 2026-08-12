@@ -24,9 +24,27 @@ import { createMonitorServer } from '../src/server.js';
 const execFileAsync = promisify(execFile);
 const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'raise.js');
 
+/**
+ * The three agents' homes, which the scan for untracked sessions reads. Pointed
+ * at the scratch directory and restored with it, so no test here walks whatever
+ * transcripts the machine running the suite happens to have on disk.
+ */
+const AGENT_HOMES = ['CLAUDE_CONFIG_DIR', 'PI_CODING_AGENT_DIR', 'CODEX_HOME'];
+
 function scratch() {
   const dir = mkdtempSync(join(tmpdir(), 'raise-test-'));
-  return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  const previous = AGENT_HOMES.map((name) => [name, process.env[name]]);
+  for (const name of AGENT_HOMES) process.env[name] = dir;
+  return {
+    dir,
+    cleanup: () => {
+      for (const [name, value] of previous) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+      rmSync(dir, { recursive: true, force: true });
+    },
+  };
 }
 
 function freePort() {
@@ -46,6 +64,9 @@ function freePort() {
  */
 async function cli(args, home, extraEnv = {}) {
   const env = { ...process.env, RAISE_HOME: home, NM_HOME: home };
+  // The spawned CLI gets the same isolation the in-process tests get: `raise
+  // status` scans these three for sessions nothing has reported.
+  for (const name of AGENT_HOMES) env[name] = home;
   delete env.RAISE_PORT;
   Object.assign(env, extraEnv);
   try {

@@ -10,6 +10,7 @@ import {
   isSafeSessionId,
   isTerminalEvent,
 } from '../src/registry.js';
+import { UNTRACKED_WINDOW_MS } from '../src/untracked.js';
 
 function scratch() {
   const dir = mkdtempSync(join(tmpdir(), 'raise-test-'));
@@ -17,6 +18,12 @@ function scratch() {
 }
 
 const alwaysAlive = () => true;
+
+/**
+ * The session records in the registry directory - what `list` itself reads, so
+ * the tombstones of ended sessions beside them are correctly not counted.
+ */
+const records = (dir) => readdirSync(dir).filter((name) => name.endsWith('.json'));
 
 test('hook events map to the right session state', () => {
   assert.equal(stateForEvent('SessionStart'), 'idle');
@@ -101,7 +108,7 @@ test('a path traversal session id is rejected rather than written', () => {
       () => registry.record({ session_id: '../escape', hook_event_name: 'SessionStart' }),
       /invalid session id/,
     );
-    assert.deepEqual(readdirSync(dir), []);
+    assert.deepEqual(records(dir), []);
   } finally {
     cleanup();
   }
@@ -443,7 +450,7 @@ test('a pidless record is dropped once it is weeks stale, not while it is merely
 
     const list = registry.list({ isAlive: alwaysAlive, now: 1000 + 30 * day });
     assert.deepEqual(list, []);
-    assert.deepEqual(readdirSync(dir), [], 'the files should be cleaned up, not just hidden');
+    assert.deepEqual(records(dir), [], 'the files should be cleaned up, not just hidden');
   } finally {
     cleanup();
   }
@@ -528,6 +535,111 @@ test('a Codex permission prompt is stored as a block with no reason to give', ()
     assert.equal(record.message, null);
     assert.equal(record.notificationType, null);
     assert.equal(record.blockAnnouncedAt, 5000);
+  } finally {
+    cleanup();
+  }
+});
+
+test('a session we watched end is not a session nothing ever reported', () => {
+  /*
+   * The untracked scan offers back any recent transcript no live record
+   * accounts for, and a closed session's transcript stays recent for hours. Left
+   * alone, closing a window put a card on the page reading "never reported -
+   * restart the session", about a session Raise had watched from start to
+   * finish and that the user had deliberately closed. That is not a state we
+   * failed to know; it is one we knew and then contradicted.
+   */
+  const { dir, cleanup } = scratch();
+  try {
+    const registry = new SessionRegistry({ dir });
+    registry.record(
+      {
+        session_id: 's1',
+        hook_event_name: 'SessionStart',
+        transcript_path: '/t/s1.jsonl',
+        host: { pid: 111 },
+      },
+      1000,
+    );
+    registry.record({ session_id: 's1', hook_event_name: 'SessionEnd' }, 2000);
+
+    assert.equal(registry.get('s1'), null, 'the record itself is gone, as it always was');
+    assert.deepEqual(registry.list({ isAlive: alwaysAlive }), [], 'and it is not a session');
+    assert.ok(
+      registry.reportedPaths([], { now: 2000 }).has('/t/s1.jsonl'),
+      'but the scan is told not to offer its transcript',
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('a session pruned for a dead pid is remembered the same way', () => {
+  // The other way a record disappears. A killed window never sends SessionEnd,
+  // so it is `list` that drops it - and it would come straight back as an
+  // unreported session if only the polite exit were covered.
+  const { dir, cleanup } = scratch();
+  try {
+    const registry = new SessionRegistry({ dir });
+    registry.record({
+      session_id: 'killed',
+      hook_event_name: 'SessionStart',
+      transcript_path: '/t/killed.jsonl',
+      host: { pid: 222 },
+    });
+
+    assert.deepEqual(registry.list({ isAlive: () => false }), []);
+    assert.ok(registry.reportedPaths([]).has('/t/killed.jsonl'));
+  } finally {
+    cleanup();
+  }
+});
+
+test('the memory of an ended session lasts exactly as long as the scan could resurface it', () => {
+  // One number, not two: a transcript older than the scan's own window is not
+  // offered as a session anyway, so remembering it further would be a directory
+  // that only grows.
+  const { dir, cleanup } = scratch();
+  try {
+    const registry = new SessionRegistry({ dir });
+    registry.record(
+      {
+        session_id: 's1',
+        hook_event_name: 'SessionStart',
+        transcript_path: '/t/s1.jsonl',
+        host: { pid: 111 },
+      },
+      1000,
+    );
+    registry.record({ session_id: 's1', hook_event_name: 'SessionEnd' }, 1000);
+
+    assert.ok(registry.reportedPaths([], { now: 1000 + UNTRACKED_WINDOW_MS }).has('/t/s1.jsonl'));
+    const expired = registry.reportedPaths([], { now: 1000 + UNTRACKED_WINDOW_MS + 1 });
+    assert.equal(expired.has('/t/s1.jsonl'), false, 'and then it is forgotten');
+    assert.deepEqual(
+      registry.reportedPaths([], { now: 1000 + UNTRACKED_WINDOW_MS + 1 }),
+      new Set(),
+      'the entry is deleted rather than merely ignored, so nothing accumulates',
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('the live sessions are in the set too, so one call answers the whole question', () => {
+  // Both renderers hand this straight to the scan. Assembling it at each caller
+  // is how the page and the CLI end up disagreeing about the same session.
+  const { dir, cleanup } = scratch();
+  try {
+    const registry = new SessionRegistry({ dir });
+    registry.record({
+      session_id: 'live',
+      hook_event_name: 'SessionStart',
+      transcript_path: '/t/live.jsonl',
+      host: { pid: 111 },
+    });
+    const sessions = registry.list({ isAlive: alwaysAlive });
+    assert.deepEqual(registry.reportedPaths(sessions), new Set(['/t/live.jsonl']));
   } finally {
     cleanup();
   }

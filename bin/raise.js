@@ -6,8 +6,7 @@
  * or to explain why you are not there yet.
  */
 
-import { homedir } from 'node:os';
-import { join, dirname, resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
@@ -33,6 +32,7 @@ import { ForgeState } from '../src/forge.js';
 import { readForgeConfig } from '../src/forge-config.js';
 import { PollWatch } from '../src/poll-watch.js';
 import { FirstmateWatch } from '../src/firstmate.js';
+import { UntrackedScan } from '../src/untracked.js';
 import { focusSession } from '../src/focus/index.js';
 import { ALL_TERMINALS } from '../src/focus/terminals.js';
 import { exec, execAsync, tryExec, tryExecAsync } from '../src/exec.js';
@@ -47,6 +47,7 @@ import {
   ensureDirs,
   piSettingsPath,
   codexHooksPath,
+  claudeSettingsPath,
   forgeConfigPath,
 } from '../src/config.js';
 import { buildRows } from '../src/dashboard.js';
@@ -57,7 +58,9 @@ import { probeHealth } from '../src/health.js';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HOOK_SCRIPT = resolve(HERE, '..', 'hooks', 'raise-hook.js');
 const PI_EXTENSION = resolve(HERE, '..', 'hooks', 'raise-pi-extension.js');
-const DEFAULT_SETTINGS = join(homedir(), '.claude', 'settings.json');
+// Through `config.js` so `CLAUDE_CONFIG_DIR` is honoured here as well as by the
+// scan for untracked sessions - one answer to where Claude Code's home is.
+const DEFAULT_SETTINGS = claudeSettingsPath();
 
 const bold = (s) => `[1m${s}[0m`;
 const dim = (s) => `[2m${s}[0m`;
@@ -77,6 +80,17 @@ const SOURCE_LABELS = {
   cli: 'per-repo fallback',
   absent: 'agent sessions only - no-mistakes is not installed',
 };
+
+/**
+ * Why an untracked row says nothing about what its session is doing, and what
+ * to do about it. Named rather than written inline because the page holds the
+ * same sentence under the same name (`UNTRACKED_REASON` in `public/index.html`)
+ * and the two must stay byte-identical: the page and the CLI are one protocol,
+ * and a row explained on one and bare on the other is the two renderers
+ * disagreeing about the same session.
+ */
+const UNTRACKED_REASON =
+  'Found on disk, never reported - restart the session and Raise will follow it';
 
 /**
  * How each `doctor` check state is marked. Padded to a common width so the
@@ -323,7 +337,7 @@ async function cmdStatus() {
   const spawnedBy = new Map(sessions.map((s) => [s.sessionId, firstmate.spawnedBy(s)]));
   const summaries = new Map(
     sessions.map((s) => {
-      const read = transcripts.read(s.transcriptPath, branches.get(s.sessionId));
+      const read = transcripts.read(s.transcriptPath, branches.get(s.sessionId), s.agent);
       const polledFile = polls.fileFor(s.host?.pid, agentPids);
       return [s.sessionId, polledFile ? { ...read, lavishFile: polledFile } : read];
     }),
@@ -356,6 +370,21 @@ async function cmdStatus() {
     }
   }
 
+  // Sessions nothing has reported. One shot, so the walk happens inline rather
+  // than on an interval - it measured 9ms across 1,396 transcripts. The set of
+  // transcripts it must not offer comes from the registry rather than being
+  // assembled here, so this renderer and the page cannot come to disagree about
+  // which of them belongs to a session that has already ended.
+  const untracked = new UntrackedScan().list({
+    registeredPaths: registry.reportedPaths(sessions),
+  });
+  for (const found of untracked) {
+    const { branch, mainCheckout } = gitBranches.checkoutFor(found.cwd);
+    branches.set(found.key, branch);
+    mainCheckouts.set(found.key, mainCheckout);
+    summaries.set(found.key, transcripts.read(found.transcriptPath, branch, found.agent));
+  }
+
   // Reuse the dashboard projection so the CLI and the page can never disagree.
   const projection = {
     sessions,
@@ -367,6 +396,7 @@ async function cmdStatus() {
     pullRequests,
     pipelines,
     runOwners: runOwners.owners,
+    untracked,
     spawnedBy,
   };
   let rows = buildRows(projection);
@@ -430,6 +460,14 @@ async function cmdStatus() {
     // the session about vanished off the row. They are concurrent, and the
     // pipeline has a line of its own below.
     if (row.summary) console.log(`  ${dim(row.summary)}`);
+    // Why this row says nothing about what the session is doing, and what to do
+    // about it. Said here in the same words as the page, for the same reason
+    // every other explanation is: the two renderers are one protocol, and a row
+    // that reads as bare on one and explained on the other is the page and the
+    // CLI disagreeing about the same session.
+    if (row.kind === 'untracked') {
+      console.log(`  ${dim(UNTRACKED_REASON)}`);
+    }
     // Why an unplaceable run is here at all, in the same words as the page.
     if (row.attributable === false) {
       const guess = row.candidateSessions

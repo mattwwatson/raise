@@ -21,6 +21,7 @@ import { ForgeState } from './forge.js';
 import { watchForgeConfig } from './forge-config.js';
 import { PollWatch } from './poll-watch.js';
 import { FirstmateWatch } from './firstmate.js';
+import { UntrackedScan } from './untracked.js';
 import { buildRows, isDismissibleBlock, summarise } from './dashboard.js';
 import { RunOwners } from './run-owner.js';
 import { focusSession } from './focus/index.js';
@@ -103,6 +104,9 @@ export function createMonitorServer({
   keepaliveMs = KEEPALIVE_MS,
   transcriptFiles = defaultFileAccess,
   gitFiles = defaultGitAccess,
+  // Injected whole rather than as a file access object, because the suite needs
+  // to point it at fixture roots as often as it needs to stub the reads.
+  untrackedScan = new UntrackedScan(),
 } = {}) {
   const registry = new SessionRegistry({ dir: sessionsPath });
   const nmState = new NoMistakesState({ dbPath, exec, execAsync });
@@ -206,8 +210,36 @@ export function createMonitorServer({
         reviewUrls.set(session.sessionId, lavish.urlFor(summary.lavishFile));
       }
     }
-    transcripts.prune(new Set(sessions.map((s) => s.transcriptPath).filter(Boolean)));
-    branches.prune(new Set(candidateDirs));
+
+    // Sessions nothing has ever reported, so the first page a stranger sees is
+    // not blank. Deduped against the registry on every tick rather than at scan
+    // time, so a session that restarts loses its untracked row on the next poll
+    // - and against the sessions we watched end, which are not unreported and
+    // have nothing to restart.
+    //
+    // They ride the same three maps as a registered session, keyed by transcript
+    // path instead of session id, which is what lets the `.git` cache, the
+    // transcript cache and both prunes serve them with no second mechanism.
+    // Deliberately *not* added to `candidateDirs`: that list is what the degraded
+    // `axi status` path spawns a process per entry for, and these rows carry no
+    // run at all.
+    const untracked = untrackedScan.list({
+      registeredPaths: registry.reportedPaths(sessions),
+    });
+    for (const found of untracked) {
+      const { branch, mainCheckout } = branches.checkoutFor(found.cwd);
+      sessionBranches.set(found.key, branch);
+      mainCheckouts.set(found.key, mainCheckout);
+      summaries.set(found.key, transcripts.read(found.transcriptPath, branch, found.agent));
+    }
+
+    transcripts.prune(
+      new Set([
+        ...sessions.map((s) => s.transcriptPath).filter(Boolean),
+        ...untracked.map((u) => u.transcriptPath),
+      ]),
+    );
+    branches.prune(new Set([...candidateDirs, ...untracked.map((u) => u.cwd)]));
     firstmate.prune(new Set(candidateDirs));
     // An empty reading is not evidence that every run ended - it is what the
     // degraded `axi status` path returns from its cache before the first
@@ -230,6 +262,7 @@ export function createMonitorServer({
       pipelines,
       runOwners: runOwners.owners,
       forgeStates: forge.readings,
+      untracked,
       spawnedBy,
     });
     // Asking is what schedules the next answer, the same arrangement `lavish.js`

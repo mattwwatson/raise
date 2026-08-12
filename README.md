@@ -51,8 +51,9 @@ gave the session, if you gave it one.
 
 ## Every row says what it is about
 
-"Working" across four repos tells you nothing about which one to look at. Every row shows
-Claude's own name for the session and the tool it is running this second - and when
+"Working" across four repos tells you nothing about which one to look at. Every row a session
+has reported shows Claude's own name for the session and the tool it is running this second -
+the quiet rows for [sessions that never reported](#install) are the one exception - and when
 no-mistakes is driving, what the pipeline is doing gets a line of its own beneath, because the
 two are happening at once:
 
@@ -213,15 +214,23 @@ raise serve
 
 `install-hooks` merges six hook entries into `~/.claude/settings.json`. It shows you exactly
 what it will change and asks before writing, keeps a `.raise-backup` copy, leaves any hooks
-you already have alone, and is safe to run twice. Undo it with `raise uninstall-hooks`.
+you already have alone, and is safe to run twice. Undo it with `raise uninstall-hooks`. Set
+`CLAUDE_CONFIG_DIR` and both that file and the transcripts Raise reads follow it, as Claude
+Code itself does.
 
 When a later version of Raise adds an event to that set, `serve` and `doctor` name the ones
 you are missing rather than calling the hooks uninstalled - what you already have keeps
 working, and the new event only makes the signal arrive sooner. Re-run `install-hooks` when it
 suits you, and restart your sessions then.
 
-**Restart your existing Claude sessions afterwards.** Hooks are read when a session starts, so
+**Restart your existing sessions afterwards.** Hooks are read when a session starts, so
 sessions already open will not report themselves until you restart them.
+
+Until you do, they still appear, under **Not reporting to Raise** - Raise finds any transcript
+written in the last couple of hours that no session has claimed, and shows where it is, what
+it was about and when it last wrote. Those rows are deliberately quiet: no state, no colour and
+no `Focus ↗`, because a session that has never reported has no window we can raise and no
+status we can honestly read. Restart it and it becomes an ordinary row.
 
 Then open the URL `raise serve` prints and leave the tab pinned. Click "Enable alerts" once if
 you want desktop notifications when something starts waiting on you.
@@ -371,7 +380,8 @@ stopped answering.
 
 Any row that can be focused is a button, says `Focus ↗` on the right, and raises that window
 when you click it. Rows without a live agent session behind them - a pipeline running with
-no session attached - are plain and do nothing.
+no session attached, or a session found on disk that has never reported one - are plain and do
+nothing.
 
 The chip beside a row says where the session lives - `tmux`, `tab`, `desktop` - and a session
 whose window Raise could not place says `no window` rather than guessing at one. Focusing is
@@ -483,6 +493,12 @@ from a local file by a local server and rendered in your own browser - it is not
 event stream, not in the hook payload, and not sent anywhere. The token guards that route
 like every other one, which is exactly why localhost alone is not treated as a boundary.
 
+Finding the sessions that predate the hooks means listing your agents' own session
+directories - `~/.claude/projects`, `~/.pi/agent/sessions` and `~/.codex/sessions` - and
+reading enough of a recent transcript to learn which directory it was working in. That is the
+same kind of local read as everything above, on the same machine, and none of it goes further
+than the page in your browser.
+
 **One optional feature sends anything at all, and it is off until you configure it.** Raise
 can ask GitHub or Bitbucket whether a pull request already on your dashboard is still open -
 once a no-mistakes run ends nothing is watching it, so a stored "open" can be days old. What
@@ -557,7 +573,14 @@ only ever make a badge more current than it would have been without it, never le
 ## Troubleshooting
 
 **Nothing appears.** Run `raise doctor`. The usual cause is hooks installed but sessions not
-restarted.
+restarted - in which case your sessions are on the page already, under **Not reporting to
+Raise**, and restarting each one turns it into an ordinary row.
+
+**A row says "Not tracked" and does nothing.** That is the above: nothing has ever reported
+that session, so all Raise has is a transcript it found on disk. It cannot say whether the
+session is working, finished or stopped at a prompt - a session in all three states writes the
+same file - and it has no window identity to focus, so it offers no button rather than one that
+would not work. Restart the session.
 
 **A session shows but is not clickable.** It started before the hooks were installed, so it
 never reported a window identity. Restart it. A Claude Desktop session that predates this

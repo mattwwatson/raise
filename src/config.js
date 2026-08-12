@@ -21,6 +21,31 @@ export function noMistakesHome() {
 }
 
 /**
+ * Where Claude Code keeps its config, its settings file and its transcripts.
+ *
+ * `CLAUDE_CONFIG_DIR` is Claude Code's own variable, exactly as
+ * `PI_CODING_AGENT_DIR` is pi's and `CODEX_HOME` is Codex's, so following it is
+ * correct behaviour rather than a hook for the tests.
+ */
+export function claudeHome() {
+  return process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
+}
+
+export function claudeSettingsPath() {
+  return join(claudeHome(), 'settings.json');
+}
+
+/**
+ * Where Claude Code writes a transcript per session, one directory per project.
+ *
+ * Read only by the scan for sessions that predate the hooks - everything else
+ * gets a transcript path handed to it by the agent itself.
+ */
+export function claudeProjectsDir() {
+  return join(claudeHome(), 'projects');
+}
+
+/**
  * Where pi keeps its config, which is where its extension list lives.
  *
  * `PI_CODING_AGENT_DIR` is pi's own variable rather than one of ours, so
@@ -33,6 +58,11 @@ export function piHome() {
 
 export function piSettingsPath() {
   return join(piHome(), 'settings.json');
+}
+
+/** Where pi writes a transcript per session, one directory per project. */
+export function piSessionsDir() {
+  return join(piHome(), 'sessions');
 }
 
 /**
@@ -53,6 +83,16 @@ export function codexHome() {
  */
 export function codexHooksPath() {
   return join(codexHome(), 'hooks.json');
+}
+
+/**
+ * Where Codex writes a rollout per session, partitioned by date.
+ *
+ * `YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl`, which is three levels deep rather
+ * than the one the other two agents use - see `UNTRACKED_ROOTS`.
+ */
+export function codexSessionsDir() {
+  return join(codexHome(), 'sessions');
 }
 
 export function statePath() {

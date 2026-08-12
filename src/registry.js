@@ -34,6 +34,9 @@ import {
   renameSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+
+import { UNTRACKED_WINDOW_MS } from './untracked.js';
 
 /**
  * The window identity a hook captures at session start - everything needed to
@@ -246,12 +249,25 @@ export function isSafeSessionId(id) {
 /** How long a record with no pid to probe may sit untouched before it is junk. */
 const MAX_UNVERIFIABLE_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 
+/**
+ * Where the transcript of a session we watched end is remembered.
+ *
+ * A subdirectory rather than a second home, so one `RAISE_HOME` still holds
+ * everything and `list` skips it for free - it reads only `.json` names out of
+ * the directory above.
+ */
+const ENDED_DIR = 'ended';
+
 export class SessionRegistry {
   #dir;
 
+  #endedDir;
+
   constructor({ dir }) {
     this.#dir = dir;
+    this.#endedDir = join(dir, ENDED_DIR);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
+    mkdirSync(this.#endedDir, { recursive: true, mode: 0o700 });
   }
 
   /**
@@ -280,7 +296,7 @@ export class SessionRegistry {
       DECLARED_AGENTS.has(/** @type {string} */ (payload.agent)) ? payload.agent : 'claude'
     );
     if (isTerminalEvent(event, agent)) {
-      this.remove(sessionId);
+      this.remove(sessionId, now);
       return null;
     }
 
@@ -398,7 +414,7 @@ export class SessionRegistry {
       const pid = record.host?.pid;
       if (pid) {
         if (!isAlive(pid)) {
-          this.remove(sessionId);
+          this.remove(sessionId, now);
           continue;
         }
       } else if (now - (record.updatedAt || 0) > MAX_UNVERIFIABLE_AGE_MS) {
@@ -406,7 +422,7 @@ export class SessionRegistry {
         // is nothing to probe and the same crash leaves the record forever.
         // Fall back to age, generously: a session idle over a long weekend is
         // still a session, so only weeks of silence count as gone.
-        this.remove(sessionId);
+        this.remove(sessionId, now);
         continue;
       }
       records.push(record);
@@ -414,9 +430,31 @@ export class SessionRegistry {
     return records.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   }
 
-  /** @param {string} sessionId */
-  remove(sessionId) {
+  /**
+   * Forget a session, and remember that we watched it go.
+   *
+   * The record is the only evidence a session exists, so dropping it is right -
+   * but the transcript it was writing outlives it by hours, and the untracked
+   * scan would then offer that file back as a session *nothing has ever
+   * reported*. It was reported, by us, until the moment it ended. The honesty
+   * rule this whole page is built on cuts both ways: it forbids asserting what
+   * we cannot know, and it equally forbids contradicting what we do.
+   *
+   * So the transcript path is kept as a tombstone, and for exactly as long as
+   * the scan could otherwise resurface it. This is the one place both removal
+   * paths meet - a terminal event in `record`, a dead pid in `list` - which is
+   * why it belongs here rather than at either call site.
+   *
+   * @param {string} sessionId
+   * @param {number} [now]
+   */
+  remove(sessionId, now = Date.now()) {
     if (!isSafeSessionId(sessionId)) return;
+    // Read before unlinking: the record is the only thing that knows which
+    // transcript this session was writing. One with none tombstones nothing,
+    // because there is no path for the scan to offer back.
+    const transcriptPath = this.get(sessionId)?.transcriptPath;
+    if (transcriptPath) this.#tombstone(transcriptPath, now);
     try {
       unlinkSync(this.#path(sessionId));
     } catch {
@@ -424,8 +462,84 @@ export class SessionRegistry {
     }
   }
 
+  /**
+   * Every transcript the untracked scan must not offer as an unreported
+   * session: the live ones, and the ones we watched end.
+   *
+   * One method rather than each caller unioning the two lists, so the page and
+   * the CLI cannot come to disagree about which sessions are ghosts - they are
+   * one protocol, and this is exactly the kind of rule that drifts when it is
+   * written twice.
+   *
+   * Expired tombstones are deleted as they are read. Retention is the scan's
+   * own window, so nothing accumulates past the point where it could have made
+   * a difference.
+   *
+   * @param {Session[]} sessions the live records, already listed by the caller
+   * @param {object} [options]
+   * @param {number} [options.now]
+   * @returns {Set<string>}
+   */
+  reportedPaths(sessions, { now = Date.now() } = {}) {
+    /** @type {Set<string>} */
+    const paths = new Set();
+    for (const session of sessions) {
+      if (session.transcriptPath) paths.add(session.transcriptPath);
+    }
+    let names;
+    try {
+      names = readdirSync(this.#endedDir);
+    } catch {
+      return paths;
+    }
+    for (const name of names) {
+      if (!name.endsWith('.json')) continue;
+      const file = join(this.#endedDir, name);
+      /** @type {{transcriptPath?: string, endedAt?: number}|null} */
+      let tombstone = null;
+      try {
+        tombstone = JSON.parse(readFileSync(file, 'utf8'));
+      } catch {
+        // Junk, and dropped below with the expired. A tombstone is written by
+        // rename, so a file that will not parse is not one that is about to.
+      }
+      if (!tombstone?.transcriptPath || now - (tombstone.endedAt || 0) > UNTRACKED_WINDOW_MS) {
+        try {
+          unlinkSync(file);
+        } catch {
+          // Another process got there first.
+        }
+        continue;
+      }
+      paths.add(tombstone.transcriptPath);
+    }
+    return paths;
+  }
+
   #path(sessionId) {
     return join(this.#dir, `${sessionId}.json`);
+  }
+
+  /**
+   * One file per transcript, never one list of them. `raise status` builds its
+   * own registry and its `list` prunes dead sessions too, so two processes end
+   * sessions concurrently - and a read-modify-write over a shared list loses
+   * whichever entry lost the race, which is the ghost this exists to prevent.
+   * The name is a digest of the path so it is a fixed length whatever the
+   * worktree is called; the path itself is in the file.
+   */
+  #tombstone(transcriptPath, now) {
+    const name = createHash('sha256').update(transcriptPath).digest('hex').slice(0, 32);
+    const target = join(this.#endedDir, `${name}.json`);
+    const temp = `${target}.tmp`;
+    try {
+      writeFileSync(temp, JSON.stringify({ transcriptPath, endedAt: now }), { mode: 0o600 });
+      renameSync(temp, target);
+    } catch {
+      // A registry directory that has gone away under us. Losing a tombstone
+      // costs a grey row that should not be there; it may never cost an error
+      // on the path that reports a session ending.
+    }
   }
 
   #write(sessionId, record) {

@@ -2506,3 +2506,128 @@ test('a Codex block is disproved by its own transcript, the only thing that can'
   });
   assert.equal(row.attention, 'working');
 });
+
+/*
+ * Sessions that were already running when the hooks went in - RAI-4.
+ *
+ * A stranger installs Raise, runs `install-hooks`, opens the dashboard and sees
+ * an empty page, because every session they have open predates the hooks and so
+ * has never fired `SessionStart`. These rows are what stops that, and every
+ * assertion below is about what such a row is *not* allowed to claim.
+ */
+
+const untracked = (over = {}) => ({
+  key: '/home/.claude/projects/-a-repo/s9.jsonl',
+  transcriptPath: '/home/.claude/projects/-a-repo/s9.jsonl',
+  agent: 'claude',
+  cwd: '/Users/x/work/repo',
+  lastSeenAt: 900,
+  ...over,
+});
+
+test('a session nothing has reported still gets a row, and it says nothing about state', () => {
+  // The four states worth telling apart - finished, at a permission prompt, on
+  // the sixty-second nudge, and closed an hour ago - write byte-identical
+  // transcripts, so any state word here would be a one-in-four guess presented
+  // as a fact. See test/untracked.test.js for the measurement.
+  const [row] = buildRows({ sessions: [], runs: [], untracked: [untracked()] });
+  assert.equal(row.kind, 'untracked');
+  assert.equal(row.attention, 'untracked');
+  assert.equal(row.attentionLabel, 'Not tracked');
+  assert.equal(row.sessionState, null);
+  assert.equal(row.message, null);
+  assert.equal(row.waitingForMs, null);
+  // `activity` and `mode` are claims about right now, and beside "restart this
+  // session to track it" they contradict the row they sit on.
+  assert.equal(row.activity, null);
+  assert.equal(row.mode, null);
+});
+
+test('an untracked row offers no control, because there is nothing behind it to act on', () => {
+  // Affordance must match capability. `/focus`, `/dismiss` and `/recent` all
+  // read the registry, and this session is not in it - so `sessionId` is null
+  // and the page renders no button and no expander with no new condition.
+  const [row] = buildRows({ sessions: [], runs: [], untracked: [untracked()] });
+  assert.equal(row.sessionId, null);
+  assert.equal(row.focusable, false);
+  assert.equal(row.dismissible, false);
+  assert.equal(row.dismissed, false);
+  // Not `unknown`, which the page renders as "no window": this session almost
+  // certainly has one, we simply cannot name it.
+  assert.equal(row.hostKind, null);
+});
+
+test('an untracked row still says where it is and what it was about', () => {
+  // Presence and identity are the whole content. The title is past tense and
+  // safe; the name is what a human called it, which is the only thing telling
+  // two of these apart on one repo.
+  const [row] = buildRows({
+    sessions: [],
+    runs: [],
+    untracked: [untracked()],
+    branches: new Map([['/home/.claude/projects/-a-repo/s9.jsonl', 'feat/thing']]),
+    summaries: new Map([
+      [
+        '/home/.claude/projects/-a-repo/s9.jsonl',
+        { title: 'wiring the exporter', sessionName: 'exporter', lastActivityAt: 950, activity: 'Running npm' },
+      ],
+    ]),
+  });
+  assert.equal(row.title, 'repo');
+  assert.equal(row.titlePath, '/Users/x/work/repo');
+  assert.equal(row.branch, 'feat/thing');
+  assert.equal(row.summary, 'wiring the exporter');
+  assert.equal(row.sessionName, 'exporter');
+  assert.equal(row.lastActivityAt, 950);
+  assert.equal(row.activity, null, 'the summary is history; the activity would be a claim');
+});
+
+test('an untracked row names its agent, so a pi or Codex card is still marked', () => {
+  const [row] = buildRows({ sessions: [], runs: [], untracked: [untracked({ agent: 'codex' })] });
+  assert.equal(row.agentKind, 'codex');
+});
+
+test('an untracked session claims no run, so the run still says it cannot be placed', () => {
+  // Ownership is decided by walking the process table up to `host.pid`, which
+  // an untracked session has none of. Attaching a pipeline here would be rank
+  // standing in for evidence, and it would put a parked gate on a card nobody
+  // can focus.
+  const rows = buildRows({
+    sessions: [],
+    runs: [run({ parked: true })],
+    untracked: [untracked()],
+  });
+  const untrackedRow = rows.find((r) => r.kind === 'untracked');
+  const runRow = rows.find((r) => r.kind === 'run');
+  assert.equal(untrackedRow.run, null);
+  assert.equal(untrackedRow.pipeline, null);
+  assert.equal(untrackedRow.pr, null);
+  assert.equal(runRow.attributable, false, 'the run keeps the card that admits what it is');
+  assert.equal(runRow.candidateSessions, 0, 'and counts live sessions, which this is not');
+});
+
+test('an untracked row sorts below every session and below an unplaceable run', () => {
+  // The page ranks by who you can go and help. An unplaceable run may still
+  // have a gate somebody has to answer; an untracked row is waiting on nothing
+  // we can name, so it goes last of all.
+  const rows = buildRows({
+    sessions: [session({ sessionId: 'idle-one', state: 'idle', cwd: '/Users/x/work/other' })],
+    branches: new Map([['idle-one', 'main']]),
+    runs: [run({ parked: true, repoPath: '/Users/x/work/elsewhere', repoName: 'elsewhere' })],
+    untracked: [untracked()],
+  });
+  assert.deepEqual(rows.map((r) => r.kind), ['session', 'run', 'untracked']);
+});
+
+test('an untracked row is disambiguated against a tracked one on the same name', () => {
+  // A worktree and its checkout are both "repo", and the usual mechanism has to
+  // work across the two kinds or the first run is a guessing game about which
+  // card is which.
+  const rows = buildRows({
+    sessions: [session({ sessionId: 's1', cwd: '/Users/x/work/repo' })],
+    branches: new Map([['s1', 'main']]),
+    runs: [],
+    untracked: [untracked({ cwd: '/Users/x/trees/1/repo' })],
+  });
+  assert.deepEqual(rows.map((r) => r.title).sort(), ['1/repo', 'work/repo']);
+});

@@ -11,9 +11,31 @@ import { probeHealth } from '../src/health.js';
 
 const nextTick = () => new Promise((resolve) => setImmediate(resolve));
 
+/**
+ * The three agents' homes, which the scan for untracked sessions reads.
+ *
+ * Pointed at the scratch directory by `scratch()` below, and restored with it.
+ * Without that the suite walks whatever transcripts the machine running it
+ * happens to have on disk, so `/state` carries a row per session the developer
+ * had open - which is both a test that touches the real machine and one whose
+ * result changes between two runs a minute apart.
+ */
+const AGENT_HOMES = ['CLAUDE_CONFIG_DIR', 'PI_CODING_AGENT_DIR', 'CODEX_HOME'];
+
 function scratch() {
   const dir = mkdtempSync(join(tmpdir(), 'raise-test-'));
-  return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  const previous = AGENT_HOMES.map((name) => [name, process.env[name]]);
+  for (const name of AGENT_HOMES) process.env[name] = dir;
+  return {
+    dir,
+    cleanup: () => {
+      for (const [name, value] of previous) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+      rmSync(dir, { recursive: true, force: true });
+    },
+  };
 }
 
 /** Ask the OS for a port nobody is using, then hand it straight back. */
@@ -1313,6 +1335,167 @@ test('with it on, the forge settles a pull request nothing else was watching', a
     assert.equal(row.pr.current, true, 'and now it may be said as the state now');
   } finally {
     await monitor?.stop();
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
+    cleanup();
+  }
+});
+
+test('a session that predates the hooks is on the page, and a restart replaces it', async () => {
+  // RAI-4, end to end. The failure this prevents is the first four seconds of
+  // somebody else's experience: install, `install-hooks`, open the page, and see
+  // nothing at all, because every session they have open predates the hooks.
+  const { dir, cleanup } = scratch();
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = dir;
+  try {
+    // A Claude Code transcript where one has actually been written, since the
+    // scan reads the three agents' homes and `scratch()` has pointed all three
+    // here. The `cwd` is on the conversation records, which is where Claude Code
+    // really puts it.
+    const transcript = join(dir, 'projects', '-a-repo', 'older.jsonl');
+    mkdirSync(join(dir, 'projects', '-a-repo'), { recursive: true });
+    writeFileSync(
+      transcript,
+      [
+        JSON.stringify({ type: 'ai-title', aiTitle: 'tidying the exporter' }),
+        JSON.stringify({
+          type: 'assistant',
+          cwd: dir,
+          timestamp: new Date().toISOString(),
+          message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] },
+        }),
+      ].join('\n'),
+    );
+
+    const port = await freePort();
+    const monitor = createMonitorServer({
+      port,
+      token: 'test-token',
+      dbPath: join(dir, 'no-such.sqlite'),
+      sessionsPath: join(dir, 'sessions'),
+      exec: () => assert.fail('no blocking commands from the server'),
+      fetch: () => assert.fail('no outbound requests from the server'),
+      execAsync: async () => '',
+    });
+    await monitor.start();
+    const state = () => fetch(`http://127.0.0.1:${port}/state?t=test-token`).then((r) => r.json());
+
+    const before = await state();
+    assert.equal(before.rows.length, 1, 'the page is populated rather than empty');
+    const [row] = before.rows;
+    assert.equal(row.kind, 'untracked');
+    assert.equal(row.attention, 'untracked');
+    assert.equal(row.focusable, false, 'and offers no control it cannot honour');
+    assert.equal(row.sessionId, null);
+    assert.equal(row.summary, 'tidying the exporter', 'read from the transcript, as for any row');
+
+    // Restarting the session is the remedy the row names, so it has to work
+    // without waiting for the next walk of the tree.
+    await fetch(`http://127.0.0.1:${port}/event`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-raise-token': 'test-token' },
+      body: JSON.stringify({
+        session_id: 'restarted',
+        hook_event_name: 'SessionStart',
+        cwd: dir,
+        transcript_path: transcript,
+        host: { tty: '/dev/ttys004', term_program: 'iTerm.app' },
+      }),
+    });
+
+    const after = await state();
+    assert.equal(after.rows.length, 1, 'one row, not two - the scan is superseded');
+    assert.equal(after.rows[0].kind, 'session');
+    assert.equal(after.rows[0].sessionId, 'restarted');
+    assert.equal(after.rows[0].focusable, true);
+
+    await monitor.stop();
+  } finally {
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
+    cleanup();
+  }
+});
+
+test('closing a session does not bring it back as one nothing ever reported', async () => {
+  /*
+   * The same walk, from the other end. On a machine where Raise is installed
+   * this is the ordinary case rather than an edge one: every window closed today
+   * has a transcript minutes old and no live record, which is exactly what the
+   * scan is looking for. So a feature built to stop a stranger's first page
+   * being empty would have filled an established one with a ghost of every
+   * session the user had deliberately finished, each saying it had never
+   * reported and each advising a restart.
+   *
+   * The second assertion is the one worth keeping: with the last session closed
+   * the page must be able to say nothing is running, which is a true and useful
+   * answer that ghosts take away for two hours.
+   */
+  const { dir, cleanup } = scratch();
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = dir;
+  try {
+    const transcript = join(dir, 'projects', '-a-repo', 'ending.jsonl');
+    mkdirSync(join(dir, 'projects', '-a-repo'), { recursive: true });
+    writeFileSync(
+      transcript,
+      JSON.stringify({
+        type: 'assistant',
+        cwd: dir,
+        timestamp: new Date().toISOString(),
+        message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] },
+      }),
+    );
+
+    const port = await freePort();
+    const monitor = createMonitorServer({
+      port,
+      token: 'test-token',
+      dbPath: join(dir, 'no-such.sqlite'),
+      sessionsPath: join(dir, 'sessions'),
+      exec: () => assert.fail('no blocking commands from the server'),
+      fetch: () => assert.fail('no outbound requests from the server'),
+      execAsync: async () => '',
+    });
+    await monitor.start();
+    const state = () => fetch(`http://127.0.0.1:${port}/state?t=test-token`).then((r) => r.json());
+    const post = (body) =>
+      fetch(`http://127.0.0.1:${port}/event`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-raise-token': 'test-token' },
+        body: JSON.stringify(body),
+      });
+
+    await post({
+      session_id: 'closing',
+      hook_event_name: 'SessionStart',
+      cwd: dir,
+      transcript_path: transcript,
+      host: { pid: process.pid, tty: '/dev/ttys004', term_program: 'iTerm.app' },
+    });
+
+    const open = await state();
+    assert.equal(open.rows.length, 1);
+    assert.equal(open.rows[0].kind, 'session', 'an ordinary row while the session is open');
+
+    await post({
+      session_id: 'closing',
+      hook_event_name: 'SessionEnd',
+      cwd: dir,
+      transcript_path: transcript,
+    });
+
+    const closed = await state();
+    assert.equal(
+      closed.rows.find((r) => r.kind === 'untracked'),
+      undefined,
+      'the session we watched end is not offered back as one that never reported',
+    );
+    assert.deepEqual(closed.rows, [], 'and "Nothing running" is reachable again');
+
+    await monitor.stop();
+  } finally {
     if (previousHome === undefined) delete process.env.RAISE_HOME;
     else process.env.RAISE_HOME = previousHome;
     cleanup();
