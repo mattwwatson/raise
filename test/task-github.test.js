@@ -125,8 +125,10 @@ test('a shipped spec whose issue is closed agrees', () => {
 });
 
 test('backlog and in-progress are not compared, because an open issue cannot tell them apart', () => {
-  // The honest limit of the move: Jira carried four workflow states and an
-  // issue carries two. Guessing which one "open" meant would be wrong about
+  // The honest limit is what `validate` reads, not what the tracker knows: the
+  // project board carries four Status options, but this asks `gh` for
+  // `number,title,state,stateReason`, so that field never reaches it and an issue
+  // is only open or closed. Guessing which one "open" meant would be wrong about
   // half the time, so it is counted and skipped.
   const report = reconcile(
     indexed([spec({ ticket: '23', status: 'backlog' }), spec({ ticket: '24', file: '24-x.md', status: 'in-progress' })]),

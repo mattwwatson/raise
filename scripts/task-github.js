@@ -8,14 +8,17 @@
  * where the workflow is. Divergence exits 0. Only a spec naming an issue that
  * does not exist is a fault.
  *
- * **GitHub knows less than Jira did, and that is a real reduction rather than a
- * porting detail.** Jira carried four workflow states, so `in-progress` on disk
- * could be checked against `In Progress` on the board. An issue is open or
- * closed and nothing else, so `backlog` and `in-progress` are indistinguishable
- * from here and are not compared. What remains checkable is the pair that
- * actually goes wrong: **a spec saying `shipped` while its issue is still open,
- * and an issue closed while its spec says the work never finished.** Those are
- * the two that leave `main` telling one story and the tracker another.
+ * **It reads the issue and never the board, and that is a real reduction rather
+ * than a porting detail.** Jira carried four workflow states, so `in-progress`
+ * on disk could be checked against `In Progress` on the board. The project board
+ * carries four of its own - Todo, In Progress, In Review, Done - but this asks
+ * `gh issue list` for `number,title,state,stateReason` and nothing else, so that
+ * Status field never reaches it. An issue is open or closed, so `backlog` and
+ * `in-progress` are indistinguishable from here and are not compared. What
+ * remains checkable is the pair that actually goes wrong: **a spec saying
+ * `shipped` while its issue is still open, and an issue closed while its spec
+ * says the work never finished.** Those are the two that leave `main` telling
+ * one story and the tracker another.
  *
  * Claiming more than that would be worse than checking less. A validator that
  * reported `backlog` against `in-progress` would have to guess which of them an
@@ -72,7 +75,7 @@ import { compareTickets, isIssueKey } from './task-specs.js';
  * @property {number} exitCode
  */
 
-/** The repository whose issues are the board. */
+/** The repository whose issues the specs are reconciled against. */
 export const REPO = 'mattwwatson/raise';
 
 /**
