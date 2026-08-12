@@ -169,11 +169,12 @@ loose document.
 1. **Move the item to In Progress on the board when you pick it up** - before the branch,
    before the spec edit, first thing. The board's Status field runs Todo → In Progress → In
    Review → Done, and this is the **only** one of those transitions a human has to make: the
-   other two both follow from the closing keyword in step 6. GitHub has no signal for *somebody
-   started*, so an item left in Todo is indistinguishable from one nobody has touched. Assign
-   the issue to yourself in the same pass - the status says the work is live, the assignee says
-   whose it is. The spec's `status: in-progress` is the authoritative copy on disk; do not
-   invent a label taxonomy on top of either.
+   other two both follow from the closing keyword in step 6, and **no** workflow can set In
+   Progress, none of them having anything to read that says somebody started. So an item left
+   in Todo reads as one nobody has picked up. Assign the issue to yourself in the same pass -
+   the status says the work is live, the assignee says whose it is. The spec's
+   `status: in-progress` is the authoritative copy on disk; do not invent a label taxonomy on
+   top of either.
 
    A human needs none of what follows - two clicks on the board set the field. An agent session
    with no browser needs two calls, because the mutation takes ids rather than names and **the
@@ -201,6 +202,11 @@ loose document.
        }) { projectV2Item { id } }
      }' -f project=<project id> -f item=<item id> -f field=<field id> -f option=<option id>
    ```
+
+   If that first query returns no node for your issue, the issue is not on the board and there
+   is no field to set. `Auto-add to project` is enabled, so anything captured through the
+   section above lands there on creation; an older issue that predates it needs
+   `addProjectV2ItemById` before the mutation has an item to write to.
 2. **Branch off `main` as `<ISSUE>-<short-name>`** - e.g. `23-stale-page-code`.
 
    GitHub links a branch to its issue from the **pull request**, not from the branch name, so
@@ -233,13 +239,15 @@ loose document.
    and has nothing to act on here, every item on the board being an issue and no pull request
    being on it at all. A plain `#23` with no keyword is not the link the board reads - it
    cross-references the issue on its timeline, which looks the same to a person and is nothing
-   the automation acts on. (Linking the issue from the pull request's Development panel works
-   too, but the keyword is the one that survives being written down.)
+   the automation acts on. (Linking the issue from the pull request's Development panel is a
+   real second route to the link - see the remedy below - but the keyword is the one that
+   survives being written down.)
 
    > **A keyword in a commit message is not a substitute for one in the description.** GitHub
    > closes the issue when that commit merges but does not list the pull request as a linked
    > one, so the item arrives in Done through the `Item closed` workflow having never passed
-   > through In Review. The description is the only place the link comes from.
+   > through In Review. Of the two places you can write a keyword, the description is the one
+   > that links.
    >
    > **The pipeline composes that description; you do not write it**, so the keyword lands
    > there only if the pipeline is told to keep it. Pull request 18 is the one worked example,
@@ -249,7 +257,15 @@ loose document.
    > under `## What Changed`. A keyword dropped into the intent text and left to find its own
    > way is a route nothing here has demonstrated, and what a bare `git push no-mistakes` does
    > with an intent nobody wrote is **not** established either. So read the body when the pull
-   > request opens rather than assuming - that is while a fix is still cheap.
+   > request opens rather than assuming.
+   >
+   > **If it opened without a keyword, link the issue from the pull request's Development
+   > panel.** That is the cheap fix, and it is cheap because it edits no body text: it cannot
+   > disturb the `## Pipeline` section the signature check reads, which is why it is here and
+   > `gh pr edit --body` is not. It creates a genuine linked pull request, so the item moves to
+   > In Review - and that is all it is claimed to buy. Whether merging a manually linked pull
+   > request also closes the issue is not established here, so for Done as well the keyword in
+   > the description is the route evidenced end to end.
    >
    > **If it merged without one, close the issue by hand and say which pull request shipped
    > it.** Issue 9 shipped in a merged pull request and stayed open; issue 15 did the same off
