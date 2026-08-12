@@ -87,23 +87,38 @@ test('a checkout with no branch fails as "no branch", not as a bad branch name',
   assert.equal(result.exitCode, 1);
 });
 
-test('a branch with no key at all fails the gate and explains the naming rule', () => {
+test('a branch with no issue number passes, because it ships no tracked item', () => {
+  // The gate asserts one thing: the pull request that ships an item marks that
+  // item shipped. That is a statement about items, so a branch carrying none
+  // has nothing to assert. It used to fail here, and with `tasks:gate` inside a
+  // required check that made a one-line spec correction cost an issue, a spec
+  // and a pipeline run.
   const result = gateBranch('tidy-up', indexed([spec()]));
-  assert.equal(result.outcome, 'no-key');
-  const rendered = text(renderGate(result));
-  assert.ok(rendered.includes('23-roadmap-tooling'));
-  assert.ok(rendered.includes('fix/23-roadmap-tooling'));
+  assert.equal(result.outcome, 'untracked');
+  assert.equal(result.exitCode, 0);
 });
 
-test('the naming failure says this is our convention rather than the tracker\'s rule', () => {
-  // GitHub links a branch to its issue from the pull request rather than from
-  // the branch name, so nothing upstream enforces this - and Jira, before it,
-  // found the key anywhere in the name and was equally content. Saying otherwise
-  // sends somebody looking for an automation rule that was never the reason.
+test('passing without a key says so rather than passing silently', () => {
+  // Silence would be indistinguishable from passing because a spec said
+  // shipped, and which of the two it was is the thing worth reading.
   const rendered = text(renderGate(gateBranch('tidy-up', indexed([spec()]))));
-  assert.ok(rendered.includes('our'));
-  assert.ok(rendered.includes('convention'));
-  assert.ok(rendered.includes('pull request'));
+  assert.ok(rendered.includes('tidy-up'));
+  assert.ok(rendered.includes('no issue number'));
+  assert.ok(rendered.includes('<issue>-<short-name>'));
+});
+
+test('an unkeyed pass goes to stdout, not to stderr with the failures', () => {
+  const rendered = renderGate(gateBranch('tidy-up', indexed([spec()])));
+  assert.deepEqual(rendered.err, []);
+  assert.ok(rendered.out.length > 0);
+});
+
+test('a keyed branch is not relaxed at all - its spec must still say shipped', () => {
+  // The whole risk of this change is that it reads as "the gate got softer".
+  // It did not: everything with a key in its name is checked exactly as before.
+  const result = gateBranch('7-require-no-mistakes', indexed([spec({ ticket: '7', status: 'in-progress' })]));
+  assert.equal(result.outcome, 'not-shipped');
+  assert.equal(result.exitCode, 1);
 });
 
 test('a branch whose key has no spec fails and names the file to create', () => {
@@ -150,7 +165,10 @@ test('the pass line goes to stdout and every failure to stderr', () => {
   assert.ok(passed.out.length > 0);
   assert.deepEqual(passed.err, []);
 
-  const failed = renderGate(gateBranch('tidy-up', indexed([spec()])));
+  // A keyed branch whose spec is missing - `tidy-up` is no longer a failure,
+  // it is the untracked pass, and asserting stderr on it would have been
+  // asserting the behaviour this change removed.
+  const failed = renderGate(gateBranch('99-mystery', indexed([spec()])));
   assert.deepEqual(failed.out, []);
   assert.ok(failed.err.length > 0);
 });

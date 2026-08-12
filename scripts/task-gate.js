@@ -20,7 +20,7 @@ import { ANSI, painter } from './task-format.js';
 /** @typedef {import('./task-specs.js').Spec} Spec */
 /** @typedef {import('./task-specs.js').Fault} Fault */
 
-/** @typedef {'ok'|'no-branch'|'no-key'|'no-spec'|'not-shipped'} GateOutcome */
+/** @typedef {'ok'|'untracked'|'no-branch'|'no-spec'|'not-shipped'} GateOutcome */
 
 /**
  * @typedef {object} GateResult
@@ -79,8 +79,22 @@ export function gateBranch(branch, byTicket) {
 
   if (!branch) return { ...base, outcome: 'no-branch' };
 
+  // A branch carrying no issue number is not shipping a tracked item, so there
+  // is nothing here to assert. This used to fail, and failing it was the gate
+  // answering a question it had not been asked: the rule is *the pull request
+  // that ships an item marks that item shipped*, which is a statement about
+  // items. With `tasks:gate` inside a required check, that made a one-line
+  // correction to a spec cost an issue, a spec of its own, a branch named after
+  // it and a full pipeline run - ceremony larger than the change, whose
+  // predictable result is that small true corrections stop being made.
+  //
+  // The trade is accepted and is not a hole being overlooked: somebody could
+  // name a branch `fix/whatever` while genuinely shipping a tracked item and
+  // slip past. The gate has never been able to tell deliberate evasion from an
+  // untracked change. What it protects against is *forgetting*, and forgetting
+  // leaves the key in the branch name.
   const ticket = ticketFromBranch(branch);
-  if (!ticket) return { ...base, outcome: 'no-key' };
+  if (!ticket) return { ...base, outcome: 'untracked', exitCode: 0 };
 
   const spec = byTicket.get(ticket) ?? null;
   if (!spec) return { ...base, outcome: 'no-spec', ticket };
@@ -113,6 +127,21 @@ export function renderGate(result, { colour = false, today = '' } = {}) {
     };
   }
 
+  // Passing silently would be indistinguishable from passing because a spec
+  // said shipped, and this page's whole habit is saying which. It goes to
+  // stdout with the other pass, not to stderr with the failures.
+  if (result.outcome === 'untracked') {
+    return {
+      out: [
+        '',
+        `${label} - ${paint(ANSI.green, `"${result.branch}" carries no issue number, so it ships no tracked item`)}`,
+        `        ${paint(ANSI.dim, 'name a branch <issue>-<short-name> and its spec must say shipped')}`,
+        '',
+      ],
+      err: [],
+    };
+  }
+
   /** @type {string[]} */
   const err = [''];
 
@@ -122,17 +151,6 @@ export function renderGate(result, { colour = false, today = '' } = {}) {
     err.push('  Set GITHUB_HEAD_REF, or run this inside a checkout that is on a');
     err.push('  branch. A detached HEAD has no ticket to check - which is what a');
     err.push('  pull-request build is, since it checks out the merge commit.');
-  } else if (result.outcome === 'no-key') {
-    err.push(`${label} - ${paint(ANSI.red, `branch "${result.branch}" carries no issue number.`)}`);
-    err.push('');
-    err.push('  Branches are named <ISSUE>-<short-name>, with the number starting');
-    err.push('  the branch name or a path element of it - 23-roadmap-tooling and');
-    err.push('  fix/23-roadmap-tooling both work.');
-    err.push('');
-    err.push('  GitHub links the branch from the pull request rather than from its');
-    err.push('  name, so wip-23-tooling would upset nothing upstream. This is our');
-    err.push('  convention, so that a branch list can be scanned by issue, and this');
-    err.push('  check is what enforces it.');
   } else if (result.outcome === 'no-spec') {
     err.push(`${label} - ${paint(ANSI.red, `no spec in docs/tasks/ has "issue: ${result.ticket}".`)}`);
     err.push('');
