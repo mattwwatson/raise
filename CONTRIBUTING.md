@@ -34,8 +34,14 @@ export const ghostty = {
   termProgram: 'ghostty',          // the TERM_PROGRAM that means "this one" - ordering only
   async isAvailable(exec) { ... }, // is this terminal even running?
   async focus(exec, { sessionUuid, tty }) { ... },  // true if a tab was found and raised
+  async focusByTitle(exec, { title }) { ... },      // optional - 'ok' | 'notfound' | 'ambiguous'
 };
 ```
+
+`focusByTitle` is required only if your terminal can host tmux in control mode (`tmux -CC`) -
+iTerm2 is the only implementer today. `focusByPaneTitle` skips any adapter without it, and for
+a control-mode pane that is the only path there is, so an adapter lacking it cannot focus those
+panes and says nothing about why. A terminal that never hosts control mode does not need it.
 
 Then add it to `ALL_TERMINALS`. Three conditions:
 
