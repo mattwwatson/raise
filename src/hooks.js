@@ -45,8 +45,9 @@ import { dirname } from 'node:path';
  * Code has no such event to fire. That is settled by reading the transcript
  * instead - see `blockDisproved` in `dashboard.js`.
  *
- * **The tempting fix is to add `PostToolUse` to the list above, and this is
- * where that warning belongs, because it is a one-line change to this array.**
+ * **The tempting fix is to add `PostToolUse` to `HOOK_EVENTS` below, and this
+ * is where that warning belongs, because it is a one-line change to that
+ * array.**
  * `EVENT_STATES` in `registry.js` already maps it (and `PreToolUse`) to
  * `working`, so nothing else would move. It is refused on two counts. It costs
  * a hook process and a localhost POST *per tool call*, inside the user's

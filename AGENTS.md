@@ -695,7 +695,9 @@ reasoning has to go somewhere, and nothing said where, so everything landed here
 | a rule one module owns | **that module's header**, plus a row in the [decision index](#decision-index) | opening the file delivers it at the moment it is needed |
 | a rejected alternative or superseded design tied to one module | **that module's header**, beside the tempting edit | the warning is worth nothing anywhere else |
 | an invariant spanning several modules | **[Invariants no single module owns](#invariants-no-single-module-owns)** | no single header can own it |
-| a product, UI or safe-change rule | **stays here** | `public/index.html` has no header, and a safe-change rule must be known *before* you choose which file to open |
+| a layout or rendering rule with one site in `public/index.html` | **a comment at that site** | the page carries per-rule comments and reads like the modules do - the `.name` identity rule sits on `.name` |
+| a page-wide UI rule with no single site, or a product rule | **[UI Rules](#ui-rules)**, here | nothing owns it, so a comment on one selector would be a claim about the rest of the page |
+| a safe-change rule | **stays here** | it must be known *before* you choose which file to open, so a comment inside the file is already too late |
 | a measurement or one-time capture | **its spec in `docs/tasks/`**, cited from wherever it is relied on | already written, and dated |
 
 Two things that keep the rule honest, both learned from the state this file was in:

@@ -193,22 +193,31 @@ Built 12/08/2026 on `15-agents-md-repeats-the-source`, against the tree at `633b
 **The brief's figures were re-measured first and they hold at that tree**: 1793 lines, 132KB,
 107 bolded headlines, `## Design decisions worth knowing` at lines 189-1409 (68% of the file).
 The issue body's "1743 lines / ~103 headlines" is from an earlier draft and is the number to
-distrust. Result: **1793 lines to 716**, a 60% cut, and roughly 33k tokens to ~13k.
+distrust. Result: **1793 lines to 718**, a 60% cut, and roughly 33k tokens to ~13k.
 
-**716 rather than the ~620 the brief estimated, and the difference is all index.** The estimate
+**718 rather than the ~620 the brief estimated, and the difference is all index.** The estimate
 assumed ~45 index rows; there are 84. Rows were split wherever one row would have covered two
 headlines, because the acceptance test is that a reviewer can pick any headline and find where
 it went - a coarser index passes the line count and fails the walk. Nothing was retained for
 length: the assembly was done by slicing the kept ranges out of the old file rather than
 retyping them, so no wording drifted.
 
-**One kept section is not byte-identical, and the exception is worth more than the rule.**
-§ Architecture ended its `src/untracked.js` paragraph with *"See *A session nothing has
-reported* below"* - a pointer at a headline this change relocated into that module. Slicing the
-section out whole is exactly what preserved it: a section kept byte-identical went on referring
-to one that was deleted, and a reader following it would have concluded the rule was dropped
-rather than moved. It now reads *"See the header of `src/untracked.js`"*. Nothing else in that
-section moved, and the other kept sections are byte-identical apart from the test count.
+**Two kept sections are not byte-identical, and both exceptions are the same one.** Slicing a
+section out whole is exactly what preserves a pointer into a section that is about to be
+deleted, so the kept sections are where a dangling cross-reference survives:
+
+- § Architecture ended its `src/untracked.js` paragraph with *"See *A session nothing has
+  reported* below"* - a headline this change relocated into that module. A reader following it
+  would have concluded the rule was dropped rather than moved. It now reads *"See the header of
+  `src/untracked.js`"*.
+- § Project Overview said *"Two consequences that are not obvious, and that the sections below
+  keep returning to"*, where "the sections below" were the deleted decisions. It now reads
+  *"Two consequences that everything below keeps returning to"*, which the invariants and the
+  index both satisfy.
+
+Neither is a wording change and neither should be reverted; both are pointers that the cut made
+false. Nothing else in either section moved, and the remaining kept sections are byte-identical
+apart from the test count.
 
 ### The 9-of-11 measurement was checked and holds
 
@@ -248,7 +257,8 @@ was found in review rather than on the first pass, which is the walk doing its j
 ### The rule walk
 
 All 107 headlines from `main`, in file order, with where each one now lives. Numbers are the
-line in the old file. "kept" means the section survived byte-identical.
+line in the old file. "kept" means the section survived whole - byte-identical but for the two
+repointed cross-references recorded above, in § Architecture and § Project Overview.
 
 | # | Headline | Now in |
 | --- | --- | --- |
@@ -384,6 +394,33 @@ The compression alone would leave the file 1793 lines again by November, so:
   to pass. `README.md` is in the set because the split left it naming the roadmap-workflow
   skill, which nothing else names, and it is the document a stranger reads first; `.claude/`
   is in the prefix list for that same skill.
+
+**The placement rule's UI row was amended in review, because it justified itself with something
+untrue.** It read *"a product, UI or safe-change rule stays here, because `public/index.html`
+has no header"*. The page has no *module* header, but it carries 219 comment blocks and reasons
+at the site as densely as any module does - and this change itself put a UI rule there, the
+`.name` identity rule that walk row 14 now points at. Left as written, the next
+layout-specific UI rule goes back into `AGENTS.md` on the strength of a false clause, which is
+the regrowth the rule exists to bound. It is now three rows: a rule with one site in the page
+goes in a comment at that site; a page-wide rule with no single site stays in § UI Rules; and a
+safe-change rule stays regardless, because it has to be known before you choose which file to
+open - that half of the original justification was always true and is kept verbatim.
+
+**Checked against every relocation this change made, and it is not a clean bill of health.**
+`public/index.html` is the only non-module destination in the whole branch - nine lines, the
+`.name` comment. Everything else landed in a `src/` module header, which the table's first row
+already covers, so the amendment disturbs nothing that shipped. But five bullets still in
+§ UI Rules are already second copies of reasoning the page carries at the site: the
+`HOST_LABELS` no-fallback bullet, the `AGENT_LABELS` bullet, the `SPAWNER_LABELS` bullet, the
+`AGENT_NAMES` expanded-panel bullet, and the untracked-row explanation. Under the amended rule
+each is a single-site rule that belongs at its site - and each is *already there*, so they are
+exactly the duplication this ticket exists to remove, left standing only because the brief
+scoped § UI Rules as kept whole. **That is known follow-up for a later item, deliberately not
+acted on here.** Four bullets were checked and are genuinely cross-cutting, so they stay
+wherever this lands: affordance-must-match-capability spans every control; a card carrying both
+lines is also a product rule and is in `dashboard.js`; where a pull request's state came from is
+a decision *not* to render something, so it has no site to sit at; and the `dismissed` marker
+binds two renderers, the page and the CLI being one protocol.
 
 ### References corrected
 
