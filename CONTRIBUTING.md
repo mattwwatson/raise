@@ -104,6 +104,28 @@ npm run typecheck
 All three pass, or it is not ready. CI runs them on every pull request, and runs the tests
 again on Node 22 to keep the `engines` floor honest rather than asserted.
 
+**Then push through the pipeline rather than straight to the remote.** Contributions here go
+through [no-mistakes](https://github.com/kunchenguid/no-mistakes), which runs review, tests,
+lint and docs before a human sees the change:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/kunchenguid/no-mistakes/main/docs/install.sh | sh
+git push no-mistakes <your-branch>
+```
+
+**The npm package called `no-mistakes` is an unrelated tool by a different author** - use the
+install script above, not `npm install`.
+
+The pipeline opens the pull request for you and writes a `## Pipeline` section into its body. A
+pull request without that section fails the *"PR body carries the no-mistakes signature"* check.
+
+Two things worth saying plainly about that check, because a rule whose limits are hidden is one
+people resent. It reads the pull request body, so it is a **convention check and not proof** -
+it exists to stop somebody arriving three days into a change having never heard of the pipeline,
+not to catch anyone determined to route around it. And **it applies to the maintainer too**: the
+branch protection on `main` enforces required checks for administrators, so there is no path
+around this that is not also open to you.
+
 - **Node 22.13 or newer.** 22.13 is where `node:sqlite` stopped needing a flag.
 - **Reproduce a bug as a test first**, then fix what the test exposes. Tests are `node:test`
   and `node:assert/strict`, one file per module, named after the behaviour in plain English.

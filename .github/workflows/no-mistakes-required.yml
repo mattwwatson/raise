@@ -1,0 +1,97 @@
+# Why this exists: a contribution should arrive having been through review, tests,
+# lint and docs, rather than as a diff a human has to reason about unaided. The
+# `no-mistakes` pipeline does that work and writes a signature into the pull
+# request body; this checks the signature is there.
+#
+# WHAT THIS CHECKS, PRECISELY: that the pull request body contains the line
+# `no-mistakes` writes into it. That is a **convention check and not proof.** The
+# marker is a string in a field the author can edit, so it gates against not
+# knowing the process and not against deciding to skip it.
+#
+# The job is named for what it reads for that reason. A check called "this PR
+# went through no-mistakes" would assert something a grep of a user-editable
+# field cannot know, and this repository refuses a confident claim it cannot
+# stand behind on every card it renders. A CI check overstating its own evidence
+# would be the same failure wearing a different hat.
+#
+# THE ATTESTATION IS NOT USED, AND THAT WAS MEASURED RATHER THAN ASSUMED.
+# `no-mistakes` also writes a machine-readable line carrying a head SHA and
+# per-step statuses:
+#
+#     <!-- no-mistakes-pipeline-attestation:v1 {"head_sha":"…","steps":[…]} -->
+#
+# Binding that SHA to the pull request head would defeat copy-paste from another
+# PR, which is strictly stronger. But it is written when the body is written, and
+# any later push moves the head without rewriting it - across six merged
+# firstmate pull requests it matched the head on three. Gating on it would fail
+# legitimate contributions, which is worse than not gating. The steps array has
+# the same problem in milder form: when the PR is first opened, `pr` is running
+# and `ci` is pending, so "all steps completed" is never true at check time.
+#
+# Revisit only if `no-mistakes` starts rewriting the attestation on every push.
+
+name: Require no-mistakes
+
+on:
+  pull_request:
+    # `edited` matters as much as `opened`: the pipeline writes its section into
+    # the body, and on some orderings that is an edit to a pull request that
+    # already exists. Without it, a PR that gains the marker legitimately would
+    # keep a failed check with no way to clear it but a fresh commit.
+    types: [opened, edited, synchronize, reopened]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: PR body carries the no-mistakes signature
+    runs-on: ubuntu-latest
+    # Bots do not run the pipeline and cannot be asked to.
+    if: >-
+      github.event.pull_request.user.login != 'github-actions[bot]' &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
+    steps:
+      - name: Look for the signature in the pull request body
+        env:
+          # Through the environment, never interpolated into the script. A pull
+          # request body is untrusted input written by anyone who can open one,
+          # and `${{ }}` inside a `run:` block is substituted before the shell
+          # sees it - so a body containing shell syntax would execute. This is
+          # the same rule `src/exec.js` follows for argv.
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -eu
+          marker='Updates from [git push no-mistakes](https://github.com/kunchenguid/no-mistakes)'
+
+          # -F so the marker's brackets and slashes are literal, not a pattern.
+          if printf '%s' "${PR_BODY:-}" | grep -qF -- "$marker"; then
+            echo "Found the no-mistakes signature in PR #${PR_NUMBER}."
+            exit 0
+          fi
+
+          {
+            echo "::error::This pull request does not carry the no-mistakes signature."
+            echo
+            echo "Contributions here go through the no-mistakes pipeline, which runs"
+            echo "review, tests, lint and docs before a human sees the change, and"
+            echo "writes a '## Pipeline' section into the pull request body containing:"
+            echo
+            echo "    $marker"
+            echo
+            echo "Install it:"
+            echo
+            echo "    curl -fsSL https://raw.githubusercontent.com/kunchenguid/no-mistakes/main/docs/install.sh | sh"
+            echo
+            echo "Note the npm package called 'no-mistakes' is an unrelated tool by a"
+            echo "different author. Use the install script above."
+            echo
+            echo "Then push your branch through the gate instead of straight to the remote:"
+            echo
+            echo "    git push no-mistakes <branch>"
+            echo
+            echo "CONTRIBUTING.md has the full walkthrough."
+          } >&2
+          exit 1
