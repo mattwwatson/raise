@@ -180,7 +180,9 @@ transitions are already automatic, which is exactly why the third is easy to mis
   nothing: only a closing keyword - `Closes #15`, `Fixes #15`, `Resolves #15` - or linking the
   issue from the pull request's Development panel creates the link GitHub acts on. Without it
   neither transition fires, and the issue stays open over merged work: pull request 17 shipped
-  issue 15 that way, and the item sat in Todo until somebody closed it by hand.
+  issue 15 that way, and the item sat in Todo until somebody closed it by hand. On the pipeline
+  path above the body is not yours to write, so the keyword is yours to add afterwards with
+  `gh pr edit --body` - or close the issue by hand and say which pull request shipped it.
 
 Security issues do **not** go in an issue - see [SECURITY.md](SECURITY.md).
 

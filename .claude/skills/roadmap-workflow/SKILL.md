@@ -9,7 +9,8 @@ description: How work items flow between GitHub issues and this repo - capturing
 an issue plus one spec file in `docs/tasks/` named for it. Neither half repeats the other:
 the issue says *what and why*, the file says *how*.
 
-Board - https://github.com/mattwwatson/raise/issues
+Board - https://github.com/users/mattwwatson/projects/1
+Issue list - https://github.com/mattwwatson/raise/issues
 
 | | The issue | `docs/tasks/<KEY>-<name>.md` |
 |---|---|---|
@@ -192,8 +193,9 @@ loose document.
    lives only in the diff is one a future session will undo.
 5. **Start every commit message you write by hand with the key**: `23: state the build the
    page loaded with`. The no-mistakes pipeline generates its own subjects
-   (`no-mistakes(review): …`) which will not carry it - that is fine, because the pull request
-   is what links the work to the issue.
+   (`no-mistakes(review): …`) which will not carry it - that is fine, because what links the
+   work to the issue is the closing keyword in the pull request body, once step 6 has made sure
+   one is actually there.
 6. **Put `Closes #23` in the pull request description.** It is what *links* the pull request to
    the issue, and that link is what the rest of the automation runs on: the item moves itself
    to In Review when the pull request is linked and to Done when it merges, and the issue
@@ -268,9 +270,9 @@ green over the wrong item's spec. It guards against forgetting, not against evas
 merged *here* while the tracker describes where the workflow is. Divergence exits 0; only a
 spec naming an issue that does not exist fails.
 
-**Know what it cannot check.** Jira carried four workflow states; an issue is open or closed.
-So `backlog` and `in-progress` are indistinguishable from the tracker and are counted and
-skipped rather than guessed between. What is still checked is the pair that actually goes
+**Know what it cannot check.** It asks `gh` for `number,title,state,stateReason` and nothing
+else, so the board's Status field never reaches it: `backlog` and `in-progress` are
+indistinguishable from here and are counted and skipped rather than guessed between. What is still checked is the pair that actually goes
 wrong: a spec saying `shipped` over an open issue, and a closed issue over a spec saying the
 work never finished. Legacy `RAI-N` specs are exempt - they have no issue and are not expected
 to.
