@@ -252,16 +252,17 @@ async function askRegistry(fetchImpl) {
  * Asking is what writes the cache, so a machine that never runs `raise serve`
  * never makes a request no matter how often anything else is run.
  *
- * @param {{current: string, config?: UpdateConfig, now?: number, fetch?: Function,
- *          cache?: CacheAccess, cachePath?: string, configPath?: string,
- *          files?: ConfigFileAccess}} deps `fetch` is injected and defaulted at
- *   the edge, so the suite asserts on the request that *would* have gone out
- *   without one going out.
+ * @param {{current: string, now?: number, fetch?: Function, cache?: CacheAccess,
+ *          cachePath?: string, configPath?: string, files?: ConfigFileAccess}} deps
+ *   `fetch` is injected and defaulted at the edge, so the suite asserts on the
+ *   request that *would* have gone out without one going out. The opt-in is
+ *   always read through `configPath`/`files` rather than passed in, so every
+ *   caller and every test exercises the same block-reading path - including the
+ *   mode refusal, which is the one part of it that must never be bypassable.
  * @returns {Promise<string|null>}
  */
 export async function newerVersion({
   current,
-  config,
   now = Date.now(),
   fetch,
   cache = defaultCacheAccess,
@@ -270,7 +271,7 @@ export async function newerVersion({
   files = defaultConfigAccess,
 }) {
   try {
-    const settings = config ?? readUpdateConfig({ path: configPath, files });
+    const settings = readUpdateConfig({ path: configPath, files });
     if (settings.enabled !== true) return null;
 
     const known = readUpdateCache({ path: cachePath, cache });

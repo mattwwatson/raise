@@ -194,6 +194,12 @@ Without that every poll would look like a change and drop the fifteen-minute fai
 which is the one thing that backoff exists to prevent - a bug the existing forge tests would
 not have caught, since none of them polls twice over an unchanged file.
 
+That gap is now closed rather than only noted. `test/forge-config.test.js` asserts the identity
+directly, with `assert.equal` on two successive reads of an unchanged file and `assert.notEqual`
+across a change - the converse mattering just as much, since a cache that never invalidated
+would satisfy the first assertion alone. The parse count the neighbouring test asserts could
+never have caught it: re-deriving from a cached read costs no read.
+
 **The mode-refusal sentence now says a credential *can* be there, not that it is.** It is
 printed by every feature the file turns on, and one of them holds nothing secret, so a file
 carrying only `{"updates": {"enabled": true}}` was being told it held a credential. What makes
@@ -218,6 +224,24 @@ Two cases that have no age of their own say so instead: enabled but never yet as
 one is a `warn` rather than an `ok` for the same reason - Raise does not know, and saying `ok`
 would be claiming it does - even though there is nothing for the reader to do, which the detail
 says.
+
+**A fourth case joined them: a version `doctor` could not read.** `packageVersion` returns
+`UNKNOWN_VERSION` when it does not come back with a usable version string, and `isNewerVersion`
+fails closed on anything it cannot rank - correctly, since that is what keeps `serve` quiet rather than nagging
+off a number it does not have. Read as a report, though, that same `false` reached the "up to
+date" branch and printed `unknown is the latest, as of 3h ago`: a green claim that this install
+is current, made from a version Raise never read. `raise --version` printing `unknown` is not
+the same act - it reports ignorance honestly - so the sentinel is named and `doctor` tests for
+it, warning that the registry's answer has nothing here to be compared against. The failing-
+closed rule is unchanged; what changed is that one reader no longer mistakes it for currency.
+
+Chasing that down moved the sentinel itself. `packageVersion` only produced `unknown` from its
+`catch`, which is the *unreachable* half - the file it reads is the one Node resolves
+`"type": "module"` from, so a `package.json` that will not parse takes the process down before
+`src/cli.js` is imported at all. The reachable half is a `package.json` that parses and carries
+no `version`: that returned `undefined`, which `raise --version` printed as the word and
+`doctor` compared as a version. Both are the same fact - there is no version to be had - so
+they now return the same sentinel, checked on the value rather than only on the read.
 
 ### What was verified by hand
 

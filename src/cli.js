@@ -146,6 +146,15 @@ function probablePort() {
 }
 
 /**
+ * What `packageVersion` says when it could not read one, named because it has
+ * two readers and only one of them may treat it as a version. `--version`
+ * prints it, which reports ignorance honestly; `doctor` has to test for it,
+ * because comparing it to a real version silently answers "not newer", which is
+ * indistinguishable from being up to date.
+ */
+const UNKNOWN_VERSION = 'unknown';
+
+/**
  * The installed package's version, for `raise --version`.
  *
  * Read from disk rather than baked in at build time, because there is no build
@@ -156,11 +165,18 @@ function probablePort() {
  */
 function packageVersion() {
   try {
-    return JSON.parse(readFileSync(resolve(HERE, '..', 'package.json'), 'utf8')).version;
+    const { version } = JSON.parse(readFileSync(resolve(HERE, '..', 'package.json'), 'utf8'));
+    // A file that parses but carries no version is the reachable half of this.
+    // An unreadable one takes Node down before this module is ever imported -
+    // it is the same file Node resolves `"type": "module"` from - whereas a
+    // `package.json` missing the field loads fine and used to reach `--version`
+    // as the word `undefined` and `doctor` as a claim about currency. Both
+    // failures are the same fact, so they get the same sentinel.
+    return typeof version === 'string' && version ? version : UNKNOWN_VERSION;
   } catch {
     // Nothing is worth crashing over here, and a wrong number would be worse
     // than an honest refusal to guess.
-    return 'unknown';
+    return UNKNOWN_VERSION;
   }
 }
 
@@ -840,12 +856,12 @@ async function cmdDoctor() {
     off('lavish-axi', 'not installed - review gates will not be detected');
   }
 
-  // The only outbound request Raise makes, so its default is off and its default
-  // is silent - `off` rather than `warn`, exactly like no-mistakes and Lavish. A
-  // `problem` is different: it is only ever set when somebody has evidently
-  // tried to configure this and it is not working, and the whole point of
-  // refusing an unsafe file mode is that they find out here rather than by
-  // noticing that nothing happens.
+  // One of the two outbound requests Raise makes - the update check below is the
+  // other - so its default is off and its default is silent: `off` rather than
+  // `warn`, exactly like no-mistakes and Lavish. A `problem` is different: it is
+  // only ever set when somebody has evidently tried to configure this and it is
+  // not working, and the whole point of refusing an unsafe file mode is that they
+  // find out here rather than by noticing that nothing happens.
   const forgeConfig = readForgeConfig();
   if (forgeConfig.problem) {
     warn('Pull request state', forgeConfig.problem);
@@ -881,6 +897,17 @@ async function cmdDoctor() {
     const cached = readUpdateCache();
     if (!cached) {
       ok('Update check', `enabled - nothing asked yet; ${bold('raise serve')} asks once a day`);
+    } else if (cached.latest && version === UNKNOWN_VERSION) {
+      // `isNewerVersion` fails closed on a version it cannot rank, which is
+      // right for `serve` - it stays quiet rather than nagging off a number it
+      // does not have. Reported as "up to date" it would be that same silence
+      // wearing a green tick: a claim that this installation is current, made
+      // from a version Raise could not read. Same shape as the branch below,
+      // and the same answer - say what is missing instead.
+      warn(
+        'Update check',
+        `the registry says ${cached.latest} is current, but this installation's package.json could not be read, so there is nothing to compare it against`,
+      );
     } else if (cached.latest && isNewerVersion(version, cached.latest)) {
       warn(
         'Update check',

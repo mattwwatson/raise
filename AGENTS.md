@@ -331,6 +331,7 @@ stratified on purpose, so read the whole file rather than one section.
 | `doctor` reports the update check without making it; only `serve` ever asks | `src/update-check.js`, `docs/tasks/12-version-notice.md` |
 | a failed check is stamped in the cache, so being offline is not a request per start | `src/update-check.js` |
 | `isNewerVersion` fails closed on anything it cannot rank, pre-release pairs included | `src/update-check.js` |
+| a version `doctor` could not read gets its own line; failing closed is not being up to date | `src/cli.js` (`UNKNOWN_VERSION`) |
 | a session nothing reported gets a row that refuses to say what it is doing | `src/untracked.js` |
 | the four states worth telling apart write byte-identical files | `src/untracked.js`, `docs/tasks/RAI-4-first-run-shows-something.md` |
 | the six bounds on the scan: window, tombstones, superseding, no id, no run, no pipeline agents | `src/untracked.js` |
