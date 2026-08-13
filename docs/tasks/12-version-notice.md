@@ -97,8 +97,9 @@ list is precisely the nag this is trying not to be.
 ## What leaves the machine, exactly
 
 One HTTPS `GET` to **`https://registry.npmjs.org/raise-cli/latest`**, at most once a day, and
-nothing else ever. No query string, no headers of ours, no version number, no machine
-identifier, no package list.
+nothing else ever. One header of ours, `accept: application/json`, which says nothing about the
+machine it came from. No query string, no version number, no machine or user identifier, no
+package list.
 
 What the registry can therefore see is an IP address, a timestamp, and the fact that somebody
 asked about `raise-cli` - which, since nobody else has a reason to ask about that package, is as
@@ -133,11 +134,14 @@ Everything external is injected - `fetch`, the clock, the file access - so the s
 the request that *would* have gone out without one going out.
 
 **The check runs in `src/cli.js`'s `serve` command and nowhere else in the running product.**
-`server.js` is untouched, so the `fetch: () => assert.fail('no outbound requests from the
-server')` guard sitting beside the `exec` guard on every server test stays exactly as it is and
-still proves what it proved before. Nothing under `hooks/` imports any of this: the hook and the
-pi extension run inside somebody else's agent and are governed by stricter rules, and a notifier
-there was a non-goal of the issue.
+`server.js` gained no code, so the `fetch: () => assert.fail('no outbound requests from the
+server')` guard sitting beside the `exec` guard on every server test is exactly as it was and
+still proves what it proved before. What did change there is two comments, narrowed once it was
+clear the guard proves a server whose `forge` block is off makes no request rather than that
+the server never makes one - the history is under
+[Implementation notes](#implementation-notes). Nothing under `hooks/` imports any of this: the
+hook and the pi extension run inside somebody else's agent and are governed by stricter rules,
+and a notifier there was a non-goal of the issue.
 
 **The notice is fired and never awaited.** `serve` starts the lookup as soon as the server is
 listening, prints its banner without waiting, and prints the notice when the answer arrives -
