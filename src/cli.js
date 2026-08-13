@@ -36,6 +36,7 @@ import { LavishState } from './lavish.js';
 import { ForgeState } from './forge.js';
 import { readForgeConfig } from './forge-config.js';
 import {
+  canCompareVersions,
   isNewerVersion,
   newerVersion,
   readUpdateCache,
@@ -146,11 +147,12 @@ function probablePort() {
 }
 
 /**
- * What `packageVersion` says when it could not read one, named because it has
- * two readers and only one of them may treat it as a version. `--version`
- * prints it, which reports ignorance honestly; `doctor` has to test for it,
- * because comparing it to a real version silently answers "not newer", which is
- * indistinguishable from being up to date.
+ * What `packageVersion` says when it could not read one. `--version` prints it,
+ * which reports ignorance honestly.
+ *
+ * Nothing tests for it: it is deliberately a string no `SEMVER` can parse, so
+ * `canCompareVersions` refuses it along with every other pair that cannot be
+ * ranked, and `doctor` needs one branch rather than two for what is one fact.
  */
 const UNKNOWN_VERSION = 'unknown';
 
@@ -897,24 +899,25 @@ async function cmdDoctor() {
     const cached = readUpdateCache();
     if (!cached) {
       ok('Update check', `enabled - nothing asked yet; ${bold('raise serve')} asks once a day`);
-    } else if (cached.latest && version === UNKNOWN_VERSION) {
-      // `isNewerVersion` fails closed on a version it cannot rank, which is
-      // right for `serve` - it stays quiet rather than nagging off a number it
-      // does not have. Reported as "up to date" it would be that same silence
-      // wearing a green tick: a claim that this installation is current, made
-      // from a version Raise could not read. Same shape as the branch below,
-      // and the same answer - say what is missing instead.
-      warn(
-        'Update check',
-        `the registry says ${cached.latest} is current, but this installation's package.json could not be read, so there is nothing to compare it against`,
-      );
     } else if (cached.latest && isNewerVersion(version, cached.latest)) {
       warn(
         'Update check',
         `${cached.latest} is available - you have ${version}, so run ${bold('npm install -g raise-cli')}`,
       );
-    } else if (cached.latest) {
+    } else if (cached.latest && canCompareVersions(version, cached.latest)) {
       ok('Update check', `${version} is the latest, as of ${ago(Date.now() - cached.checkedAt)}`);
+    } else if (cached.latest) {
+      // `isNewerVersion` fails closed on a pair it cannot rank, which is right
+      // for `serve` - it stays quiet rather than nagging off a comparison it did
+      // not make. Reported as "up to date" it would be that same silence wearing
+      // a green tick, so the `ok` above asks whether the two can be ranked at
+      // all rather than trusting a bare `false`. Both ways of getting here say
+      // the same thing: an unreadable `package.json`, and a pair of pre-releases
+      // the ranker refuses, are one fact - there is no comparison to report.
+      warn(
+        'Update check',
+        `the registry says ${cached.latest} is current, but this installation reports ${version}, which cannot be ranked against it - so whether you are up to date is not something Raise knows`,
+      );
     } else {
       // Asked and got nothing. Reported rather than folded into "up to date",
       // because a check that has not answered is something Raise does not know,

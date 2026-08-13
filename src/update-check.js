@@ -48,8 +48,10 @@
  * for an answer nobody is waiting on.
  *
  * **Nothing here is imported by `server.js`, by `hooks/` or by the page.** The
- * server's own suite asserts that it makes no outbound request at all, and that
- * guard is left exactly as it was; the hook and the pi extension run inside
+ * server's own suite asserts that a server whose `forge` block is off makes no
+ * outbound request at all - the forge lookup is the one it can make, and it goes
+ * through the `fetch` injected into it - and that guard is left exactly as it
+ * was, because nothing here ever reaches it; the hook and the pi extension run inside
  * somebody else's agent under stricter rules again, and a notifier in either was
  * ruled out. This runs in `raise serve`, once, and in nothing else.
  */
@@ -160,12 +162,21 @@ export function readUpdateConfig({ path = userConfigPath(), files = defaultConfi
  *
  * A record stamped in the future is discarded rather than trusted - the clock
  * has moved backwards, and a cache that cannot expire is one that would sit on
- * a version number forever.
+ * a version number forever. That rule is enforced here rather than in the
+ * caller that needs it most, because there are two callers and the other one
+ * reports what it reads: `doctor` used to print *"as of 0m ago"* over a stamp
+ * from next week, `ago` having clamped the negative age into something that
+ * looked like a fresh reading. Discarded, it correctly reaches doctor's
+ * "nothing asked yet" branch instead.
  *
- * @param {{path?: string, cache?: CacheAccess}} [deps]
+ * @param {{path?: string, cache?: CacheAccess, now?: number}} [deps]
  * @returns {UpdateCache|null}
  */
-export function readUpdateCache({ path = updateCachePath(), cache = defaultCacheAccess } = {}) {
+export function readUpdateCache({
+  path = updateCachePath(),
+  cache = defaultCacheAccess,
+  now = Date.now(),
+} = {}) {
   let raw;
   try {
     raw = JSON.parse(cache.readText(path));
@@ -175,7 +186,7 @@ export function readUpdateCache({ path = updateCachePath(), cache = defaultCache
     return null;
   }
   const checkedAt = Number(raw?.checkedAt);
-  if (!Number.isFinite(checkedAt) || checkedAt <= 0) return null;
+  if (!Number.isFinite(checkedAt) || checkedAt <= 0 || checkedAt > now) return null;
   const latest = typeof raw?.latest === 'string' && raw.latest ? raw.latest : null;
   return { checkedAt, latest };
 }
@@ -219,6 +230,37 @@ export function isNewerVersion(current, latest) {
     if (theirs.core[i] !== mine.core[i]) return theirs.core[i] > mine.core[i];
   }
   return Boolean(mine.pre) && !theirs.pre;
+}
+
+/**
+ * Whether the pair above is one `isNewerVersion` actually ranks.
+ *
+ * It exists because `false` from `isNewerVersion` says two different things and
+ * only one of them is "you are up to date". The other is "I refused to guess" -
+ * a version neither side could parse, or two pre-releases of the same release,
+ * which that function deliberately declines to order. A reader shown *"0.1.0 is
+ * the latest"* off the second one has been told something nobody checked, so
+ * anything that reports currency rather than acting on it has to ask this first.
+ * `raise doctor` does; `raise serve` does not need to, because staying quiet is
+ * the right answer to both.
+ *
+ * Two identical pre-releases are the one pair here that is knowable without
+ * being ranked - they are the same version - so they compare, and a reader on
+ * exactly the published release candidate is told so rather than fobbed off.
+ *
+ * @param {unknown} current
+ * @param {unknown} latest
+ * @returns {boolean}
+ */
+export function canCompareVersions(current, latest) {
+  const mine = parseVersion(current);
+  const theirs = parseVersion(latest);
+  if (!mine || !theirs) return false;
+  for (let i = 0; i < 3; i += 1) {
+    if (theirs.core[i] !== mine.core[i]) return true;
+  }
+  if (!mine.pre || !theirs.pre) return true;
+  return mine.pre === theirs.pre;
 }
 
 /**
@@ -274,10 +316,10 @@ export async function newerVersion({
     const settings = readUpdateConfig({ path: configPath, files });
     if (settings.enabled !== true) return null;
 
-    const known = readUpdateCache({ path: cachePath, cache });
+    const known = readUpdateCache({ path: cachePath, cache, now });
     const age = known ? now - known.checkedAt : Infinity;
     let latest;
-    if (known && age >= 0 && age < UPDATE_CHECK_INTERVAL_MS) {
+    if (known && age < UPDATE_CHECK_INTERVAL_MS) {
       latest = known.latest;
     } else {
       latest = await askRegistry(fetch).catch(() => null);

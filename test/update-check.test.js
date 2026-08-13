@@ -17,6 +17,7 @@ import assert from 'node:assert/strict';
 import {
   UPDATE_CHECK_INTERVAL_MS,
   REGISTRY_URL,
+  canCompareVersions,
   isNewerVersion,
   newerVersion,
   readUpdateCache,
@@ -219,9 +220,28 @@ test('an answer older than the interval is asked for again', async () => {
   assert.equal(latest, '0.3.0');
 });
 
-test('a cache stamped in the future is not trusted', async () => {
-  // The clock has moved backwards, and a record that cannot expire is one that
-  // would sit on a version number forever.
+test('a cache stamped in the future is discarded by the read itself', () => {
+  // Where the rule lives decides who gets it. `newerVersion` is not the only
+  // caller: `doctor` reads the cache directly and reports what it finds, so a
+  // stamp from next week used to reach it as a reading it then dated "0m ago" -
+  // a fresh-looking claim of currency off a clock that had moved backwards.
+  // Discarded here, both callers see what is true, which is that there is no
+  // usable record.
+  const cache = scratchCache(JSON.stringify({ checkedAt: NOW + 60_000, latest: '0.2.0' }));
+  assert.equal(readUpdateCache({ path: '/c/update-check.json', cache, now: NOW }), null);
+
+  // The boundary is not the discard: a stamp of exactly now is a reading taken
+  // this instant, which is the most current one there can be.
+  const justNow = scratchCache(JSON.stringify({ checkedAt: NOW, latest: '0.2.0' }));
+  assert.deepEqual(readUpdateCache({ path: '/c/update-check.json', cache: justNow, now: NOW }), {
+    checkedAt: NOW,
+    latest: '0.2.0',
+  });
+});
+
+test('a cache stamped in the future is asked again rather than believed', async () => {
+  // The same rule seen from the caller: an unusable record is not a recent one,
+  // so the interval does not suppress the request.
   const npm = registry('0.3.0');
   const cache = scratchCache(JSON.stringify({ checkedAt: NOW + 60_000, latest: '0.2.0' }));
   const latest = await newerVersion({
@@ -428,4 +448,30 @@ test('anything unrankable says no, because guessing is the worse error', () => {
 
 test('build metadata is ignored rather than making a version unrankable', () => {
   assert.equal(isNewerVersion('0.1.0', '0.2.0+build.7'), true);
+});
+
+test('a pair the ranker refuses is told apart from one it ranked as not newer', () => {
+  // The distinction the `false` above cannot carry. Everything the previous test
+  // asserts returns false from `isNewerVersion`, but only some of those mean
+  // "you are up to date" - the rest mean nobody compared anything. A reader
+  // shown "0.2.0-rc.1 is the latest" off the second kind has been told something
+  // that was never checked, which is why `doctor` asks this before reporting
+  // currency rather than trusting a bare false.
+  assert.equal(canCompareVersions('0.2.0-rc.1', '0.2.0-rc.2'), false, 'two pre-releases');
+  assert.equal(canCompareVersions('unknown', '0.2.0'), false, 'no version could be read');
+  assert.equal(canCompareVersions('0.1.0', 'latest'), false);
+  assert.equal(canCompareVersions(null, undefined), false);
+
+  // And the pairs that genuinely were ranked, including both directions of the
+  // pre-release rule, which is a real ordering rather than a refusal to order.
+  assert.equal(canCompareVersions('0.1.0', '0.2.0'), true);
+  assert.equal(canCompareVersions('0.2.0', '0.1.0'), true);
+  assert.equal(canCompareVersions('0.2.0-rc.1', '0.2.0'), true);
+  assert.equal(canCompareVersions('0.2.0', '0.2.0-rc.1'), true);
+
+  // Identical pre-releases are the one pre-release pair that is knowable without
+  // being ranked - they are the same version - so somebody sitting on exactly
+  // the published release candidate is told they are current, not fobbed off.
+  assert.equal(canCompareVersions('0.2.0-rc.1', '0.2.0-rc.1'), true);
+  assert.equal(isNewerVersion('0.2.0-rc.1', '0.2.0-rc.1'), false, 'and it is not an upgrade');
 });

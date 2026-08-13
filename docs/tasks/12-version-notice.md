@@ -231,9 +231,40 @@ fails closed on anything it cannot rank - correctly, since that is what keeps `s
 off a number it does not have. Read as a report, though, that same `false` reached the "up to
 date" branch and printed `unknown is the latest, as of 3h ago`: a green claim that this install
 is current, made from a version Raise never read. `raise --version` printing `unknown` is not
-the same act - it reports ignorance honestly - so the sentinel is named and `doctor` tests for
-it, warning that the registry's answer has nothing here to be compared against. The failing-
-closed rule is unchanged; what changed is that one reader no longer mistakes it for currency.
+the same act - it reports ignorance honestly. The failing-closed rule is unchanged; what changed
+is that one reader no longer mistakes it for currency.
+
+**Keying that branch on the sentinel was the wrong axis, though, and review caught it.** An
+unreadable version is only one of the two ways `isNewerVersion` returns `false` without having
+compared anything: it also declines to rank two pre-releases of the same release, so a machine
+on `0.2.0-rc.1` against a `latest` of `0.2.0-rc.2` got the same green *"is the latest"* the
+sentinel case had just been rescued from. The branch is therefore gated on **rankability**
+rather than on the sentinel, through `canCompareVersions` beside `isNewerVersion`, and the
+sentinel falls out of it for free - `unknown` is a string no `SEMVER` parses. The honest word is
+*"cannot be ranked against it"* and not *"could not be read"*, because the two roads to this
+branch are one fact: there is no comparison to report. `serve` needs none of this; staying quiet
+is the right answer to both, and only a report has to tell them apart.
+
+Identical pre-releases are the one pair let through: they are the same version, so somebody
+sitting on exactly the published release candidate is told they are current rather than fobbed
+off with a refusal. That is knowable without ranking anything.
+
+Chasing that down moved the sentinel itself. `packageVersion` only produced `unknown` from its
+`catch`, which is the *unreachable* half - the file it reads is the one Node resolves
+`"type": "module"` from, so a `package.json` that will not parse takes the process down before
+`src/cli.js` is imported at all. The reachable half is a `package.json` that parses and carries
+no `version`: that returned `undefined`, which `raise --version` printed as the word and
+`doctor` compared as a version. Both are the same fact - there is no version to be had - so
+they now return the same sentinel, checked on the value rather than only on the read.
+
+**The same false-currency shape had a third site, in the cache read.** `readUpdateCache`'s
+JSDoc said a record stamped in the future was discarded, and it was not: the discard lived in
+`newerVersion`'s `age >= 0`, so `doctor` - the other caller, which reports what it reads -
+trusted a stamp from next week and dated it *"as of 0m ago"*, `ago` having clamped the negative
+age into something that looked like a fresh reading. The rule now lives in `readUpdateCache`,
+which takes an injected `now`, so both callers get it and the sentence is true where it is
+written; `newerVersion`'s guard is gone as redundant, and the discarded record correctly reaches
+doctor's "nothing asked yet" branch. Where a rule lives decides who obeys it.
 
 Chasing that down moved the sentinel itself. `packageVersion` only produced `unknown` from its
 `catch`, which is the *unreachable* half - the file it reads is the one Node resolves

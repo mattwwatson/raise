@@ -150,7 +150,7 @@ machine at your address has Raise installed. It does **not** learn which version
 your version never leaves the machine, and the comparison happens here against the number the
 registry sent back. Nothing else about this changes anything above - it never upgrades
 anything, it is not in the hook or the extension, and the server that runs while your dashboard
-is open makes no request at all. Turning it on is
+is open never makes this request. Turning it on is
 [the same config file](#telling-you-when-there-is-a-newer-raise).
 
 Everything the hooks install is reversible - `uninstall-hooks`, `uninstall-codex`,
@@ -648,7 +648,8 @@ is ten notices and one request.
 
 `raise doctor` reports it too, and **reports it without asking anybody** - it prints what the
 last check found and how long ago that was, so it stays instant and truthful with no network.
-If the check has not answered it says that rather than saying you are up to date.
+If the check has not answered, or the two version numbers are not ones it can rank against each
+other, it says so rather than saying you are up to date.
 
 Everything about it fails silently: offline, a timeout, a rate limit, an answer it cannot make
 sense of. Each leaves `raise serve` printing exactly what it printed before you turned this on,
