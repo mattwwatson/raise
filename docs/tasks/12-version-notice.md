@@ -227,9 +227,10 @@ says.
 
 **A fourth case joined them: a version `doctor` could not read.** `packageVersion` returns
 `UNKNOWN_VERSION` when it does not come back with a usable version string, and `isNewerVersion`
-fails closed on anything it cannot rank - correctly, since that is what keeps `serve` quiet rather than nagging
-off a number it does not have. Read as a report, though, that same `false` reached the "up to
-date" branch and printed `unknown is the latest, as of 3h ago`: a green claim that this install
+fails closed on anything it cannot rank - correctly, since that is what keeps `serve` quiet
+rather than nagging off a number it does not have. Read as a report, though, that same `false`
+reached the "up to date" branch and printed `unknown is the latest, as of 3h ago`: a green claim
+that this install
 is current, made from a version Raise never read. `raise --version` printing `unknown` is not
 the same act - it reports ignorance honestly. The failing-closed rule is unchanged; what changed
 is that one reader no longer mistakes it for currency.
@@ -266,13 +267,16 @@ which takes an injected `now`, so both callers get it and the sentence is true w
 written; `newerVersion`'s guard is gone as redundant, and the discarded record correctly reaches
 doctor's "nothing asked yet" branch. Where a rule lives decides who obeys it.
 
-Chasing that down moved the sentinel itself. `packageVersion` only produced `unknown` from its
-`catch`, which is the *unreachable* half - the file it reads is the one Node resolves
-`"type": "module"` from, so a `package.json` that will not parse takes the process down before
-`src/cli.js` is imported at all. The reachable half is a `package.json` that parses and carries
-no `version`: that returned `undefined`, which `raise --version` printed as the word and
-`doctor` compared as a version. Both are the same fact - there is no version to be had - so
-they now return the same sentinel, checked on the value rather than only on the read.
+**The claim about the `fetch` guard needed narrowing at three sites, and the first attempt at it
+widened the claim instead.** `server.test.js`'s `fetch: () => assert.fail(...)` was described as
+proving that Raise makes no outbound request; rewritten to say *this server* makes none,
+configured or not, it became false, because `createMonitorServer` hands that injected `fetch`
+straight to `ForgeState` and the poll calls `observe` on it every second. What the guard proves
+is that a server whose `forge` block is off makes no request - it passes because every
+`scratch()` points `RAISE_HOME` at an empty directory, not because the poll path cannot reach
+the network. `src/server.js`'s header and the comment beside the injection say that, and
+`AGENTS.md`'s safe-change rule, which is the canonical carrier, was the third site and says it
+too. The update check is the one that genuinely lives outside the server.
 
 ### What was verified by hand
 

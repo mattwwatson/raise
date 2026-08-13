@@ -623,9 +623,12 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
   named in it; the update check sends one GET to `registry.npmjs.org` for this package's own
   name. Each is off unless `~/.raise/config.json` says so, each is separately opted into, and
   each is silent in every failure. `server.test.js` carries `fetch: () => assert.fail(...)`
-  beside its `exec` guard on every other test, which is what proves an unconfigured Raise makes
-  no request at all - **do not weaken that guard either**, and note that it still holds
-  literally: the update check runs in `raise serve`'s own command, never in `server.js`.
+  beside its `exec` guard on every other test, which is what proves a server whose `forge` block
+  is off makes no request at all - **do not weaken that guard either**, and do not read it as
+  more than it says. The one request the server itself can make is the forge lookup, fired from
+  the poll through that very injection; the guard passes because every `scratch()` points
+  `RAISE_HOME` at an empty directory. The update check is outside the server entirely, in
+  `raise serve`'s own command.
 
   **A third one is a change to the README's Security section first and code second.** That
   section's strongest sentence - that in the default configuration Raise makes no outbound

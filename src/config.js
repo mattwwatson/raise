@@ -131,7 +131,7 @@ export function userConfigPath() {
  * Beside the config file rather than in it: that one is the user's to write and
  * this one is ours, and a tool that edits the file it tells you to hand-edit is
  * one that will eventually reformat your comments away. It holds nothing secret
- * - a version string and two timestamps - and exists so that restarting `raise
+ * - a version string and a timestamp - and exists so that restarting `raise
  * serve` ten times in an afternoon is ten notices and one request.
  */
 export function updateCachePath() {
