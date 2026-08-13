@@ -254,6 +254,18 @@ Identical pre-releases are the one pair let through: they are the same version, 
 sitting on exactly the published release candidate is told they are current rather than fobbed
 off with a refusal. That is knowable without ranking anything.
 
+**Adding that helper put the ranking rule in two places, which is the same failure one step
+further back.** `canCompareVersions` was written with its own copy of the parse and the core
+loop, so teaching `isNewerVersion` to order two pre-releases would have left the other calling
+that pair unrankable - and `doctor` reporting *"cannot be ranked against it"* over a pair it had
+just ranked. A rule held true by two functions agreeing is a rule that drifts, which is the
+lesson of this branch generally. So a private three-valued `compareVersions` now states it once,
+returning a comparator's `-1`/`0`/`1` and `null` for a pair it declines to order, and both
+exports are one line on top of it: `=== -1` and `!== null`. No behaviour changed - every
+existing test passed unedited - and a test asserts the property directly across a table of
+pairs, so the two can no longer disagree about whether a comparison happened without the suite
+saying so.
+
 Chasing that down moved the sentinel itself. `packageVersion` only produced `unknown` from its
 `catch`, which is the *unreachable* half - the file it reads is the one Node resolves
 `"type": "module"` from, so a `package.json` that will not parse takes the process down before
@@ -303,5 +315,3 @@ nothing; and a `0644` config file is refused with both features reporting it.
   told, and so that there is somewhere for release notes to live, costs no runtime code and no
   outbound request - and it is worth doing whether or not this shipped, since it reaches the
   people who never turn this on. It is a separate item and was not built here.
-</content>
-</invoke>

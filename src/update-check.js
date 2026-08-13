@@ -204,63 +204,87 @@ function parseVersion(version) {
 }
 
 /**
+ * Rank `current` against `latest`, or decline to.
+ *
+ * **The one place the ranking rule lives.** Two exported questions are asked of
+ * this comparison - *is there something newer* and *was there a comparison at
+ * all* - and they used to answer it separately, each with its own copy of the
+ * parse and the core loop. That is a rule stated twice, which is a rule that
+ * eventually disagrees with itself: teach one of them to order two pre-releases
+ * and the other goes on calling that pair unrankable, so `doctor` reports "cannot
+ * be ranked" over a pair this now ranks. Same class of wrong report as the ones
+ * that shape cost two rounds to close, so the rule is stated once and both are a
+ * line on top of it.
+ *
+ * Semver, without a dependency and without pretending to be one: `major.minor.patch`
+ * numerically, a pre-release below its own release, build metadata ignored. That
+ * is the whole of what the `dist-tags.latest` this reads can produce.
+ *
+ * **Two pairs are declined rather than guessed**, and `null` is how it says so.
+ * Anything either side cannot parse - a `latest` the registry has changed the
+ * shape of, a `version` a checkout has invented - and two *different*
+ * pre-releases of one release, which have no order this can know. Identical
+ * pre-releases are not declined: they are the same version, which is knowable
+ * without ranking anything.
+ *
+ * @param {unknown} current
+ * @param {unknown} latest
+ * @returns {-1|0|1|null} a comparator's answer, or null for a pair it will not order
+ */
+function compareVersions(current, latest) {
+  const mine = parseVersion(current);
+  const theirs = parseVersion(latest);
+  if (!mine || !theirs) return null;
+  for (let i = 0; i < 3; i += 1) {
+    if (theirs.core[i] !== mine.core[i]) return theirs.core[i] > mine.core[i] ? -1 : 1;
+  }
+  // Same core. Equal pre-releases - including neither having one - are the same
+  // version; one pre-release against its own release is ordered; two different
+  // ones are the pair above that gets no answer.
+  if (mine.pre === theirs.pre) return 0;
+  if (mine.pre && !theirs.pre) return -1;
+  if (!mine.pre && theirs.pre) return 1;
+  return null;
+}
+
+/**
  * Whether `latest` is a version worth telling somebody on `current` about.
  *
- * Semver comparison, without a dependency and without pretending to be one. It
- * ranks `major.minor.patch` numerically and puts a pre-release below its own
- * release, which is the whole of what the `dist-tags.latest` this reads can
- * produce.
- *
- * **Everything else fails closed.** Two pre-releases of the same version are not
- * ranked against each other, and anything either side cannot parse - a `latest`
- * the registry has changed the shape of, a `version` a checkout has invented -
- * returns false. The two errors are not comparable: saying nothing costs
- * somebody an upgrade a week later, and guessing puts a monitor on the page
- * asserting something untrue about itself.
+ * **A declined pair fails closed**, because the two errors are not comparable:
+ * saying nothing costs somebody an upgrade a week later, and guessing puts a
+ * monitor on the page asserting something untrue about itself. So a pair
+ * `compareVersions` will not order reads here exactly like one it ordered as not
+ * newer - `raise serve` stays quiet either way, which is the right answer to
+ * both. What that silence costs is that `false` alone cannot tell them apart,
+ * which is what `canCompareVersions` is for.
  *
  * @param {unknown} current
  * @param {unknown} latest
  * @returns {boolean}
  */
 export function isNewerVersion(current, latest) {
-  const mine = parseVersion(current);
-  const theirs = parseVersion(latest);
-  if (!mine || !theirs) return false;
-  for (let i = 0; i < 3; i += 1) {
-    if (theirs.core[i] !== mine.core[i]) return theirs.core[i] > mine.core[i];
-  }
-  return Boolean(mine.pre) && !theirs.pre;
+  return compareVersions(current, latest) === -1;
 }
 
 /**
- * Whether the pair above is one `isNewerVersion` actually ranks.
+ * Whether the pair was compared at all.
  *
  * It exists because `false` from `isNewerVersion` says two different things and
- * only one of them is "you are up to date". The other is "I refused to guess" -
- * a version neither side could parse, or two pre-releases of the same release,
- * which that function deliberately declines to order. A reader shown *"0.1.0 is
- * the latest"* off the second one has been told something nobody checked, so
- * anything that reports currency rather than acting on it has to ask this first.
- * `raise doctor` does; `raise serve` does not need to, because staying quiet is
- * the right answer to both.
+ * only one of them is "you are up to date". The other is "I refused to guess",
+ * and a reader shown *"0.1.0 is the latest"* off the second one has been told
+ * something nobody checked. So anything that **reports** currency rather than
+ * acting on it has to ask this first: `raise doctor` does, and `raise serve`
+ * does not need to, since staying quiet answers both.
  *
- * Two identical pre-releases are the one pair here that is knowable without
- * being ranked - they are the same version - so they compare, and a reader on
- * exactly the published release candidate is told so rather than fobbed off.
+ * Identical pre-releases compare, so a reader on exactly the published release
+ * candidate is told they are current rather than fobbed off with a refusal.
  *
  * @param {unknown} current
  * @param {unknown} latest
  * @returns {boolean}
  */
 export function canCompareVersions(current, latest) {
-  const mine = parseVersion(current);
-  const theirs = parseVersion(latest);
-  if (!mine || !theirs) return false;
-  for (let i = 0; i < 3; i += 1) {
-    if (theirs.core[i] !== mine.core[i]) return true;
-  }
-  if (!mine.pre || !theirs.pre) return true;
-  return mine.pre === theirs.pre;
+  return compareVersions(current, latest) !== null;
 }
 
 /**

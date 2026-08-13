@@ -475,3 +475,48 @@ test('a pair the ranker refuses is told apart from one it ranked as not newer', 
   assert.equal(canCompareVersions('0.2.0-rc.1', '0.2.0-rc.1'), true);
   assert.equal(isNewerVersion('0.2.0-rc.1', '0.2.0-rc.1'), false, 'and it is not an upgrade');
 });
+
+test('the two questions never disagree about whether a pair was compared', () => {
+  // The coupling, enforced rather than described. Both exports answer different
+  // questions about one comparison, so a change to the ranking rule that reaches
+  // only one of them is the bug this pins: teach `isNewerVersion` to order two
+  // pre-releases and leave `canCompareVersions` calling them unrankable, and
+  // doctor reports "cannot be ranked against it" over a pair that was just
+  // ranked - the same false report as "unknown is the latest", one step over.
+  // Asserted through the two public answers rather than the shared primitive,
+  // because it is their agreement that a reader of `doctor` actually depends on.
+  const PAIRS = [
+    ['0.1.0', '0.2.0'],
+    ['1.0.0', '1.0.1'],
+    ['0.2.0-rc.1', '0.2.0'],
+    ['0.2.0-rc.1', '0.2.0-rc.1'],
+    ['0.1.0', '0.1.0'],
+    ['0.1.0', '0.2.0+build.7'],
+    ['0.2.0-rc.1', '0.2.0-rc.2'],
+    ['unknown', '0.2.0'],
+    ['0.1.0', 'latest'],
+    ['0.1.0', '0.2'],
+    ['0.1.0', ''],
+    [null, undefined],
+  ];
+
+  for (const [a, b] of PAIRS) {
+    const pair = `${a} vs ${b}`;
+    const comparable = canCompareVersions(a, b);
+    // Whether a pair can be ranked is a property of the pair, so asking it the
+    // other way round must not change the answer.
+    assert.equal(canCompareVersions(b, a), comparable, `${pair}: rankability changed with order`);
+
+    if (comparable) {
+      assert.ok(
+        !(isNewerVersion(a, b) && isNewerVersion(b, a)),
+        `${pair}: each cannot be newer than the other`,
+      );
+    } else {
+      // The load-bearing direction: nothing may claim an upgrade off a
+      // comparison that never happened.
+      assert.equal(isNewerVersion(a, b), false, `${pair}: unranked pair claimed an upgrade`);
+      assert.equal(isNewerVersion(b, a), false, `${pair}: unranked pair claimed one in reverse`);
+    }
+  }
+});
