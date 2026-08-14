@@ -305,5 +305,17 @@ else the credential-holding directory landed at `0755` under an ordinary umask -
 function of which command a user happened to run first. It now passes `mode: 0o700`, the mode
 `ensureDirs` uses.
 
-**Test count 846 → 874.** The two new files are 13 tests each, plus one apiece for the two
-corrections above.
+**The restart notice is said on the way on only.** Printed after a `disable` it invited a
+restart that changes nothing - the check runs once at `raise serve` startup and the process
+never asks again - while implying the check was meanwhile still running. The watched line stays
+on both paths, being true either way. `cli-enable.test.js` pins the disable path.
+
+**A file Raise cannot read is not a file with bad JSON in it.** Both readers wrapped the read
+and the parse in one `try`, so `EACCES` on a root-owned file and `EISDIR` where a directory
+stands in for the file were both reported as invalid JSON - a diagnosis pointing at a syntax
+error that is not there. The two are separated in `readUserConfig` and `readUserConfigForWrite`
+alike, since the rule belongs to both; the refusal is unchanged, an unreadable file still being
+one Raise declines to overwrite.
+
+**Test count 846 → 877.** The two new files are 13 tests each, plus one apiece for the two
+`watched`/`0700` corrections and three for the two above.

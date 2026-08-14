@@ -135,9 +135,20 @@ export function readUserConfig({ path = userConfigPath(), files = defaultConfigA
     };
   }
 
+  // The read and the parse are separate because they fail for unrelated reasons
+  // and only one of them is the user's JSON. A file owned by root, or a
+  // directory sitting where the file should be, reported as malformed JSON sends
+  // somebody looking for a syntax error in a file that has none.
+  let text;
+  try {
+    text = files.readText(path);
+  } catch (err) {
+    return { data: null, problem: `${path} could not be read (${err.message})` };
+  }
+
   let raw;
   try {
-    raw = JSON.parse(files.readText(path));
+    raw = JSON.parse(text);
   } catch (err) {
     return { data: null, problem: `${path} is not valid JSON (${err.message})` };
   }
@@ -285,9 +296,23 @@ export function readUserConfigForWrite({ path = userConfigPath(), files = defaul
     return { exists: false, mode: null, data: {} };
   }
 
+  // Refused for the same reason an unparseable file is, and named for what it
+  // actually is: `EACCES` on a root-owned file, or `EISDIR` where a directory
+  // stands in for the file, reported as invalid JSON is a diagnosis pointing at
+  // a syntax error that is not there.
+  let text;
+  try {
+    text = files.readText(path);
+  } catch (err) {
+    throw new Error(
+      `${path} exists but could not be read (${err.message}). Fix it first - Raise will not ` +
+        'replace a config file it cannot read, because it may hold a credential.',
+    );
+  }
+
   let raw;
   try {
-    raw = JSON.parse(files.readText(path));
+    raw = JSON.parse(text);
   } catch (err) {
     throw new Error(
       `${path} is not valid JSON (${err.message}). Fix it first - Raise will not ` +

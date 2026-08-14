@@ -768,15 +768,22 @@ async function cmdSetFeature(flags, positional, enabled) {
     );
   }
   // Whether a running server would notice this is a property of the feature,
-  // not of the command - see `watched` in `CONFIG_FEATURES`.
-  console.log(
-    dim(
-      feature.watched
-        ? 'A running raise serve picks this up within a second; nothing to restart.'
-        : 'The registry is asked once, when raise serve starts, so a running one will not ' +
-            'pick this up until you restart it.',
-    ),
-  );
+  // not of the command - see `watched` in `CONFIG_FEATURES`. The watched line is
+  // true either way round, so it is said on both. The unwatched one is said on
+  // the way on only: turning the check *off* is nothing a restart could pick up,
+  // because it runs once at startup and the process never asks again - so the
+  // sentence would invite a pointless restart and imply the check is meanwhile
+  // still happening, which it is not.
+  if (feature.watched) {
+    console.log(dim('A running raise serve picks this up within a second; nothing to restart.'));
+  } else if (enabled) {
+    console.log(
+      dim(
+        'The registry is asked once, when raise serve starts, so a running one will not ' +
+          'pick this up until you restart it.',
+      ),
+    );
+  }
 }
 
 async function cmdUninstallHooks(flags) {

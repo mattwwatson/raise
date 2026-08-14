@@ -259,6 +259,38 @@ test('what a running server does with the write is said per feature, not as a bl
   }
 });
 
+test('turning the update check off says nothing about restarting, because a restart changes nothing', async () => {
+  // The check runs once at `raise serve` startup and the process never asks
+  // again, so a running server behaves identically whether or not it "picks up"
+  // the disable. Telling somebody to restart for it would invite a pointless
+  // restart and imply the check is meanwhile still running.
+  const s = scratch({ config: '{"updates":{"enabled":true}}\n' });
+  try {
+    const { stdout } = await raise(['disable', 'update-check', '--yes'], s.home);
+    assert.match(stdout, /Update check disabled/);
+    assert.doesNotMatch(stdout, /restart/);
+  } finally {
+    s.cleanup();
+  }
+});
+
+test('a config path Raise cannot read is refused as unreadable, not as bad JSON', async () => {
+  // A directory where the file should be gives EISDIR, which is the same shape
+  // as a root-owned file's EACCES: reported as malformed JSON it sends you
+  // looking for a syntax error in a file that has none.
+  const s = scratch();
+  try {
+    mkdirSync(s.path, { mode: 0o700 });
+    await assert.rejects(raise(['enable', 'update-check', '--yes'], s.home), (err) => {
+      assert.match(err.stderr, /could not be read/);
+      assert.doesNotMatch(err.stderr, /not valid JSON/);
+      return err.code === 1;
+    });
+  } finally {
+    s.cleanup();
+  }
+});
+
 test('every command raise doctor names is one raise enable actually accepts', async () => {
   // What you read in the diagnostic is what you type to fix it - and asserting
   // that against the same literals `cli.js` prints would prove nothing. So the

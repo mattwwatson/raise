@@ -11,18 +11,21 @@
  *
  * The read half is covered by `forge-config.test.js` and `update-check.test.js`,
  * which is where the refusal rule is exercised through the features that own the
- * blocks.
+ * blocks. The one exception is here rather than there on purpose: how a failed
+ * *read* is told apart from a failed parse is a rule both readers share, so it
+ * is pinned once, against both, in the module that owns them.
  */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, statSync, chmodSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, statSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import {
   CONFIG_FEATURES,
   configFeature,
+  readUserConfig,
   readUserConfigForWrite,
   setFeature,
   writeUserConfig,
@@ -176,6 +179,31 @@ test('reading for a write throws on JSON it cannot parse, rather than offering a
     assert.throws(() => readUserConfigForWrite({ path: s.path }), /not valid JSON/);
     writeFileSync(s.path, '[1, 2]');
     assert.throws(() => readUserConfigForWrite({ path: s.path }), /rather than a JSON object/);
+  } finally {
+    s.cleanup();
+  }
+});
+
+test('a config path that cannot be read is refused as unreadable, not as bad JSON', () => {
+  // A read failure and a parse failure are unrelated facts, and only one of them
+  // is about the user's JSON. A directory standing where the file should be
+  // gives EISDIR, the same shape a root-owned file's EACCES has; called invalid
+  // JSON it sends somebody hunting a syntax error in a file that has none. The
+  // refusal itself is unchanged - an unreadable file is still never overwritten.
+  const s = scratch();
+  try {
+    mkdirSync(s.path, { mode: 0o700 });
+    assert.throws(() => readUserConfigForWrite({ path: s.path }), (err) => {
+      assert.match(err.message, /could not be read/);
+      assert.doesNotMatch(err.message, /not valid JSON/);
+      return true;
+    });
+
+    // The reader that only reports has the same split, for the same reason.
+    const { data, problem } = readUserConfig({ path: s.path });
+    assert.equal(data, null);
+    assert.match(problem, /could not be read/);
+    assert.doesNotMatch(problem, /not valid JSON/);
   } finally {
     s.cleanup();
   }
