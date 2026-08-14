@@ -50,9 +50,11 @@ the execution path to compromise.
 - **Raise never writes Codex's `config.toml`.** That file records what *you* have agreed to let
   Codex run, and forging a consent hash would be installing a silent executable on your behalf.
   It is why Codex asks you to approve the hook yourself.
-- **One outbound request exists and is off by default.** With the forge lookup enabled, a pull
-  request URL already on your dashboard is sent to the forge hosting it, and nothing else. With
-  it off, Raise makes no network request of any kind.
+- **Two outbound requests exist, they are separately opted into, and both are off by default.**
+  With the forge lookup enabled, a pull request URL already on your dashboard is sent to the
+  forge hosting it, and nothing else. With the update check enabled, one request a day goes to
+  `registry.npmjs.org` for this package's own name, carrying no version, no identifier and no
+  query string. With both off - the default - Raise makes no network request of any kind.
 - **The Bitbucket token is read from a `0600` file, never from the environment.** Deliberate:
   child processes inherit the environment, and several of them run on a one-second loop. An
   unsafe file mode makes Raise refuse the whole file rather than honour the half without a

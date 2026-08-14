@@ -179,6 +179,28 @@ test('the file is parsed once and then only when it changes', () => {
   assert.equal(file.state.reads, 2);
 });
 
+test('an unchanged file yields the same object, and a changed one a different object', () => {
+  // Identity, not equality - `assert.equal` on purpose. `ForgeState#observe`
+  // notices a changed configuration by comparing references, so handing it a
+  // fresh object for an unchanged file makes every poll look like a change and
+  // drops the fifteen-minute failure backoff with it: a forge lookup that failed
+  // would be re-asked once a second, for the rest of the day, against a
+  // repository the credential cannot see. The parse count above cannot catch
+  // that, because re-deriving from a cached read costs no read at all.
+  const file = editable();
+  file.write(JSON.stringify({ forge: { enabled: true } }));
+  const read = watchForgeConfig({ path: '/c.json', files: file.files });
+
+  const first = read();
+  assert.equal(read(), first, 'an unchanged file must keep its identity across polls');
+
+  // And the converse, since a cache that never invalidates would also pass the
+  // assertion above: a changed file has to arrive as a different object, or
+  // `observe` never notices the user turning the forge off.
+  file.write(JSON.stringify({ forge: { enabled: false } }));
+  assert.notEqual(read(), first, 'a changed file must arrive as a new object');
+});
+
 test('a file written under a running monitor is noticed, because absence is not cached', () => {
   // The same problem `nm-state.js` has with the database appearing: only the
   // positive case may be remembered, or the ordinary act of configuring this

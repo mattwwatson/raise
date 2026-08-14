@@ -9,8 +9,9 @@
  * so unlike the transcript - which may only ever clear a block, never assert one
  * - a forge reading is allowed to assert, and it outranks all three sources.
  *
- * It is the only outbound network request Raise makes, so it is off until the
- * user turns it on, and every failure is indistinguishable from it being off. No
+ * It is one of the two outbound network requests Raise makes - the other is the
+ * update check in `update-check.js` - and, like it, it is off until the user
+ * turns it on and every failure is indistinguishable from it being off. No
  * credential, no `gh`, no network, a private repo, a rate limit: each of them
  * leaves the row exactly as it was before this module existed. Failures are
  * cached as well as answers, so a repository the credential cannot see is asked

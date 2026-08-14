@@ -209,6 +209,23 @@ test('doctor reports a port held by a Raise it has no record of', async () => {
   }
 });
 
+test('doctor reports the update check as off, and asks nobody about it', async () => {
+  // The scratch home has no config.json, which is the default every reader of
+  // the README's Security section is being told about. `doctor` has to say so -
+  // a check omitted from the report is one the reader cannot see was made - and
+  // it has to say so without contacting the registry, which is why this passes
+  // offline and why a run that hung would fail it by timing out.
+  const { dir, cleanup } = scratch();
+  try {
+    const { code, stdout } = await cli(['doctor'], dir);
+    assert.equal(code, 0, `an opt-in nobody took must not fail the check:\n${stdout}`);
+    assert.match(stdout, /Update check\s+not enabled/);
+    assert.ok(!/is available/.test(stdout), `a version claim off no reading:\n${stdout}`);
+  } finally {
+    cleanup();
+  }
+});
+
 test('doctor treats a machine without no-mistakes as a setup, not a failure', async () => {
   // no-mistakes is optional, so "not installed" is neither a fault nor
   // something to act on. Reporting it as `fail` - which is what a missing

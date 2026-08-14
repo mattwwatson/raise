@@ -26,8 +26,16 @@
  * second timer, pushes a stream and answers hook posts bounded at two seconds;
  * one blocking `spawnSync` stalls all three, and the dropped signal is the one
  * you cared about. `server.test.js` injects an `exec` that fails the test if it
- * is ever called - do not weaken that guard, nor the `fetch` beside it that
- * proves an unconfigured Raise makes no outbound request at all.
+ * is ever called - do not weaken that guard, nor the `fetch` beside it, which
+ * proves a server whose `forge` block is off makes no outbound request at all.
+ * Say it exactly that way. The one request this server *can* make is the forge
+ * lookup, and it goes through this very injection: the `fetch` handed in here
+ * reaches `ForgeState`, which the poll calls into every second. The guard passes
+ * because every `scratch()` in `server.test.js` points `RAISE_HOME` at an empty
+ * directory, so `watchForgeConfig()` returns disabled and `observe` returns
+ * before any request - not because the poll path cannot reach the network. The
+ * update check is the one that genuinely lives outside: it runs in `cli.js`'s
+ * `serve` command, before this server exists.
  *
  * **A reading we did not get is not evidence**, which is why the `release` and
  * `prune` calls in the poll are each guarded on a non-empty list rather than
@@ -120,8 +128,10 @@ export function createMonitorServer({
   exec = defaultExec,
   execAsync = defaultExecAsync,
   // Injected for the same reason `exec` is, and guarded the same way: the suite
-  // passes one that fails the test if it is ever called, which is what proves an
-  // unconfigured Raise makes no outbound request at all.
+  // passes one that fails the test if it is ever called, which is what proves a
+  // server whose `forge` block is off makes no outbound request at all. It
+  // proves that and not more - this is the fetch `ForgeState` is built with
+  // below, so an enabled forge reaches the network through here, from the poll.
   fetch = globalThis.fetch,
   // A reader rather than a reading: `~/.raise/config.json` is the one file the
   // user writes, and the README tells them to write it, so an answer captured

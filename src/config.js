@@ -114,13 +114,28 @@ export function tokenPath() {
 /**
  * The one file the user writes rather than one Raise generates.
  *
- * It holds the opt-in for the forge lookup and, for Bitbucket, a credential -
- * which is why it lives here beside `token` and is held to the same `0600`.
- * See `src/forge-config.js` for why the credential may not come from the
- * environment instead.
+ * It holds the opt-in for each of the two features that reach the network - the
+ * forge lookup and the update check - and, for Bitbucket, a credential, which is
+ * why it lives here beside `token` and is held to the same `0600`. See
+ * `src/user-config.js` for the rule that decides whether it is read at all, and
+ * `src/forge-config.js` for why the credential may not come from the environment
+ * instead.
  */
-export function forgeConfigPath() {
+export function userConfigPath() {
   return join(monitorHome(), 'config.json');
+}
+
+/**
+ * Where the update check remembers what the registry last said.
+ *
+ * Beside the config file rather than in it: that one is the user's to write and
+ * this one is ours, and a tool that edits the file it tells you to hand-edit is
+ * one that will eventually reformat your comments away. It holds nothing secret
+ * - a version string and a timestamp - and exists so that restarting `raise
+ * serve` ten times in an afternoon is ten notices and one request.
+ */
+export function updateCachePath() {
+  return join(monitorHome(), 'update-check.json');
 }
 
 export const DEFAULT_PORT = 7717;
