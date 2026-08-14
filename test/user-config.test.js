@@ -18,7 +18,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, statSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import {
   CONFIG_FEATURES,
@@ -104,6 +104,20 @@ test('a new file is created 0600, whatever the umask says', () => {
     assert.equal(backup, null, 'nothing to back up when there was no file');
     assert.equal(mode(s.path), '0600');
     assert.deepEqual(JSON.parse(readFileSync(s.path, 'utf8')), { updates: { enabled: true } });
+  } finally {
+    s.cleanup();
+  }
+});
+
+test('the directory is created 0700, so the mode does not depend on which command ran first', () => {
+  // ~/.raise holds a credential, and `mkdirSync` with recursive:true will not
+  // tighten a directory that already exists - so if this command is the first
+  // thing to create it, it has to create it the way `ensureDirs` does.
+  const s = scratch();
+  try {
+    const home = join(dirname(s.path), '.raise');
+    writeUserConfig(join(home, 'config.json'), { updates: { enabled: true } });
+    assert.equal(mode(home), '0700');
   } finally {
     s.cleanup();
   }

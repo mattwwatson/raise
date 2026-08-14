@@ -43,9 +43,29 @@ function scratch({ config = null, fileMode = 0o600 } = {}) {
   return { home, path, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
+/**
+ * The scratch home, plus every other installation this CLI might otherwise read.
+ *
+ * `raise doctor` opens the no-mistakes database and walks all three agents'
+ * session directories, so with `RAISE_HOME` alone the doctor test below reads
+ * whatever the machine running the suite happens to have - a live no-mistakes
+ * database included, since this suite runs inside that pipeline.
+ * `cli-serve.test.js` isolates the same three agent homes for the same reason.
+ */
+function scratchEnv(home) {
+  return {
+    ...process.env,
+    RAISE_HOME: home,
+    NM_HOME: home,
+    CLAUDE_CONFIG_DIR: home,
+    PI_CODING_AGENT_DIR: home,
+    CODEX_HOME: home,
+  };
+}
+
 function raise(args, home, options = {}) {
   return execFileAsync(process.execPath, [CLI, ...args], {
-    env: { ...process.env, RAISE_HOME: home },
+    env: scratchEnv(home),
     ...options,
   });
 }
@@ -154,7 +174,7 @@ test('answering no at the prompt writes nothing', async () => {
   const s = scratch();
   try {
     const child = execFileAsync(process.execPath, [CLI, 'enable', 'update-check'], {
-      env: { ...process.env, RAISE_HOME: s.home },
+      env: scratchEnv(s.home),
     });
     child.child.stdin.end('n\n');
     const { stdout } = await child;
@@ -214,6 +234,24 @@ test('there is no way to pass a credential on the command line', async () => {
     const after = read(s.path);
     assert.deepEqual(after, { forge: { enabled: true } }, 'nothing from --token may be stored');
     assert.doesNotMatch(readFileSync(s.path, 'utf8'), /secret/);
+  } finally {
+    s.cleanup();
+  }
+});
+
+test('what a running server does with the write is said per feature, not as a blanket line', async () => {
+  // The forge block is re-read on the poll loop, so "nothing to restart" is true
+  // of it. The update check is asked once at `raise serve` startup, so the same
+  // sentence over it would be a confident false claim - the failure this whole
+  // page is built against, printed by the tool itself.
+  const s = scratch();
+  try {
+    const forge = await raise(['enable', 'pull-request-state', '--yes'], s.home);
+    assert.match(forge.stdout, /picks this up within a second; nothing to restart/);
+
+    const updates = await raise(['enable', 'update-check', '--yes'], s.home);
+    assert.match(updates.stdout, /will not pick this up until you restart it/);
+    assert.doesNotMatch(updates.stdout, /nothing to restart/);
   } finally {
     s.cleanup();
   }

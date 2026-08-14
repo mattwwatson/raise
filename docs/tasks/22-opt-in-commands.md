@@ -270,9 +270,31 @@ the file. A non-goal recorded only in prose is one a later change can violate wi
 going red; this one now has a test, because the cost of getting it wrong is a credential in
 every `ps` on the machine.
 
-**The doctor assertion in `cli-enable.test.js` shells out**, which AGENTS.md would ordinarily
-refuse. It is kept because `cli-codex.test.js` and `cli-serve.test.js` already run `raise
-doctor` end to end, so it is the established pattern rather than a new exception, and what it
-asserts - that the diagnostic names the command - is the naming decision this item turns on.
+**The doctor assertion in `cli-enable.test.js` shells out**, which is the established pattern -
+`cli-codex.test.js` and `cli-serve.test.js` both run `raise doctor` end to end - and what it
+asserts, that the diagnostic names the command, is the naming decision this item turns on. The
+precedent is the *shell-out*, and it comes with an obligation this first version missed: both
+of those files point the homes `doctor` reads at their own scratch directory,
+`cli-codex.test.js` passing `NM_HOME` and `CODEX_HOME` and `cli-serve.test.js` isolating all
+three agent homes. With `RAISE_HOME` alone the test read the developer's live installation, and
+inside this pipeline a live no-mistakes database. `cli-enable.test.js`'s helper now sets
+`NM_HOME`, `CLAUDE_CONFIG_DIR`, `PI_CODING_AGENT_DIR` and `CODEX_HOME` too.
 
-**Test count 846 → 872.** The two new files are 13 tests each.
+**"Nothing to restart" is a property of the feature, and saying it of both was wrong.** The
+first version printed one closing line after every write. It is true of the forge, whose block
+`watchForgeConfig` re-reads on the poll loop, and false of the update check, which `newerVersion`
+asks exactly once at `raise serve` startup and never again - so `raise enable update-check`
+against a running server made a confident false claim, in a tool whose entire purpose is
+removing those. `CONFIG_FEATURES` now carries `watched`, so the fact sits beside the feature
+definition rather than in a `block` comparison in `cli.js`, and `cli-enable.test.js` pins both
+sentences.
+
+**`~/.raise` is created `0700` by the writer, not just `0600` by the file.** `writeUserConfig`
+created the directory with no `mode`, so on a machine where `raise enable` ran before anything
+else the credential-holding directory landed at `0755` under an ordinary umask - and because
+`mkdirSync` with `recursive: true` will not tighten an existing directory, the mode became a
+function of which command a user happened to run first. It now passes `mode: 0o700`, the mode
+`ensureDirs` uses.
+
+**Test count 846 → 874.** The two new files are 13 tests each, plus one apiece for the two
+corrections above.

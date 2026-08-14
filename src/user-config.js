@@ -94,6 +94,9 @@ const GROUP_OR_OTHER_READABLE = 0o077;
 /** What the file must be, and what `writeUserConfig` leaves it at. */
 const SAFE_MODE = 0o600;
 
+/** What the directory holding it must be - the mode `ensureDirs` uses. */
+const SAFE_DIR_MODE = 0o700;
+
 /** @type {UserConfig} */
 const NOTHING = { data: null, problem: null };
 
@@ -211,12 +214,23 @@ export function watchUserConfig({ path = userConfigPath(), files = defaultConfig
  * `forge-config.js` and `update-check.js` - and neither of them needs to know
  * that a command can write it.
  *
- * @typedef {{name: string, block: string, label: string}} ConfigFeature
+ * **`watched` is whether a *running* `raise serve` would notice the write**, and
+ * the asymmetry is real rather than an oversight: the forge block is re-read on
+ * the poll loop through `watchForgeConfig`, so turning the lookup on takes
+ * effect within a second, while the update check is asked exactly once per
+ * process, by `newerVersion` at startup, and is never consulted again. A command
+ * that says "nothing to restart" over the second one is the confident wrong
+ * sentence this product exists to remove, so the fact lives here beside the
+ * feature it is a property of and cannot drift from a `block` name in `cli.js`.
+ *
+ * @typedef {{name: string, block: string, label: string, watched: boolean}} ConfigFeature
  * @type {ConfigFeature[]}
  */
 export const CONFIG_FEATURES = [
-  { name: 'pull-request-state', block: 'forge', label: 'Pull request state' },
-  { name: 'update-check', block: 'updates', label: 'Update check' },
+  // Re-read every poll by `watchForgeConfig`, so a running server picks it up.
+  { name: 'pull-request-state', block: 'forge', label: 'Pull request state', watched: true },
+  // Read once by `newerVersion` at `raise serve` startup, and never again.
+  { name: 'update-check', block: 'updates', label: 'Update check', watched: false },
 ];
 
 /** @param {string} name @returns {ConfigFeature|null} */
@@ -367,13 +381,19 @@ export function setFeature(data, feature, enabled) {
  * says the tool put it there. It is the leak the original file was refused for,
  * created by the command that fixes it.
  *
+ * **The directory is created `0700`, the same way `ensureDirs` creates it.**
+ * `mkdirSync` with `recursive: true` will not *tighten* a directory that already
+ * exists, so the mode has to be right at creation or never - and without it the
+ * mode of the directory holding a credential would be decided by which command a
+ * user happened to run first.
+ *
  * @param {string} path
  * @param {Record<string, any>} data
  * @param {{backup?: boolean}} [options]
  * @returns {string|null} the path the previous file was copied to, if any
  */
 export function writeUserConfig(path, data, { backup = true } = {}) {
-  mkdirSync(dirname(path), { recursive: true });
+  mkdirSync(dirname(path), { recursive: true, mode: SAFE_DIR_MODE });
   let backupPath = null;
   if (backup && existsSync(path)) {
     backupPath = `${path}.raise-backup`;

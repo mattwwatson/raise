@@ -767,7 +767,16 @@ async function cmdSetFeature(flags, positional, enabled) {
       ),
     );
   }
-  console.log(dim('A running raise serve picks this up within a second; nothing to restart.'));
+  // Whether a running server would notice this is a property of the feature,
+  // not of the command - see `watched` in `CONFIG_FEATURES`.
+  console.log(
+    dim(
+      feature.watched
+        ? 'A running raise serve picks this up within a second; nothing to restart.'
+        : 'A running raise serve asked npm once at startup, so it will not pick this up ' +
+            'until you restart it; the next raise serve will.',
+    ),
+  );
 }
 
 async function cmdUninstallHooks(flags) {

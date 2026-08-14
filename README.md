@@ -625,6 +625,10 @@ notice it in `npm outdated -g` - and for a monitor that is the wrong way round, 
 fixes worth having are the ones that stop a row telling you something untrue, and whoever is
 running that row is exactly who will never find out.
 
+**This one does need a restart, unlike pull request state.** The registry is asked once, when
+`raise serve` starts, so a server already running will not begin checking until you restart it -
+and `raise enable update-check` says so rather than promising otherwise.
+
 With it on, `raise serve` says so at startup, once, and nothing else changes:
 
 ```
