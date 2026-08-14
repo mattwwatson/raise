@@ -36,6 +36,15 @@ import { LavishState } from './lavish.js';
 import { ForgeState } from './forge.js';
 import { readForgeConfig } from './forge-config.js';
 import {
+  CONFIG_FEATURES,
+  configFeature,
+  formatMode,
+  isUnsafeMode,
+  readUserConfigForWrite,
+  setFeature,
+  writeUserConfig,
+} from './user-config.js';
+import {
   canCompareVersions,
   isNewerVersion,
   newerVersion,
@@ -210,6 +219,8 @@ ${bold('Usage')}
   raise open               print (and open) the dashboard URL
   raise status             one-shot text summary, no server needed
   raise focus <session>    bring a session's window to the front
+  raise enable <feature>   turn an optional feature on (${CONFIG_FEATURES.map((f) => f.name).join(', ')})
+  raise disable <feature>  turn one off again
   raise install-hooks      add the Claude Code hooks to settings.json
   raise uninstall-hooks    remove them again
   raise install-pi         add the pi extension to pi's settings.json
@@ -663,6 +674,102 @@ async function cmdInstallHooks(flags) {
   );
 }
 
+/**
+ * `raise enable <feature>` and `raise disable <feature>`.
+ *
+ * One implementation for both, because they differ by a boolean and nothing
+ * else, and two copies would be two copies of the contract below.
+ *
+ * **The contract is `install-hooks`', deliberately**: show what will change, ask
+ * before writing, leave a `.raise-backup`, and be safe to run twice. That is the
+ * bar this codebase already sets for touching a file somebody else owns, and
+ * `~/.raise/config.json` is more somebody-else's than `settings.json` is - it can
+ * hold a Bitbucket credential.
+ *
+ * It exists because the README used to document turning these on as a heredoc,
+ * and `cat >` truncates: the update-check recipe destroyed the forge opt-in and
+ * the credential written by the recipe sixty lines above it, silently, leaving a
+ * dashboard that looked exactly as confident as before. See
+ * `docs/tasks/22-opt-in-commands.md`.
+ *
+ * There is no `--token` flag here and there must never be one. A token in argv
+ * is a token in shell history and in every `ps` on the machine, which is the
+ * whole reason `forge-config.js` keeps it in a `0600` file rather than in the
+ * environment; the argument does not survive being moved to a flag.
+ *
+ * @param {Record<string, any>} flags
+ * @param {string[]} positional
+ * @param {boolean} enabled
+ */
+async function cmdSetFeature(flags, positional, enabled) {
+  const verb = enabled ? 'enable' : 'disable';
+  const name = positional[0];
+  const feature = name ? configFeature(name) : null;
+  if (!feature) {
+    const known = CONFIG_FEATURES.map((f) => f.name).join(', ');
+    console.error(
+      name
+        ? `Unknown feature ${JSON.stringify(name)}. Raise can ${verb}: ${known}.`
+        : `Usage: raise ${verb} <feature>   (${known})`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const path = userConfigPath();
+  let current;
+  let merged;
+  try {
+    current = readUserConfigForWrite({ path });
+    merged = setFeature(current.data, feature, enabled);
+  } catch (err) {
+    console.error(red(err.message));
+    process.exitCode = 1;
+    return;
+  }
+
+  // The mode is a change in its own right, and it is what keeps "safe to run
+  // twice" honest: a file whose boolean is already right but whose mode is 0644
+  // is a file Raise refuses to read, so there is still something to do and the
+  // command must not report "already enabled" over it.
+  const repairMode = current.exists && current.mode !== null && isUnsafeMode(current.mode);
+  const changes = [...merged.changes];
+  if (repairMode) changes.push(`repair mode ${formatMode(current.mode)} -> 0600`);
+
+  if (changes.length === 0) {
+    console.log(`${green(`Already ${verb}d`)} - ${feature.label} is ${verb}d in ${path}.`);
+    return;
+  }
+
+  console.log(`${bold('Changes to')} ${path}`);
+  for (const change of changes) console.log(`  ${change}`);
+  console.log('');
+
+  if (flags['dry-run']) {
+    console.log(dim('Dry run; nothing written.'));
+    return;
+  }
+  if (!flags.yes && !(await confirm('Write these changes?'))) {
+    console.log('Nothing written.');
+    return;
+  }
+  const backupPath = writeUserConfig(path, merged.data);
+  console.log(green(`${feature.label} ${verb}d. ${backupPath ? `Backup at ${backupPath}` : ''}`.trim()));
+
+  // Said only on the way on, and only for the forge: it is the one thing left
+  // that a command cannot do for you, and the reason it cannot is that a token
+  // on a command line is a token in your shell history.
+  if (enabled && feature.block === 'forge' && !readForgeConfig().bitbucket) {
+    console.log(
+      dim(
+        'GitHub works now through your own gh login. Bitbucket needs an API token - ' +
+          'add it to the file by hand, see the README.',
+      ),
+    );
+  }
+  console.log(dim('A running raise serve picks this up within a second; nothing to restart.'));
+}
+
 async function cmdUninstallHooks(flags) {
   const settingsPath = flags.settings || DEFAULT_SETTINGS;
   const existing = readSettings(settingsPath);
@@ -870,7 +977,9 @@ async function cmdDoctor() {
   } else if (!forgeConfig.enabled) {
     off(
       'Pull request state',
-      `not enabled - pull request state comes from no-mistakes only (see ${userConfigPath()})`,
+      // The feature name here is the command's, kebab-cased, so what you read is
+      // what you type - `CONFIG_FEATURES` holds both and keeps them in step.
+      `not enabled - pull request state comes from no-mistakes only; ${bold('raise enable pull-request-state')}`,
     );
   } else if (forgeConfig.bitbucket) {
     ok('Pull request state', 'enabled - GitHub through gh, Bitbucket through its API');
@@ -893,7 +1002,7 @@ async function cmdDoctor() {
   } else if (!updateConfig.enabled) {
     off(
       'Update check',
-      `not enabled - nothing tells you when a newer Raise is published (see ${userConfigPath()})`,
+      `not enabled - nothing tells you when a newer Raise is published; ${bold('raise enable update-check')}`,
     );
   } else {
     const cached = readUpdateCache();
@@ -1079,6 +1188,12 @@ export async function main() {
       break;
     case 'focus':
       await cmdFocus(positional);
+      break;
+    case 'enable':
+      await cmdSetFeature(flags, positional, true);
+      break;
+    case 'disable':
+      await cmdSetFeature(flags, positional, false);
       break;
     case 'install-hooks':
       await cmdInstallHooks(flags);

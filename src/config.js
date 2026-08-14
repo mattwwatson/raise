@@ -112,12 +112,14 @@ export function tokenPath() {
 }
 
 /**
- * The one file the user writes rather than one Raise generates.
+ * The file the user writes - and the only one Raise writes on their behalf
+ * rather than for its own bookkeeping.
  *
  * It holds the opt-in for each of the two features that reach the network - the
  * forge lookup and the update check - and, for Bitbucket, a credential, which is
  * why it lives here beside `token` and is held to the same `0600`. See
- * `src/user-config.js` for the rule that decides whether it is read at all, and
+ * `src/user-config.js` for the rule that decides whether it is read at all, for
+ * the narrow write `raise enable` and `raise disable` are allowed to make, and
  * `src/forge-config.js` for why the credential may not come from the environment
  * instead.
  */
@@ -133,6 +135,17 @@ export function userConfigPath() {
  * one that will eventually reformat your comments away. It holds nothing secret
  * - a version string and a timestamp - and exists so that restarting `raise
  * serve` ten times in an afternoon is ten notices and one request.
+ *
+ * **`raise enable` and `raise disable` now edit that file, and this objection is
+ * what shaped how.** It rules out Raise keeping its *own* state in there, which
+ * is why this cache stayed a separate file when those commands landed. What they
+ * write is one boolean the user asked for by name, never anything machine-
+ * generated, and the reformatting is real rather than argued away: key order
+ * survives `JSON.stringify`, indentation and blank lines do not, and JSON has no
+ * comments to lose. The user sees the diff and says yes first, and a
+ * `.raise-backup` is left beside the file - the same bargain `install-hooks` has
+ * struck with `settings.json` from the beginning, over a file with far more of
+ * somebody else's content in it. See `docs/tasks/22-opt-in-commands.md`.
  */
 export function updateCachePath() {
   return join(monitorHome(), 'update-check.json');

@@ -144,7 +144,7 @@ of its design - it is what stops the first page a stranger sees being blank. See
 | `src/git-branch.js` | the branch a checkout is on, and the checkout a worktree belongs to, read from `.git` |
 | `src/lavish.js` | resolving a Lavish artifact to the page waiting on you |
 | `src/forge.js` | asking GitHub or Bitbucket whether a pull request is still open |
-| `src/user-config.js` | the one file a user writes, and the mode check that refuses it |
+| `src/user-config.js` | the one file a user writes, the mode check that refuses it, and the one narrow write |
 | `src/forge-config.js` | the `forge` block of that file, and what may be asked of a forge |
 | `src/update-check.js` | asking npm whether a newer Raise exists, at most once a day |
 | `src/poll-watch.js` | which sessions are in a `lavish-axi poll`, which have a pipeline running, and which are driving one |
@@ -324,6 +324,13 @@ stratified on purpose, so read the whole file rather than one section.
 | the Bitbucket credential lives in a `0600` file and never in the environment | `src/forge-config.js` |
 | GitHub goes through `gh` and holds no credential here - do not add a token path | `src/forge-config.js`, `src/forge.js` |
 | an unsafe mode refuses the whole file, blocks with no secret in them included | `src/user-config.js` |
+| the writer lives beside the reader, because `0600` is a property of the file | `src/user-config.js` (`writeUserConfig`) |
+| `hooks.js`'s `writeSettings` is not reused; `mode` creates and only `chmod` repairs | `src/user-config.js` (`writeUserConfig`) |
+| the backup is chmodded too, or repairing a mode leaks the credential it just secured | `src/user-config.js` (`writeUserConfig`) |
+| `enable`/`disable` are a closed set of two, named for what `doctor` prints | `src/user-config.js` (`CONFIG_FEATURES`) |
+| `disable` writes `false` rather than deleting, and never removes a credential | `src/user-config.js` (`setFeature`) |
+| no credential may reach argv - there is no `--token` flag, now or later | `src/cli.js` (`cmdSetFeature`), `docs/tasks/22-opt-in-commands.md` |
+| a config file that will not parse is refused rather than overwritten | `src/user-config.js` (`readUserConfigForWrite`) |
 | `problem` is for `doctor` only, and never for the ordinary case of no file | `src/user-config.js` |
 | the config is re-read while the monitor runs; the mode is part of the cache key | `src/user-config.js` (`watchUserConfig`) |
 | the watched read keeps its identity until the file changes, and `ForgeState` depends on it | `src/forge-config.js` (`watchForgeConfig`) |
@@ -494,7 +501,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 846 tests, no network, no dependencies, ~9s
+npm test          # 872 tests, no network, no dependencies, ~9s
 npm run lint      # oxlint over src, bin, hooks, public, test, scripts
 npm run typecheck # tsc --noEmit over src, bin, hooks, public, scripts
 ```
@@ -690,7 +697,7 @@ the [roadmap-workflow skill](.claude/skills/roadmap-workflow/SKILL.md).
 ## Commands
 
 ```sh
-npm test                       # 846 tests, ~9s
+npm test                       # 872 tests, ~9s
 npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above

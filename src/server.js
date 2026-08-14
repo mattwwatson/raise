@@ -133,11 +133,11 @@ export function createMonitorServer({
   // proves that and not more - this is the fetch `ForgeState` is built with
   // below, so an enabled forge reaches the network through here, from the poll.
   fetch = globalThis.fetch,
-  // A reader rather than a reading: `~/.raise/config.json` is the one file the
-  // user writes, and the README tells them to write it, so an answer captured
-  // here would leave `raise doctor` reporting an opt-in this server never saw
-  // until somebody restarted it. Costs a `stat` a second - see
-  // `watchForgeConfig`. Tests pass a fixed config, which is accepted too.
+  // A reader rather than a reading: `~/.raise/config.json` changes under a
+  // running server - `raise enable` in another terminal, or the user editing it
+  // by hand - so an answer captured here would leave `raise doctor` reporting an
+  // opt-in this server never saw until somebody restarted it. Costs a `stat` a
+  // second - see `watchForgeConfig`. Tests pass a fixed config, accepted too.
   forgeConfig = watchForgeConfig(),
   dbPath = statePath(),
   sessionsPath = sessionsDir(),

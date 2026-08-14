@@ -118,8 +118,11 @@ export const LOOKUP_TIMEOUT_MS = 3000;
 
 /**
  * Reading and writing our own cache file, injected so the suite never touches a
- * real one. Separate from `ConfigFileAccess` because that one is deliberately
- * read-only: the config file is the user's to write and Raise never writes it.
+ * real one. Separate from `ConfigFileAccess`, which stays read-only: the config
+ * file is written in exactly one place - `writeUserConfig`, reached only by
+ * `raise enable` and `raise disable` - and nothing on the poll path may write it
+ * at all. Two shapes is what keeps that true by construction rather than by
+ * everyone remembering.
  *
  * @typedef {object} CacheAccess
  * @property {(path: string) => string} readText
