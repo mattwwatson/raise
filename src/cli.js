@@ -773,8 +773,8 @@ async function cmdSetFeature(flags, positional, enabled) {
     dim(
       feature.watched
         ? 'A running raise serve picks this up within a second; nothing to restart.'
-        : 'A running raise serve asked npm once at startup, so it will not pick this up ' +
-            'until you restart it; the next raise serve will.',
+        : 'The registry is asked once, when raise serve starts, so a running one will not ' +
+            'pick this up until you restart it.',
     ),
   );
 }
@@ -980,20 +980,23 @@ async function cmdDoctor() {
   // only ever set when somebody has evidently tried to configure this and it is
   // not working, and the whole point of refusing an unsafe file mode is that they
   // find out here rather than by noticing that nothing happens.
+  // The check's name and the command that fixes it are both taken from
+  // `CONFIG_FEATURES`, which is what makes "what you read is what you type" a
+  // property of the code rather than of two literals someone kept in step.
+  const forgeFeature = configFeature('pull-request-state');
   const forgeConfig = readForgeConfig();
   if (forgeConfig.problem) {
-    warn('Pull request state', forgeConfig.problem);
+    warn(forgeFeature.label, forgeConfig.problem);
   } else if (!forgeConfig.enabled) {
     off(
-      'Pull request state',
-      // The feature name here is the command's, kebab-cased, so what you read is
-      // what you type - `CONFIG_FEATURES` holds both and keeps them in step.
-      `not enabled - pull request state comes from no-mistakes only; ${bold('raise enable pull-request-state')}`,
+      forgeFeature.label,
+      'not enabled - pull request state comes from no-mistakes only; ' +
+        bold(`raise enable ${forgeFeature.name}`),
     );
   } else if (forgeConfig.bitbucket) {
-    ok('Pull request state', 'enabled - GitHub through gh, Bitbucket through its API');
+    ok(forgeFeature.label, 'enabled - GitHub through gh, Bitbucket through its API');
   } else {
-    ok('Pull request state', 'enabled for GitHub through gh; no Bitbucket credential configured');
+    ok(forgeFeature.label, 'enabled for GitHub through gh; no Bitbucket credential configured');
   }
 
   // The other outbound request, reported on the same terms as the forge above -
@@ -1004,26 +1007,28 @@ async function cmdDoctor() {
   // is blocked on is one people stop running. It also keeps the promise the
   // README makes about how often this contacts anybody a function of elapsed
   // time rather than of how many commands you typed.
+  const updateFeature = configFeature('update-check');
   const updateConfig = readUpdateConfig();
   const version = packageVersion();
   if (updateConfig.problem) {
-    warn('Update check', updateConfig.problem);
+    warn(updateFeature.label, updateConfig.problem);
   } else if (!updateConfig.enabled) {
     off(
-      'Update check',
-      `not enabled - nothing tells you when a newer Raise is published; ${bold('raise enable update-check')}`,
+      updateFeature.label,
+      'not enabled - nothing tells you when a newer Raise is published; ' +
+        bold(`raise enable ${updateFeature.name}`),
     );
   } else {
     const cached = readUpdateCache();
     if (!cached) {
-      ok('Update check', `enabled - nothing asked yet; ${bold('raise serve')} asks once a day`);
+      ok(updateFeature.label, `enabled - nothing asked yet; ${bold('raise serve')} asks once a day`);
     } else if (cached.latest && isNewerVersion(version, cached.latest)) {
       warn(
-        'Update check',
+        updateFeature.label,
         `${cached.latest} is available - you have ${version}, so run ${bold('npm install -g raise-cli')}`,
       );
     } else if (cached.latest && canCompareVersions(version, cached.latest)) {
-      ok('Update check', `${version} is the latest, as of ${ago(Date.now() - cached.checkedAt)}`);
+      ok(updateFeature.label, `${version} is the latest, as of ${ago(Date.now() - cached.checkedAt)}`);
     } else if (cached.latest) {
       // `isNewerVersion` fails closed on a pair it cannot rank, which is right
       // for `serve` - it stays quiet rather than nagging off a comparison it did
@@ -1033,7 +1038,7 @@ async function cmdDoctor() {
       // the same thing: an unreadable `package.json`, and a pair of pre-releases
       // the ranker refuses, are one fact - there is no comparison to report.
       warn(
-        'Update check',
+        updateFeature.label,
         `the registry says ${cached.latest} is current, but this installation reports ${version}, which cannot be ranked against it - so whether you are up to date is not something Raise knows`,
       );
     } else {
@@ -1043,7 +1048,7 @@ async function cmdDoctor() {
       // this whole tool is built against. There is no step for the reader here,
       // which is why the detail says so.
       warn(
-        'Update check',
+        updateFeature.label,
         `the check ${ago(Date.now() - cached.checkedAt)} got no answer - usually no network, and nothing to fix; it tries again a day after that`,
       );
     }

@@ -289,6 +289,15 @@ removing those. `CONFIG_FEATURES` now carries `watched`, so the fact sits beside
 definition rather than in a `block` comparison in `cli.js`, and `cli-enable.test.js` pins both
 sentences.
 
+**`doctor`'s labels and commands are read out of `CONFIG_FEATURES`, because a comment saying
+they are kept in step is not a mechanism.** The first version hardcoded `'Pull request state'`
+and `raise enable pull-request-state` in `cmdDoctor` while a comment beside them claimed the
+registry held both - so renaming a feature would have left the whole suite green and `doctor`
+naming a command that exits 1 with "Unknown feature". The strings printed are unchanged;
+`cmdDoctor` now derives them through `configFeature()`, and `cli-enable.test.js` pins the
+coupling by lifting every `raise enable <name>` out of doctor's own output and typing it back
+at the CLI rather than re-asserting the literals the code prints.
+
 **`~/.raise` is created `0700` by the writer, not just `0600` by the file.** `writeUserConfig`
 created the directory with no `mode`, so on a machine where `raise enable` ran before anything
 else the credential-holding directory landed at `0755` under an ordinary umask - and because

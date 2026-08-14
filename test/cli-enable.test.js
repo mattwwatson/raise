@@ -19,6 +19,8 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync, statSync, chmodSync, 
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
+import { CONFIG_FEATURES, configFeature } from '../src/user-config.js';
+
 const execFileAsync = promisify(execFile);
 const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'raise.js');
 
@@ -257,13 +259,29 @@ test('what a running server does with the write is said per feature, not as a bl
   }
 });
 
-test('doctor names the command that turns each feature on', async () => {
-  // What you read in the diagnostic is what you type to fix it.
+test('every command raise doctor names is one raise enable actually accepts', async () => {
+  // What you read in the diagnostic is what you type to fix it - and asserting
+  // that against the same literals `cli.js` prints would prove nothing. So the
+  // names are taken out of doctor's own output and typed back at the CLI: rename
+  // a feature and this fails, because doctor would be naming a command that
+  // exits 1 with "Unknown feature".
   const s = scratch();
   try {
     const { stdout } = await raise(['doctor'], s.home);
-    assert.match(stdout, /raise enable pull-request-state/);
-    assert.match(stdout, /raise enable update-check/);
+    const named = [...stdout.matchAll(/raise enable ([a-z-]+)/g)].map((m) => m[1]);
+    assert.deepEqual(
+      [...named].sort(),
+      CONFIG_FEATURES.map((f) => f.name).sort(),
+      'doctor names every switchable feature, and nothing it cannot switch',
+    );
+
+    for (const name of named) {
+      const { stdout: enabled } = await raise(['enable', name, '--yes'], s.home);
+      assert.doesNotMatch(enabled, /Unknown feature/);
+      const feature = configFeature(name);
+      assert.match(stdout, new RegExp(`${feature.label}[\\s\\S]*?raise enable ${name}`));
+      assert.match(enabled, new RegExp(`${feature.label} enabled`));
+    }
   } finally {
     s.cleanup();
   }
