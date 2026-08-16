@@ -1,8 +1,9 @@
 ---
 issue: 1
-status: backlog
+status: in-progress
 size: M
 depends: -
+branch: fm/1-stale-page-code
 ---
 # 1 - A pinned dashboard never picks up UI changes
 
@@ -89,6 +90,138 @@ Decisions for whoever picks this up - **bring these back rather than choosing al
 5. **Is it worth it at all?** A defensible answer is no - document the reload and move on. Say so
    if that is your conclusion, but weigh it against this being invisible to the user by
    construction: they cannot tell it is happening, so they cannot know to reload.
+
+## What the investigation measured
+
+Taken on 17/08/2026 against this checkout, before any of the five decisions below were
+settled. Each one is repeatable; the method is named so it can be repeated rather than
+believed.
+
+**The package version has never moved.** `git log` over `package.json` across all 238 commits
+returns exactly one distinct version, `0.1.0`, set in the very first commit. 24 commits have
+touched `public/` since, PR #11 among them. **A version-derived build identity would have
+detected none of them** - not "would often miss", but a measured zero for zero.
+
+**Only about one restart in ten is a page change.** 24 of 236 commits since that first one
+touched `public/`; the rest changed `src/`, tests or docs and still mean a restart. So an
+identity derived from the *server* having restarted - `server.json`'s `startedAt`, the
+cheapest option of all and already written to disk - would have been wrong on roughly 90% of
+the occasions it fired. It is cheaper than mtime and worse than it on the only axis that
+matters.
+
+**`servePage` re-reads `index.html` on every request, so the served build changes with no
+restart.** Measured directly: a server was started, `GET /` returned `<title>Raise</title>`,
+`public/index.html` was edited in place with the process still running, and the very next
+`GET /` returned the edited title. `serveModule` reads `connection.js` the same way. This is
+the fact that rules on option 1: an identity *captured at startup* - the spec's own suggestion
+- is not an identity of what is being served. It reports the boot-time build while the server
+hands out a newer one, so two tabs opened either side of an edit run different code and both
+claim the same build. That is a false negative, in the same quiet-staleness direction as the
+bug this ticket is about.
+
+**Hashing is not the expensive option.** Reading and `sha256`-ing both files in `public/`
+(67,206 bytes) costs **0.052ms**, mean over 1000 iterations; `stat`-ing both costs **0.0024ms**.
+A stamp recomputed only when an mtime moves - the cache `src/transcript-reader.js` already
+implements for transcripts - therefore costs two `stat` calls per poll in the steady state and
+one 0.05ms hash on the ticks where the page actually changed. The spec's "most honest and the
+most work" trade-off does not survive the measurement.
+
+**The state frame is delivered immediately on stream open; the ping is not.** Two SSE clients
+were attached to one server and every frame timestamped. Client A connected at 28ms and got
+its `state` frame at 28ms; client B connected at 8031ms and got its `state` frame at 8031ms.
+**Both got their first `ping` at 20002ms** - the keepalive is one server-wide `setInterval`
+started in `start()`, not a per-client timer, so a client's wait for its first ping is anywhere
+from 0 to `KEEPALIVE_MS`. A restart is exactly a reconnect, and `openStream` pushes a `state`
+frame unconditionally as its second write.
+
+**A constant field in the state payload causes no extra broadcasts, and a changed one causes
+exactly one.** `broadcast(false)` compares `stableJson(payload)`, so a build stamp that does
+not move is invisible to the change gate, and a stamp that moves pushes a frame by itself.
+Verified against `stableJson` directly. The mechanism that announces the change is therefore
+the one already there.
+
+## The five decisions, brought back
+
+Recorded here with the competing reading on each, because the answer to each is a rule rather
+than a preference and the rule is what a future session needs.
+
+### 1. What identifies a build
+
+**The rule underneath: an identity must be a property of the thing at the moment it is
+asserted, not of a proxy for it.** The package version is a declaration of intent, `startedAt`
+is the process's lifetime, and a hash taken at startup is a snapshot of a file the server goes
+on re-reading. All three are correlates. The bytes being served are the thing itself. This is
+the same rule as *the branch comes from `.git/HEAD`, and from nowhere else*.
+
+The competing reading is that this is a single-user local monitor, where a proxy that is right
+most of the time costs one unnecessary reload when it is wrong - which favours a bare mtime,
+about eight lines shorter. It survives the false-negative test (a write always moves an mtime)
+and fails only by over-reporting when a file is rewritten with identical content, as
+`git checkout` and `npm install` both do.
+
+**Recommendation: a content hash of the two files the server actually serves, recomputed only
+when an mtime moves** - the cache `src/transcript-reader.js` already implements, for the same
+reason. The measurements above delete both arguments against it: hashing costs 0.05ms and only
+on the ticks where the page changed, and the startup variant the spec proposed is measurably
+not an identity of what is served.
+
+### 2. Where the identity rides
+
+**The rule underneath: carry the fact on the channel whose delivery is guaranteed at the moment
+the fact becomes true.** The stamp changes on exactly two occasions, and the state frame covers
+both without anything new: a restart is a reconnect, and `openStream` pushes a `state` frame
+unconditionally; an edit under a running server changes the payload, and the change gate turns
+that into a broadcast by itself.
+
+The competing reading is that the ping is the page's liveness channel and this is liveness of
+code, so it belongs there. That is a grouping argument, and it costs a wait of 0 to
+`KEEPALIVE_MS` (measured: a client attached at 8.0s waited until 20.0s) plus a change to the
+ping's *shape*, from a bare number to JSON, where the state payload is already an object with
+many fields.
+
+**Recommendation: the state frame.**
+
+### 3. Never reload automatically
+
+**Already ruled, restated so it is on the record and not re-opened.** Offer, do not act. The
+notice is a control the user presses; nothing reloads on a timer, on a mismatch, or on a
+reconnect. A dashboard that reloads itself discards whatever is expanded, at an arbitrary
+moment, on a page being watched precisely because something needs a human.
+
+### 4. Where the notice appears
+
+**The rule underneath: a message about the page belongs where the page's other self-descriptions
+are, and a message about the work belongs among the cards.** The header already carries the
+liveness dot and the alerts button - both facts about the page's relationship with the server,
+neither about any session. The `#notice` slot inside `<main>` carries `payload.warning`, which
+is about the *data* being degraded. This notice is about the page's own code, so it is the
+header's kind of fact.
+
+The competing reading is to reuse `#notice` with a quiet variant, keeping every page-level
+message in one slot. It costs a `.notice` variant and puts a housekeeping line above the cards,
+taking vertical space at the top of a page whose ordering is the product.
+
+**Recommendation: the header, left of the connection indicator, as a `<button>` in the existing
+quiet header-button style.** That style is already `--muted` on `--panel` with a `--border`
+edge, so this introduces **no new colour custom property at all** - which is the cleanest
+possible way to satisfy "must not compete with `blocked` red", since it never enters the
+attention palette to begin with, and it leaves the *"add a variable to both blocks or neither"*
+rule with nothing to arbitrate.
+
+### 5. Whether to build it
+
+**The rule underneath is the one the ticket already names: a failure the user cannot detect is
+one the tool has to detect for them.** That is the liveness dot's own rule, applied to code
+instead of data.
+
+The competing reading is that this is a single-user tool whose user is also its developer, so a
+README line saying "reload after upgrading" is proportionate. Against it: a README line is read
+once, and the condition arises silently months later - PR #11 shipped a feature that looked
+broken, and it took the five measurements recorded at the top of this file to establish that
+nothing was.
+
+**Recommendation: build it.** 24 of the last 236 commits touched `public/`, so this recurs on
+roughly one commit in ten, and it is invisible every time.
 
 ## Secondary finding, unrelated but noticed
 
