@@ -2,11 +2,22 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, renameSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  readdirSync,
+  cpSync,
+  rmSync,
+  existsSync,
+  renameSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
 import { createMonitorServer, writeFrame, stableJson } from '../src/server.js';
+import { SERVED_FILES, PUBLIC_DIR } from '../src/build-stamp.js';
 import { probeHealth } from '../src/health.js';
 
 const nextTick = () => new Promise((resolve) => setImmediate(resolve));
@@ -1630,6 +1641,97 @@ test('the served page carries the build the stream is stating, with nothing inje
 
     const state = await (await fetch(`http://127.0.0.1:${port}/state?t=test-token`)).json();
     assert.equal(state.build, baked, 'and the two halves of the protocol agree');
+  } finally {
+    if (monitor) await monitor.stop();
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
+    cleanup();
+  }
+});
+
+test('every file the server hands out is part of the build it states', async () => {
+  // The drift guard. `SERVED_FILES` names the build; the server names what is
+  // sent. A third file served but left off that list would be a change no tab
+  // could ever notice - this feature's own bug, reintroduced through the blind
+  // spot of its fix - so something has to keep the two equal.
+  //
+  // It is asked of the server rather than of `src/server.js`'s source, because a
+  // guard that read the source would go on passing for a file served in any
+  // shape its pattern did not recognise, which is failing open on exactly the
+  // case it exists to catch. So: copy the product's own `public/` somewhere
+  // writable, stand a real server and a real `BuildStamp` on the copy, and edit
+  // each file in it. Whether the server hands a file out is decided by looking
+  // for the edit in a response; where it does, the build must move.
+  //
+  // Copying the whole directory rather than iterating `SERVED_FILES` is the
+  // point - a file somebody adds to `public/` later is in the fixture without
+  // anyone remembering to put it there.
+  //
+  // What it cannot see, and what a future reader therefore has to keep in mind:
+  // routes are probed as `/` and `/<filename>`, so a file handed out under some
+  // other path - `/app.js` reading `bundle.js` - is invisible here and needs
+  // adding to `routes` below. Nothing in Node lets the route table be read back
+  // off a running `http.Server`, so that mapping is the one thing still stated
+  // rather than discovered.
+  const { dir, cleanup } = scratch();
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = dir;
+  let monitor = null;
+  try {
+    const publicDir = join(dir, 'public');
+    cpSync(PUBLIC_DIR, publicDir, { recursive: true });
+    const names = readdirSync(publicDir);
+
+    const port = await freePort();
+    monitor = createMonitorServer({
+      port,
+      token: 'test-token',
+      dbPath: join(dir, 'no-such.sqlite'),
+      sessionsPath: join(dir, 'sessions'),
+      exec: () => assert.fail('no blocking commands from the server'),
+      fetch: () => assert.fail('no outbound requests from the server'),
+      execAsync: async () => '',
+      publicDir,
+    });
+    await monitor.start();
+
+    const get = (path) => fetch(`http://127.0.0.1:${port}${path}?t=test-token`);
+    const build = async () => (await (await get('/state')).json()).build;
+    const routes = ['/', ...names.map((name) => `/${name}`)];
+
+    const handedOut = [];
+    for (const name of names) {
+      const path = join(publicDir, name);
+      const original = readFileSync(path);
+      // A marker rather than "did the body change", because `/state` carries
+      // the build itself and would answer yes to every file on its own.
+      const marker = `raise-served-probe-${name.replace(/[^a-z0-9]/gi, '-')}`;
+      const before = await build();
+      writeFileSync(path, `${original}\n/* ${marker} */\n`);
+      try {
+        const bodies = await Promise.all(
+          routes.map((route) => get(route).then((res) => (res.ok ? res.text() : ''))),
+        );
+        if (!bodies.some((body) => body.includes(marker))) continue;
+        handedOut.push(name);
+        assert.notEqual(
+          await build(),
+          before,
+          `${name} is handed out by the server but does not move the build it states`,
+        );
+      } finally {
+        writeFileSync(path, original);
+      }
+    }
+
+    // And the other direction, which is the cheaper mistake but still one: a
+    // name in `SERVED_FILES` that nothing is served from puts a file in the
+    // build that no tab is running, so touching it offers a reload for nothing.
+    assert.deepEqual(
+      [...handedOut].sort(),
+      [...SERVED_FILES].sort(),
+      'the files the server hands out and the files the build is made of are the same set',
+    );
   } finally {
     if (monitor) await monitor.stop();
     if (previousHome === undefined) delete process.env.RAISE_HOME;

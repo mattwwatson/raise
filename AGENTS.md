@@ -376,6 +376,8 @@ stratified on purpose, so read the whole file rather than one section.
 | what `tool_name` would have bought, and why the boundary did not move for it | `docs/tasks/RAI-11-question-vs-permission.md` |
 | the build is the hash of the served bytes; version, restart time and a startup hash were each measured and rejected | `src/build-stamp.js`, `docs/tasks/1-stale-page-code.md` |
 | the stamp is baked into the page it describes, so a tab knows what it loaded rather than what it was first told | `src/server.js` (`servePage`) |
+| the stamp is taken before the bytes, so an edit landing between the two reads is self-healing | `src/server.js` (`servePage`) |
+| one `PUBLIC_DIR`, handed to the server and the stamp together, because they must be the same directory | `src/build-stamp.js` (`PUBLIC_DIR`) |
 | the build rides the state frame, because that frame is delivered at both moments the build can change | `src/server.js` (`snapshot`) |
 | a frame stating no build says nothing and never clears a known mismatch | `public/connection.js` (`createBuildWatch`) |
 | localhost is not a boundary: token, `Host` and `Origin` are all three load-bearing | `src/security.js` |

@@ -295,6 +295,17 @@ the server forever while running superseded code. An unreadable build substitute
 string rather than leaving the placeholder, because a literal `__RAISE_BUILD__` compares unequal
 to every real stamp and would put the notice on every current page.
 
+The stamp is taken **before** the bytes, which review caught and which matters for the same
+reason the rest of this does: they are two separate reads, and an in-place edit or an upgrade can
+land between them. Stamped after the read, that window hands the tab the old page carrying the
+new build's number, and the tab then agrees with the server for as long as it stays open -
+permanent quiet staleness, the exact failure this ticket exists to remove. Stamped first, the
+race resolves the other way: a current page carrying the previous stamp says it is behind, and a
+reload settles it. `PUBLIC_DIR` also has a single definition, in `build-stamp.js`, which
+`server.js` imports and passes on as `publicDir`; the two agreeing is not a convention but the
+whole of the guarantee, since a build computed over a directory nobody is served from reads
+`null` and silently retires the notice.
+
 **`public/connection.js`** gains `createBuildWatch`, pure and DOM-free like everything else
 there, and holds the one rule worth protecting: **a frame that states no build says nothing and
 never clears a mismatch already known.** An older server - one predating the field - sends
@@ -319,12 +330,24 @@ edits the product's own `public/index.html` on the developer's disk.
 
 `test/build-stamp.test.js` covers the identity itself against a fake filesystem, including the
 two cases that are cheap to get subtly wrong in opposite directions - a file rewritten with
-identical bytes is the *same* build, and a file that cannot be read is *no* build. It also
-carries the drift guard: it reads `src/server.js`, extracts every `join(PUBLIC_DIR, '…')` it
-serves, and fails if one is missing from `SERVED_FILES`. A third served file left out of that
-list would be a change no tab could notice, which is this ticket's own bug reintroduced through
-the blind spot of its fix - so it is made detectable rather than merely documented, the same
-bargain `test/docs-claims.test.js` strikes with `CONTRIBUTING.md`.
+identical bytes is the *same* build, and a file that cannot be read is *no* build.
+
+The drift guard between `SERVED_FILES` and what the server actually sends is a **behavioural**
+one, in `test/server.test.js` as *"every file the server hands out is part of the build it
+states"*. It copies the product's own `public/` into a scratch directory, stands a real server
+and a real `BuildStamp` on the copy through the injected `publicDir`, then edits each file in
+that directory in turn: whether the server hands a file out is decided by looking for the edit in
+a response, and where it does, `state.build` must move. It asserts the set equality both ways, so
+a `SERVED_FILES` entry nothing is served from fails too.
+
+A third served file left out of that list would be a change no tab could notice, which is this
+ticket's own bug reintroduced through the blind spot of its fix. The first version of this guard
+read `src/server.js` and regex-matched `join(PUBLIC_DIR, '…')`, and was replaced during review
+because it **failed open on exactly that case**: a third file served in any shape the pattern did
+not recognise left the other two matching, the guard green, and the blind spot open. Its one
+remaining limit is stated in the test - routes are probed as `/` and `/<filename>`, since nothing
+in Node lets a route table be read back off a running `http.Server`, so a file handed out under
+some other path has to be added to the probe list by hand.
 
 `test/connection.test.js` covers the page-side rule directly, silence and unknown-either-side
 included.

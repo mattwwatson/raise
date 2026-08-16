@@ -9,17 +9,18 @@
  *
  * File access is injected throughout, as everywhere else here, so nothing waits
  * on real mtime granularity or writes to the product's own `public/`.
+ *
+ * What is *not* here is the guard that `SERVED_FILES` still names everything the
+ * server hands out. That is a question about the server's behaviour rather than
+ * about this module, and it lives in `server.test.js` under 'every file the
+ * server hands out is part of the build it states'.
  */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join, basename } from 'node:path';
+import { basename } from 'node:path';
 
 import { BuildStamp, SERVED_FILES, PUBLIC_DIR, defaultBuildFiles } from '../src/build-stamp.js';
-
-const HERE = dirname(fileURLToPath(import.meta.url));
 
 /**
  * A filesystem you can edit, that counts what was asked of it.
@@ -176,19 +177,4 @@ test('the real public/ hashes through the default file access', () => {
   const build = new BuildStamp();
   assert.match(build.current(), /^[0-9a-f]{12}$/);
   assert.equal(new BuildStamp({ dir: PUBLIC_DIR, files: defaultBuildFiles }).current(), build.current());
-});
-
-test('the stamp covers every file the server actually serves', () => {
-  // The drift guard. `SERVED_FILES` names the build, and `src/server.js` names
-  // what is sent; nothing but this makes the two stay equal. A third served
-  // file left out of the list would be a change no tab could ever notice -
-  // which is the exact bug this module was written for, reintroduced through
-  // its own blind spot. Detectable rather than impossible, the same bargain
-  // `docs-claims.test.js` strikes with CONTRIBUTING.md's inventory.
-  const source = readFileSync(join(HERE, '..', 'src', 'server.js'), 'utf8');
-  const served = [...source.matchAll(/join\(PUBLIC_DIR,\s*'([^']+)'/g)].map((m) => m[1]);
-  assert.ok(served.length > 0, 'the pattern still matches how server.js reads public/');
-  for (const name of served) {
-    assert.ok(SERVED_FILES.includes(name), `${name} is served but is not part of the build stamp`);
-  }
 });

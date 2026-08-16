@@ -56,7 +56,15 @@ import { dirname, join } from 'node:path';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-/** Where the page lives, matching `PUBLIC_DIR` in `src/server.js`. */
+/**
+ * Where the page lives, and the one definition of it.
+ *
+ * `src/server.js` imports this rather than deriving its own, and hands it to
+ * `BuildStamp` as `publicDir`, because the guarantee here is that the build is
+ * computed over the directory the server hands files out of. Two definitions
+ * agreeing by convention would let `public/` move under one of them, at which
+ * point every build reads null and the notice silently stops working.
+ */
 export const PUBLIC_DIR = join(HERE, '..', 'public');
 
 /**
@@ -66,10 +74,12 @@ export const PUBLIC_DIR = join(HERE, '..', 'public');
  * happens to sit in `public/`. A file nobody is served is not part of the code
  * a tab is running, and stamping it would offer a reload that changes nothing.
  *
- * The coupling is the obvious way for this to rot, so `build-stamp.test.js`
- * reads `src/server.js` and fails if it serves a file this list does not name.
- * Detectable rather than impossible, which is the bargain `docs-claims.test.js`
- * strikes with `CONTRIBUTING.md`'s inventory.
+ * The coupling is the obvious way for this to rot, so `server.test.js` stands a
+ * real server on a copy of `public/`, edits each file in turn and fails if one
+ * the server hands out does not move the build. Behaviour rather than a reading
+ * of `src/server.js`: a guard that inspected the source would go on passing for
+ * a third file served in any shape it did not recognise, which is this module's
+ * own bug reintroduced through the blind spot of its fix.
  */
 export const SERVED_FILES = ['index.html', 'connection.js'];
 

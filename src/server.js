@@ -47,8 +47,7 @@
 
 import { createServer } from 'node:http';
 import { readFileSync, writeFileSync, unlinkSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
 import { NoMistakesState } from './nm-state.js';
 import { SessionRegistry } from './registry.js';
@@ -61,15 +60,12 @@ import { PollWatch } from './poll-watch.js';
 import { FirstmateWatch } from './firstmate.js';
 import { UntrackedScan } from './untracked.js';
 import { buildRows, isDismissibleBlock, summarise } from './dashboard.js';
-import { BuildStamp } from './build-stamp.js';
+import { BuildStamp, PUBLIC_DIR } from './build-stamp.js';
 import { RunOwners } from './run-owner.js';
 import { focusSession } from './focus/index.js';
 import { checkRequest } from './security.js';
 import { exec as defaultExec, execAsync as defaultExecAsync } from './exec.js';
 import { sessionsDir, statePath, serverInfoPath, readOrCreateToken, defaultPort } from './config.js';
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-const PUBLIC_DIR = join(HERE, '..', 'public');
 
 const POLL_INTERVAL_MS = 1000;
 export const KEEPALIVE_MS = 20000;
@@ -148,10 +144,16 @@ export function createMonitorServer({
   // Injected whole rather than as a file access object, because the suite needs
   // to point it at fixture roots as often as it needs to stub the reads.
   untrackedScan = new UntrackedScan(),
+  // The directory `servePage` and `serveModule` hand files out of, and the
+  // directory the build is computed over - one value, because those two being
+  // the same directory is the whole of the stamp's guarantee. A test can point
+  // the pair at a copy of `public/` and edit it, which is how `server.test.js`
+  // asks whether every file the server hands out actually moves the build.
+  publicDir = PUBLIC_DIR,
   // Injected whole for the same reason, and one more: the alternative to
   // driving the stamp from a test is a test that edits the product's own page
   // on the developer's disk to make the served build change.
-  buildStamp = new BuildStamp(),
+  buildStamp = new BuildStamp({ dir: publicDir }),
 } = {}) {
   const registry = new SessionRegistry({ dir: sessionsPath });
   const nmState = new NoMistakesState({ dbPath, exec, execAsync });
@@ -439,27 +441,36 @@ export function createMonitorServer({
   });
 
   function servePage(res, pageToken) {
-    let html;
-    try {
-      html = readFileSync(join(PUBLIC_DIR, 'index.html'), 'utf8');
-    } catch {
-      res.writeHead(500).end('page missing');
-      return;
-    }
-    // The page needs the token to open the event stream and to focus.
-    html = html.replace('__RAISE_TOKEN__', pageToken);
     // Stamped into the bytes the tab receives, so it knows what it *loaded*
     // with rather than what it was first *told*. Those differ: a page loaded
     // during a restart can take its HTML from one build and its first frame
     // from the next, and a tab that only remembered the first stamp it was sent
     // would agree with the server forever while running superseded code.
     //
+    // Taken *before* the bytes, because the stamp and the page are two separate
+    // reads and an upgrade or an in-place edit can land between them. Stamped
+    // after, that window hands this tab the old page carrying the new build's
+    // number, and it agrees with the server for as long as it stays open -
+    // permanent quiet staleness, which is the thing this exists to prevent.
+    // Stamped first, the same race resolves the other way: a current page
+    // carrying the previous stamp says it is behind, and a reload settles it.
+    //
     // An unreadable build substitutes the empty string rather than leaving the
     // placeholder in place, because a literal `__RAISE_BUILD__` would compare
     // unequal to every real stamp and put an out-of-date notice on a page that
     // is perfectly current. `createBuildWatch` reads the empty string as no
     // answer, exactly as it reads an absent field.
-    html = html.replace('__RAISE_BUILD__', buildStamp.current() ?? '');
+    const build = buildStamp.current() ?? '';
+    let html;
+    try {
+      html = readFileSync(join(publicDir, 'index.html'), 'utf8');
+    } catch {
+      res.writeHead(500).end('page missing');
+      return;
+    }
+    // The page needs the token to open the event stream and to focus.
+    html = html.replace('__RAISE_TOKEN__', pageToken);
+    html = html.replace('__RAISE_BUILD__', build);
     res.writeHead(200, {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': 'no-store',
@@ -482,7 +493,7 @@ export function createMonitorServer({
   function serveModule(res) {
     let source;
     try {
-      source = readFileSync(join(PUBLIC_DIR, 'connection.js'), 'utf8');
+      source = readFileSync(join(publicDir, 'connection.js'), 'utf8');
     } catch {
       res.writeHead(500).end('module missing');
       return;
