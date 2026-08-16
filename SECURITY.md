@@ -58,7 +58,9 @@ the execution path to compromise.
 - **The Bitbucket token is read from a `0600` file, never from the environment.** Deliberate:
   child processes inherit the environment, and several of them run on a one-second loop. An
   unsafe file mode makes Raise refuse the whole file rather than honour the half without a
-  secret in it.
+  secret in it. `raise enable` and `raise disable` are the only things that write that file:
+  they merge one boolean, leave everything else in it - the credential included - alone, and
+  write `0600` both for the file and for the `.raise-backup` they leave beside it.
 
 If you have found a way around any of the above, that *is* a finding, and the paragraph
 describing it is what it contradicts.

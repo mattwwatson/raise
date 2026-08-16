@@ -36,6 +36,15 @@ import { LavishState } from './lavish.js';
 import { ForgeState } from './forge.js';
 import { readForgeConfig } from './forge-config.js';
 import {
+  CONFIG_FEATURES,
+  configFeature,
+  formatMode,
+  isUnsafeMode,
+  readUserConfigForWrite,
+  setFeature,
+  writeUserConfig,
+} from './user-config.js';
+import {
   canCompareVersions,
   isNewerVersion,
   newerVersion,
@@ -210,6 +219,8 @@ ${bold('Usage')}
   raise open               print (and open) the dashboard URL
   raise status             one-shot text summary, no server needed
   raise focus <session>    bring a session's window to the front
+  raise enable <feature>   turn an optional feature on (${CONFIG_FEATURES.map((f) => f.name).join(', ')})
+  raise disable <feature>  turn one off again
   raise install-hooks      add the Claude Code hooks to settings.json
   raise uninstall-hooks    remove them again
   raise install-pi         add the pi extension to pi's settings.json
@@ -663,6 +674,118 @@ async function cmdInstallHooks(flags) {
   );
 }
 
+/**
+ * `raise enable <feature>` and `raise disable <feature>`.
+ *
+ * One implementation for both, because they differ by a boolean and nothing
+ * else, and two copies would be two copies of the contract below.
+ *
+ * **The contract is `install-hooks`', deliberately**: show what will change, ask
+ * before writing, leave a `.raise-backup`, and be safe to run twice. That is the
+ * bar this codebase already sets for touching a file somebody else owns, and
+ * `~/.raise/config.json` is more somebody-else's than `settings.json` is - it can
+ * hold a Bitbucket credential.
+ *
+ * It exists because the README used to document turning these on as a heredoc,
+ * and `cat >` truncates: the update-check recipe destroyed the forge opt-in and
+ * the credential written by the recipe sixty lines above it, silently, leaving a
+ * dashboard that looked exactly as confident as before. See
+ * `docs/tasks/22-opt-in-commands.md`.
+ *
+ * There is no `--token` flag here and there must never be one. A token in argv
+ * is a token in shell history and in every `ps` on the machine, which is the
+ * whole reason `forge-config.js` keeps it in a `0600` file rather than in the
+ * environment; the argument does not survive being moved to a flag.
+ *
+ * @param {Record<string, any>} flags
+ * @param {string[]} positional
+ * @param {boolean} enabled
+ */
+async function cmdSetFeature(flags, positional, enabled) {
+  const verb = enabled ? 'enable' : 'disable';
+  const name = positional[0];
+  const feature = name ? configFeature(name) : null;
+  if (!feature) {
+    const known = CONFIG_FEATURES.map((f) => f.name).join(', ');
+    console.error(
+      name
+        ? `Unknown feature ${JSON.stringify(name)}. Raise can ${verb}: ${known}.`
+        : `Usage: raise ${verb} <feature>   (${known})`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const path = userConfigPath();
+  let current;
+  let merged;
+  try {
+    current = readUserConfigForWrite({ path });
+    merged = setFeature(current.data, feature, enabled);
+  } catch (err) {
+    console.error(red(err.message));
+    process.exitCode = 1;
+    return;
+  }
+
+  // The mode is a change in its own right, and it is what keeps "safe to run
+  // twice" honest: a file whose boolean is already right but whose mode is 0644
+  // is a file Raise refuses to read, so there is still something to do and the
+  // command must not report "already enabled" over it.
+  const repairMode = current.exists && current.mode !== null && isUnsafeMode(current.mode);
+  const changes = [...merged.changes];
+  if (repairMode) changes.push(`repair mode ${formatMode(current.mode)} -> 0600`);
+
+  if (changes.length === 0) {
+    console.log(`${green(`Already ${verb}d`)} - ${feature.label} is ${verb}d in ${path}.`);
+    return;
+  }
+
+  console.log(`${bold('Changes to')} ${path}`);
+  for (const change of changes) console.log(`  ${change}`);
+  console.log('');
+
+  if (flags['dry-run']) {
+    console.log(dim('Dry run; nothing written.'));
+    return;
+  }
+  if (!flags.yes && !(await confirm('Write these changes?'))) {
+    console.log('Nothing written.');
+    return;
+  }
+  const backupPath = writeUserConfig(path, merged.data);
+  console.log(green(`${feature.label} ${verb}d. ${backupPath ? `Backup at ${backupPath}` : ''}`.trim()));
+
+  // Said only on the way on, and only for the forge: it is the one thing left
+  // that a command cannot do for you, and the reason it cannot is that a token
+  // on a command line is a token in your shell history.
+  if (enabled && feature.block === 'forge' && !readForgeConfig().bitbucket) {
+    console.log(
+      dim(
+        'GitHub works now through your own gh login. Bitbucket needs an API token - ' +
+          'add it to the file by hand, see the README.',
+      ),
+    );
+  }
+  // Whether a running server would notice this is a property of the feature,
+  // not of the command - see `watched` in `CONFIG_FEATURES`. The watched line is
+  // true either way round, so it is said on both. The unwatched one is said on
+  // the way on only: turning the check *off* is nothing a restart could pick up,
+  // because it runs once at startup and the process never asks again - so the
+  // sentence would invite a pointless restart and imply the check is meanwhile
+  // still happening, which it is not.
+  if (feature.watched) {
+    console.log(dim('A running raise serve picks this up within a second; nothing to restart.'));
+  } else if (enabled) {
+    console.log(
+      dim(
+        'The registry is asked once, when raise serve starts, so a running one will not ' +
+          'pick this up until you restart it.',
+      ),
+    );
+  }
+}
+
 async function cmdUninstallHooks(flags) {
   const settingsPath = flags.settings || DEFAULT_SETTINGS;
   const existing = readSettings(settingsPath);
@@ -864,18 +987,23 @@ async function cmdDoctor() {
   // only ever set when somebody has evidently tried to configure this and it is
   // not working, and the whole point of refusing an unsafe file mode is that they
   // find out here rather than by noticing that nothing happens.
+  // The check's name and the command that fixes it are both taken from
+  // `CONFIG_FEATURES`, which is what makes "what you read is what you type" a
+  // property of the code rather than of two literals someone kept in step.
+  const forgeFeature = configFeature('pull-request-state');
   const forgeConfig = readForgeConfig();
   if (forgeConfig.problem) {
-    warn('Pull request state', forgeConfig.problem);
+    warn(forgeFeature.label, forgeConfig.problem);
   } else if (!forgeConfig.enabled) {
     off(
-      'Pull request state',
-      `not enabled - pull request state comes from no-mistakes only (see ${userConfigPath()})`,
+      forgeFeature.label,
+      'not enabled - pull request state comes from no-mistakes only; ' +
+        bold(`raise enable ${forgeFeature.name}`),
     );
   } else if (forgeConfig.bitbucket) {
-    ok('Pull request state', 'enabled - GitHub through gh, Bitbucket through its API');
+    ok(forgeFeature.label, 'enabled - GitHub through gh, Bitbucket through its API');
   } else {
-    ok('Pull request state', 'enabled for GitHub through gh; no Bitbucket credential configured');
+    ok(forgeFeature.label, 'enabled for GitHub through gh; no Bitbucket credential configured');
   }
 
   // The other outbound request, reported on the same terms as the forge above -
@@ -886,26 +1014,28 @@ async function cmdDoctor() {
   // is blocked on is one people stop running. It also keeps the promise the
   // README makes about how often this contacts anybody a function of elapsed
   // time rather than of how many commands you typed.
+  const updateFeature = configFeature('update-check');
   const updateConfig = readUpdateConfig();
   const version = packageVersion();
   if (updateConfig.problem) {
-    warn('Update check', updateConfig.problem);
+    warn(updateFeature.label, updateConfig.problem);
   } else if (!updateConfig.enabled) {
     off(
-      'Update check',
-      `not enabled - nothing tells you when a newer Raise is published (see ${userConfigPath()})`,
+      updateFeature.label,
+      'not enabled - nothing tells you when a newer Raise is published; ' +
+        bold(`raise enable ${updateFeature.name}`),
     );
   } else {
     const cached = readUpdateCache();
     if (!cached) {
-      ok('Update check', `enabled - nothing asked yet; ${bold('raise serve')} asks once a day`);
+      ok(updateFeature.label, `enabled - nothing asked yet; ${bold('raise serve')} asks once a day`);
     } else if (cached.latest && isNewerVersion(version, cached.latest)) {
       warn(
-        'Update check',
+        updateFeature.label,
         `${cached.latest} is available - you have ${version}, so run ${bold('npm install -g raise-cli')}`,
       );
     } else if (cached.latest && canCompareVersions(version, cached.latest)) {
-      ok('Update check', `${version} is the latest, as of ${ago(Date.now() - cached.checkedAt)}`);
+      ok(updateFeature.label, `${version} is the latest, as of ${ago(Date.now() - cached.checkedAt)}`);
     } else if (cached.latest) {
       // `isNewerVersion` fails closed on a pair it cannot rank, which is right
       // for `serve` - it stays quiet rather than nagging off a comparison it did
@@ -915,7 +1045,7 @@ async function cmdDoctor() {
       // the same thing: an unreadable `package.json`, and a pair of pre-releases
       // the ranker refuses, are one fact - there is no comparison to report.
       warn(
-        'Update check',
+        updateFeature.label,
         `the registry says ${cached.latest} is current, but this installation reports ${version}, which cannot be ranked against it - so whether you are up to date is not something Raise knows`,
       );
     } else {
@@ -925,7 +1055,7 @@ async function cmdDoctor() {
       // this whole tool is built against. There is no step for the reader here,
       // which is why the detail says so.
       warn(
-        'Update check',
+        updateFeature.label,
         `the check ${ago(Date.now() - cached.checkedAt)} got no answer - usually no network, and nothing to fix; it tries again a day after that`,
       );
     }
@@ -1079,6 +1209,12 @@ export async function main() {
       break;
     case 'focus':
       await cmdFocus(positional);
+      break;
+    case 'enable':
+      await cmdSetFeature(flags, positional, true);
+      break;
+    case 'disable':
+      await cmdSetFeature(flags, positional, false);
       break;
     case 'install-hooks':
       await cmdInstallHooks(flags);

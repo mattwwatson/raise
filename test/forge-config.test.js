@@ -135,10 +135,10 @@ test('a malformed file is named rather than silently ignored', () => {
 
 // ------------------------------------------------- the file, while it changes
 //
-// The user writes this file, and the README tells them to. An answer captured
-// when the server started is one `raise doctor` and the running server disagree
-// about until somebody restarts it, which is the confident-wrong shape this
-// codebase is built against.
+// `raise enable` writes this file, and the user may still edit it by hand. An
+// answer captured when the server started is one `raise doctor` and the running
+// server disagree about until somebody restarts it, which is the confident-wrong
+// shape this codebase is built against.
 
 /** A mutable fake file, so a test can edit, chmod or delete it. */
 const editable = () => {

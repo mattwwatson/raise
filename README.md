@@ -135,8 +135,8 @@ that forge's own API - `api.github.com`, reached through `gh`, or `api.bitbucket
 nowhere else. GitHub goes through your own `gh` login, so Raise never sees a GitHub credential
 at all; Bitbucket needs an API token with the single scope `read:pullrequest:bitbucket`, which
 grants no access to your source code, kept `0600` in `~/.raise/config.json`, never logged,
-never echoed, and never sent anywhere but Bitbucket. Turning it on is
-[one config file](#pull-request-state-from-the-forge).
+never echoed, and never sent anywhere but Bitbucket. Turning it on is one command,
+[`raise enable pull-request-state`](#pull-request-state-from-the-forge).
 
 **The update check**, which asks npm whether a newer Raise has been published, because nothing
 else will ever tell you. What goes out is one HTTPS request to `https://registry.npmjs.org`
@@ -151,10 +151,12 @@ your version never leaves the machine, and the comparison happens here against t
 registry sent back. Nothing else about this changes anything above - it never upgrades
 anything, it is not in the hook or the extension, and the server that runs while your dashboard
 is open never makes this request. Turning it on is
-[the same config file](#telling-you-when-there-is-a-newer-raise).
+[`raise enable update-check`](#telling-you-when-there-is-a-newer-raise).
 
 Everything the hooks install is reversible - `uninstall-hooks`, `uninstall-codex`,
-`uninstall-pi` - and every write to a settings file keeps a `.raise-backup` beside it.
+`uninstall-pi` - and so is every opt-in above, with `raise disable`. Every file Raise writes on
+your behalf - an agent's settings, and `~/.raise/config.json` - is shown to you as a diff first,
+confirmed before it is written, and left with a `.raise-backup` beside it.
 
 ## What it watches
 
@@ -423,6 +425,7 @@ daemon creates its database on first use, and Raise looks each time it reads.
 | `raise status` | One-shot text summary; no server needed |
 | `raise doctor` | Check the setup and explain anything missing |
 | `raise focus <session>` | Bring a session's window to the front from the terminal |
+| `raise enable <feature>` / `disable <feature>` | Turn an optional feature on or off: `pull-request-state`, `update-check` |
 | `raise install-hooks` / `uninstall-hooks` | Manage the Claude Code hooks |
 | `raise install-codex` / `uninstall-codex` | Manage the Codex hooks |
 | `raise install-pi` / `uninstall-pi` | Manage the pi extension |
@@ -545,18 +548,15 @@ already imported, so the link would land on that duplicate rather than the sessi
 ## Pull request state from the forge
 
 Off by default, and one of the two things in Raise that make an outbound request - what it
-sends and where is in [Security](#security). Turn it on by writing `~/.raise/config.json`:
+sends and where is in [Security](#security). Turn it on with:
 
 ```sh
-umask 077 && cat > ~/.raise/config.json <<'JSON'
-{
-  "forge": {
-    "enabled": true
-  }
-}
-JSON
-chmod 600 ~/.raise/config.json
+raise enable pull-request-state
 ```
+
+That writes one boolean into `~/.raise/config.json`, shows you the change first, keeps a
+`.raise-backup` beside the file, and leaves everything else in it alone. `raise disable
+pull-request-state` turns it off again.
 
 That is the whole of it for GitHub: it goes through `gh`, which authenticates itself, so
 there is no credential to configure and none for Raise to hold. `gh` needs to be installed
@@ -567,8 +567,11 @@ Bitbucket has no equivalent CLI, so it needs a token. Create an
 under **Account settings → Security → API tokens**, select **Bitbucket** as the app, and give
 it **`read:pullrequest:bitbucket` and nothing else**. That scope allows viewing pull requests
 and explicitly does *not* imply `read:repository:bitbucket`, so a token minted for Raise
-cannot read your source code. Add it with the Atlassian account email it belongs to, because
-Bitbucket authenticates with both:
+cannot read your source code. **The token is the one thing you still write by hand**, because
+a token given on a command line is a token in your shell history and in every `ps` on the
+machine - so there is no flag for it. Open `~/.raise/config.json` and add it beside the opt-in
+`raise enable` wrote, with the Atlassian account email it belongs to, because Bitbucket
+authenticates with both:
 
 ```json
 {
@@ -581,7 +584,8 @@ Bitbucket authenticates with both:
 
 **The file must be `0600`.** It holds a credential, so if anyone else on the machine can read
 it Raise refuses the whole file - opt-in included - and `raise doctor` says so rather than
-quietly doing nothing.
+quietly doing nothing. `raise enable` and `raise disable` write it `0600` and repair the mode
+if it has been made looser, so this only needs thinking about if you created the file yourself.
 
 **There is nothing to restart.** A running `raise serve` picks the file up as you write it, so
 turning the lookup on, correcting a token or fixing the mode all take effect within a second -
@@ -603,30 +607,27 @@ only ever make a badge more current than it would have been without it, never le
 
 ## Telling you when there is a newer Raise
 
-Also off by default, in the same file, and opted into separately - what it sends and to whom is
-in [Security](#security):
+Also off by default, opted into separately - what it sends and to whom is in
+[Security](#security):
 
 ```sh
-umask 077 && cat > ~/.raise/config.json <<'JSON'
-{
-  "updates": {
-    "enabled": true
-  }
-}
-JSON
-chmod 600 ~/.raise/config.json
+raise enable update-check
 ```
 
-Both blocks live in the one file, so if you already turned on pull request state, add `updates`
-beside `forge` rather than replacing it. The `0600` rule is the file's rather than either
-feature's: if anyone else on the machine can read it, Raise refuses the whole file and
-`raise doctor` says so.
+Both opt-ins live in the one file, and each command merges its own boolean into it, so turning
+this on cannot disturb pull request state or the Bitbucket credential beside it. The `0600`
+rule is the file's rather than either feature's: if anyone else on the machine can read it,
+Raise refuses the whole file and `raise doctor` says so.
 
 **Why this is worth a config file at all.** npm has no way of telling you. A published version
 sits in the registry and your install stays on whatever it has until you reinstall or happen to
 notice it in `npm outdated -g` - and for a monitor that is the wrong way round, because the
 fixes worth having are the ones that stop a row telling you something untrue, and whoever is
 running that row is exactly who will never find out.
+
+**This one does need a restart, unlike pull request state.** The registry is asked once, when
+`raise serve` starts, so a server already running will not begin checking until you restart it -
+and `raise enable update-check` says so rather than promising otherwise.
 
 With it on, `raise serve` says so at startup, once, and nothing else changes:
 
