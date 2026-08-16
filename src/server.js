@@ -61,6 +61,7 @@ import { PollWatch } from './poll-watch.js';
 import { FirstmateWatch } from './firstmate.js';
 import { UntrackedScan } from './untracked.js';
 import { buildRows, isDismissibleBlock, summarise } from './dashboard.js';
+import { BuildStamp } from './build-stamp.js';
 import { RunOwners } from './run-owner.js';
 import { focusSession } from './focus/index.js';
 import { checkRequest } from './security.js';
@@ -147,6 +148,10 @@ export function createMonitorServer({
   // Injected whole rather than as a file access object, because the suite needs
   // to point it at fixture roots as often as it needs to stub the reads.
   untrackedScan = new UntrackedScan(),
+  // Injected whole for the same reason, and one more: the alternative to
+  // driving the stamp from a test is a test that edits the product's own page
+  // on the developer's disk to make the served build change.
+  buildStamp = new BuildStamp(),
 } = {}) {
   const registry = new SessionRegistry({ dir: sessionsPath });
   const nmState = new NoMistakesState({ dbPath, exec, execAsync });
@@ -317,6 +322,17 @@ export function createMonitorServer({
       summary: summarise(rows),
       source,
       warning,
+      // Which build of the page this server is serving, so a tab pinned for a
+      // week can tell it is rendering with code that has since been replaced.
+      // It rides here rather than on the `ping` because the state frame is
+      // delivered at both the moments this can change: `openStream` pushes one
+      // unconditionally, so a restart - which is a reconnect - is answered at
+      // once, where the keepalive is a single server-wide interval and a client
+      // can wait a full `KEEPALIVE_MS` for its first. And an edit under a
+      // running server moves this value, which moves `stableJson`, which
+      // broadcasts - so the change announces itself through the machinery that
+      // is already here. Constant otherwise, so it costs no extra frames.
+      build: buildStamp.current(),
       generatedAt: Date.now(),
     };
   }
@@ -432,6 +448,18 @@ export function createMonitorServer({
     }
     // The page needs the token to open the event stream and to focus.
     html = html.replace('__RAISE_TOKEN__', pageToken);
+    // Stamped into the bytes the tab receives, so it knows what it *loaded*
+    // with rather than what it was first *told*. Those differ: a page loaded
+    // during a restart can take its HTML from one build and its first frame
+    // from the next, and a tab that only remembered the first stamp it was sent
+    // would agree with the server forever while running superseded code.
+    //
+    // An unreadable build substitutes the empty string rather than leaving the
+    // placeholder in place, because a literal `__RAISE_BUILD__` would compare
+    // unequal to every real stamp and put an out-of-date notice on a page that
+    // is perfectly current. `createBuildWatch` reads the empty string as no
+    // answer, exactly as it reads an absent field.
+    html = html.replace('__RAISE_BUILD__', buildStamp.current() ?? '');
     res.writeHead(200, {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': 'no-store',

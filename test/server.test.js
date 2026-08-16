@@ -1501,3 +1501,139 @@ test('closing a session does not bring it back as one nothing ever reported', as
     cleanup();
   }
 });
+
+test('a tab can tell the page it loaded is no longer the page being served', async () => {
+  // The reproduction, at the seam where the fault actually lives. Nothing was
+  // ever broken in the feature that exposed this: the record was present, the
+  // server emitted the field, the served HTML carried the new rendering code
+  // and `cache-control: no-store` ruled a browser cache out. The tab simply
+  // went on running the JavaScript it had loaded days earlier, and no frame
+  // said otherwise.
+  //
+  // So the thing to assert is the one the page needs and did not have: the
+  // build is stamped into the HTML at the moment it is served, the stream
+  // states the build currently being served, and the two differ exactly when a
+  // pinned tab has fallen behind. The stamp is injected rather than taken from
+  // the real `public/`, because the alternative is a test that edits the
+  // product's own page on the developer's disk.
+  const { dir, cleanup } = scratch();
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = dir;
+  let monitor = null;
+  try {
+    const port = await freePort();
+    let stamp = 'build-one';
+    monitor = createMonitorServer({
+      port,
+      token: 'test-token',
+      dbPath: join(dir, 'no-such.sqlite'),
+      sessionsPath: join(dir, 'sessions'),
+      exec: () => assert.fail('no blocking commands from the server'),
+      fetch: () => assert.fail('no outbound requests from the server'),
+      execAsync: async () => '',
+      buildStamp: { current: () => stamp },
+    });
+    await monitor.start();
+
+    const page = () => fetch(`http://127.0.0.1:${port}/?t=test-token`).then((r) => r.text());
+    const served = async () =>
+      (await (await fetch(`http://127.0.0.1:${port}/state?t=test-token`)).json()).build;
+    const bakedInto = (html) => /const BUILD = '([^']*)'/.exec(html)?.[1];
+
+    const pinned = await page();
+    assert.equal(bakedInto(pinned), 'build-one', 'the tab is told what it loaded with');
+    assert.equal(await served(), 'build-one', 'and the stream states the same build');
+
+    // The page changes underneath the pinned tab. It keeps its own stamp,
+    // because it is still running the code it downloaded.
+    stamp = 'build-two';
+    assert.equal(await served(), 'build-two');
+    assert.notEqual(
+      bakedInto(pinned),
+      await served(),
+      'which is precisely how a pinned tab learns it has fallen behind',
+    );
+
+    const reloaded = await page();
+    assert.equal(bakedInto(reloaded), 'build-two', 'and a reload settles it');
+  } finally {
+    if (monitor) await monitor.stop();
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
+    cleanup();
+  }
+});
+
+test('a build the server could not read leaves the page with no claim to make', async () => {
+  // The failure that would be worse than the bug. If `servePage` left the
+  // `__RAISE_BUILD__` placeholder in the HTML, that literal would compare
+  // unequal to every real stamp and put an out-of-date notice on a page that is
+  // perfectly current - and it would do it on every single tab at once.
+  // Substituting the empty string is what makes the page's rule read it as no
+  // answer, exactly as it reads the absent field beside it.
+  const { dir, cleanup } = scratch();
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = dir;
+  let monitor = null;
+  try {
+    const port = await freePort();
+    monitor = createMonitorServer({
+      port,
+      token: 'test-token',
+      dbPath: join(dir, 'no-such.sqlite'),
+      sessionsPath: join(dir, 'sessions'),
+      exec: () => assert.fail('no blocking commands from the server'),
+      fetch: () => assert.fail('no outbound requests from the server'),
+      execAsync: async () => '',
+      buildStamp: { current: () => null },
+    });
+    await monitor.start();
+
+    const html = await (await fetch(`http://127.0.0.1:${port}/?t=test-token`)).text();
+    assert.equal(html.includes('__RAISE_BUILD__'), false, 'the placeholder never survives');
+    assert.match(html, /const BUILD = ''/, 'and it resolves to the page saying it does not know');
+
+    const state = await (await fetch(`http://127.0.0.1:${port}/state?t=test-token`)).json();
+    assert.equal(state.build, null, 'the frame states no build rather than a made-up one');
+  } finally {
+    if (monitor) await monitor.stop();
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
+    cleanup();
+  }
+});
+
+test('the served page carries the build the stream is stating, with nothing injected', async () => {
+  // The default wiring, against the product's own `public/`: every other test
+  // here drives the stamp, so without this one nothing proves `BuildStamp` is
+  // actually reached on the path a user takes.
+  const { dir, cleanup } = scratch();
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = dir;
+  let monitor = null;
+  try {
+    const port = await freePort();
+    monitor = createMonitorServer({
+      port,
+      token: 'test-token',
+      dbPath: join(dir, 'no-such.sqlite'),
+      sessionsPath: join(dir, 'sessions'),
+      exec: () => assert.fail('no blocking commands from the server'),
+      fetch: () => assert.fail('no outbound requests from the server'),
+      execAsync: async () => '',
+    });
+    await monitor.start();
+
+    const html = await (await fetch(`http://127.0.0.1:${port}/?t=test-token`)).text();
+    const baked = /const BUILD = '([^']*)'/.exec(html)?.[1];
+    assert.match(baked, /^[0-9a-f]{12}$/, 'a real stamp off the real page');
+
+    const state = await (await fetch(`http://127.0.0.1:${port}/state?t=test-token`)).json();
+    assert.equal(state.build, baked, 'and the two halves of the protocol agree');
+  } finally {
+    if (monitor) await monitor.stop();
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
+    cleanup();
+  }
+});

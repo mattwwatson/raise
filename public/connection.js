@@ -111,6 +111,78 @@ export function createConnectionWatch({
 }
 
 /**
+ * Whether this tab is still running the page the server is serving.
+ *
+ * The same idea as the watch above, applied to code rather than data. A pinned
+ * tab loads its HTML and JavaScript once and lives for days; when the server
+ * restarts with new code the stream quietly reopens and the tab carries on
+ * rendering with what it downloaded, ignoring every new field that arrives. So
+ * the server stamps each page with the build it was served and states the build
+ * it is serving on every state frame, and this compares the two.
+ *
+ * **A frame that carries no stamp says nothing, and never clears a mismatch
+ * already known.** That is the load-bearing rule here and it is the liveness
+ * dot's own: positive evidence, never the absence of a signal. An older server
+ * - one that predates this field entirely - sends frames with nothing in them,
+ * and must not thereby make a perfectly current page announce itself stale.
+ * Silence is not disagreement.
+ *
+ * Deliberately *not* sticky beyond that. A server that goes back to the build
+ * this tab holds - a branch switched back, an upgrade rolled back - genuinely
+ * agrees with it again, and there is nothing left to reload for. Only a stamp
+ * the server actually stated may change the answer, in either direction.
+ *
+ * No clock in here: the rule has no time in it. Being out of date is not a thing
+ * that ages.
+ *
+ * @param {unknown} loaded the stamp baked into this page when it was served
+ */
+export function createBuildWatch(loaded) {
+  const own = knownStamp(loaded);
+  /** @type {string | null} the last build the server actually stated */
+  let served = null;
+
+  return {
+    /**
+     * Whatever the state frame said, which may well be nothing.
+     *
+     * @param {unknown} stamp
+     */
+    noteServed(stamp) {
+      const said = knownStamp(stamp);
+      if (said !== null) served = said;
+    },
+
+    /** @returns {string | null} */
+    loaded: () => own,
+
+    /** @returns {string | null} */
+    served: () => served,
+
+    /**
+     * @returns {boolean} whether reloading would actually get you newer code.
+     *   False whenever either side is unknown - an unanswerable question is not
+     *   a yes.
+     */
+    isStale: () => own !== null && served !== null && served !== own,
+  };
+}
+
+/**
+ * A stamp we can actually compare, or null for anything we cannot.
+ *
+ * The empty string is what `servePage` substitutes when it could not read the
+ * page to hash it, so it means "no answer" exactly as an absent field does and
+ * must not be allowed to differ from a real stamp.
+ *
+ * @param {unknown} value
+ * @returns {string | null}
+ */
+function knownStamp(value) {
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
+/**
  * How the header should read for a status.
  *
  * "stale" has to say more than the others, because it is the one state where

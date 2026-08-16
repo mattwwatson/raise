@@ -1,9 +1,10 @@
 ---
 issue: 1
-status: in-progress
+status: shipped
 size: M
 depends: -
 branch: fm/1-stale-page-code
+shipped: 2026-08-17
 ---
 # 1 - A pinned dashboard never picks up UI changes
 
@@ -140,7 +141,16 @@ not move is invisible to the change gate, and a stamp that moves pushes a frame 
 Verified against `stableJson` directly. The mechanism that announces the change is therefore
 the one already there.
 
-## The five decisions, brought back
+## The five decisions, as ruled
+
+**The captain decided all five, and all five went the way the investigation recommended.** They
+were put to him with the evidence and the competing reading on each; his answer was to go with
+the recommendations. He is the decider of record on every one of them - not the agent that
+proposed them and not firstmate, which relayed them. The reasoning below is kept as it was put
+to him, because the competing reading is the part a future session needs in order to know what
+was weighed rather than merely what was chosen.
+
+
 
 Recorded here with the competing reading on each, because the answer to each is a rule rather
 than a preference and the rule is what a future session needs.
@@ -260,3 +270,80 @@ npm run lint
 
 If the answer is "document the reload and do nothing", that is a complete outcome - write the
 reasoning into the spec and mark it `wont-do`.
+
+## Implementation notes
+
+Four pieces, and the seam between them is the protocol: the server states which build it is
+serving, the page remembers which build it loaded with, and a pure rule decides whether they
+still agree.
+
+**`src/build-stamp.js`** computes the identity: a SHA-256 over the two files `servePage` and
+`serveModule` actually read, truncated to twelve hex characters, recomputed only when a `stat`
+shows a size or mtime has moved. That is the cache `src/transcript-reader.js` already
+implements, chosen for the same reason - a stat is a syscall and hashing is not. Each file's
+name and length go into the hash with its bytes, so moving a character across the boundary
+between the two, or swapping their contents, cannot hash to the build it replaced. A file it
+cannot read yields `null` rather than a hash of what survived, because a stamp derived from a
+failed read would differ from the one every open tab holds and would tell all of them at once
+that they were stale.
+
+**`src/server.js`** carries it both ways. `snapshot()` puts it on the state frame; `servePage`
+substitutes it into the HTML beside `__RAISE_TOKEN__`. Baking it into the served bytes is what
+makes the page's half first-hand: a tab that merely remembered the first stamp it was *sent*
+could take its HTML from one build and its first frame from the next, and would then agree with
+the server forever while running superseded code. An unreadable build substitutes the empty
+string rather than leaving the placeholder, because a literal `__RAISE_BUILD__` compares unequal
+to every real stamp and would put the notice on every current page.
+
+**`public/connection.js`** gains `createBuildWatch`, pure and DOM-free like everything else
+there, and holds the one rule worth protecting: **a frame that states no build says nothing and
+never clears a mismatch already known.** An older server - one predating the field - sends
+frames with nothing in them, and silence must not read as disagreement. It is deliberately not
+sticky beyond that: a server that returns to the build a tab holds genuinely agrees with it
+again, so the notice goes away rather than persisting as a claim nobody can act on.
+
+**`public/index.html`** renders it as a hidden `<button>` in the header, between the alerts
+button and the connection indicator, in the existing quiet header-button style. That style is
+already `--muted` on `--panel` with a `--border` edge, so **this change adds no colour custom
+property at all** - which is why the "add a variable to both blocks or neither" rule had nothing
+to arbitrate here, and why the notice cannot compete with `blocked` red: it never enters the
+attention palette. Pressing it reloads; nothing else does.
+
+### What the tests pin, and where
+
+The reproduction lives in `test/server.test.js` as *"a tab can tell the page it loaded is no
+longer the page being served"*, and it is written against the seam rather than the symptom:
+the stamp is injected, the served build is moved underneath a page already fetched, and the two
+are asserted to diverge. Injected rather than real, because the alternative is a test that
+edits the product's own `public/index.html` on the developer's disk.
+
+`test/build-stamp.test.js` covers the identity itself against a fake filesystem, including the
+two cases that are cheap to get subtly wrong in opposite directions - a file rewritten with
+identical bytes is the *same* build, and a file that cannot be read is *no* build. It also
+carries the drift guard: it reads `src/server.js`, extracts every `join(PUBLIC_DIR, '…')` it
+serves, and fails if one is missing from `SERVED_FILES`. A third served file left out of that
+list would be a change no tab could notice, which is this ticket's own bug reintroduced through
+the blind spot of its fix - so it is made detectable rather than merely documented, the same
+bargain `test/docs-claims.test.js` strikes with `CONTRIBUTING.md`.
+
+`test/connection.test.js` covers the page-side rule directly, silence and unknown-either-side
+included.
+
+### Exercised in a real browser
+
+Not only in the suite. A scratch server was started on a spare port with `RAISE_HOME`, `NM_HOME`
+and the three agent homes pointed at a temporary directory, the page opened and left sitting,
+and `public/index.html` then edited underneath it. The pinned tab picked up the changed stamp on
+the next poll and grew the notice without being reloaded, while the connection indicator
+correctly stayed **live** - the data was never in doubt, only the code. Pressing the button
+cleared it. Checked in light and dark, where the button inherits both palettes with no new
+variable.
+
+### Deliberately not done
+
+The stamp covers what is served, not everything in `public/`. A file nobody is sent is not part
+of the code a tab is running, and stamping it would offer a reload that changes nothing on
+screen; the drift guard above is what keeps the two lists equal instead.
+
+The secondary finding above - the stray `raise serve` inside a pipeline worktree - stays out of
+this change, as the spec directed. Nothing learned while working on this bears on it.
