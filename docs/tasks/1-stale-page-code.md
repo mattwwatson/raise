@@ -150,11 +150,6 @@ proposed them and not firstmate, which relayed them. The reasoning below is kept
 to him, because the competing reading is the part a future session needs in order to know what
 was weighed rather than merely what was chosen.
 
-
-
-Recorded here with the competing reading on each, because the answer to each is a rule rather
-than a preference and the rule is what a future session needs.
-
 ### 1. What identifies a build
 
 **The rule underneath: an identity must be a property of the thing at the moment it is
