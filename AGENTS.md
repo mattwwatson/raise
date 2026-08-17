@@ -154,6 +154,7 @@ of its design - it is what stops the first page a stranger sees being blank. See
 | `src/focus/` | tmux resolution, per-terminal adapters, and raising Claude Desktop |
 | `src/process-tree.js` | which terminal or app, and which agent process, a hook is running under |
 | `src/security.js` | token, Host and Origin checks (pure) |
+| `src/build-stamp.js` | which build of the page is being served, so a pinned tab can tell it is running superseded code |
 | `src/health.js` | probing a port to find out whether Raise is behind it |
 | `src/exec.js` | the one place that runs external commands |
 | `src/server.js` | HTTP, server-sent events, the poll loop |
@@ -166,7 +167,7 @@ of its design - it is what stops the first page a stranger sees being blank. See
 | `src/codex-transcript.js` | Codex rollouts, normalised into those same records |
 | `src/untracked.js` | sessions found on disk that no hook has reported |
 | `public/index.html` | the page, self-contained |
-| `public/connection.js` | the liveness rule (pure, no DOM, injected clock) |
+| `public/connection.js` | the liveness rule, and whether the page's own code is current (pure, no DOM, injected clock) |
 
 `scripts/` is **not** part of the product. It holds this repository's own roadmap tooling -
 the board, the link check, the shipped-spec CI gate and the issue reconciliation - and is
@@ -373,6 +374,12 @@ stratified on purpose, so read the whole file rather than one section.
 | recording the wrong agent pid is worse than recording none | `src/process-tree.js` |
 | the hook payload is an allowlist, and why it must be | `src/hook-payload.js` |
 | what `tool_name` would have bought, and why the boundary did not move for it | `docs/tasks/RAI-11-question-vs-permission.md` |
+| the build is the hash of the served bytes; version, restart time and a startup hash were each measured and rejected | `src/build-stamp.js`, `docs/tasks/1-stale-page-code.md` |
+| the stamp is baked into the page it describes, so a tab knows what it loaded rather than what it was first told | `src/server.js` (`servePage`) |
+| the stamp is taken before the bytes, so an edit landing between the two reads is self-healing | `src/server.js` (`servePage`) |
+| one `PUBLIC_DIR`, handed to the server and the stamp together, because they must be the same directory | `src/build-stamp.js` (`PUBLIC_DIR`) |
+| the build rides the state frame, because that frame is delivered at both moments the build can change | `src/server.js` (`snapshot`) |
+| a frame stating no build says nothing and never clears a known mismatch | `public/connection.js` (`createBuildWatch`) |
 | localhost is not a boundary: token, `Host` and `Origin` are all three load-bearing | `src/security.js` |
 | the merge shows a diff, asks first, backs up, and is safe to run twice | `src/hooks.js`, `src/pi-extension.js` |
 | `raise serve` asks the port rather than a file; `/health` needs no token | `src/health.js` |
@@ -497,12 +504,19 @@ Keep it that way - it has no build step and must open as a file.
   clicked, and it gets a neutral toast.
 - The liveness dot is positive evidence (a `ping` within `STALE_AFTER_MS`), never the absence
   of an error. When stale, dim the page - it is a snapshot of the past.
+- **The page never reloads itself, and that rule has no exception to earn.** It applies to the
+  build notice that prompted it and to anything else that might later want the same power:
+  offer, do not act. A reload discards whatever the user has expanded, at a moment they did not
+  choose, on a page they are watching precisely because something needs them - so the notice is
+  a button and pressing it is the whole of the behaviour. The rule above says the page must be
+  honest about *data* it can no longer vouch for; this is the same obligation for *code*, and
+  the two are deliberately answered the same way: say so plainly, change nothing on your own.
 - Density over decoration. This is a page you leave pinned and glance at.
 
 ## Testing and Quality
 
 ```sh
-npm test          # 877 tests, no network, no dependencies, ~9s
+npm test          # 899 tests, no network, no dependencies, ~9s
 npm run lint      # oxlint over src, bin, hooks, public, test, scripts
 npm run typecheck # tsc --noEmit over src, bin, hooks, public, scripts
 ```
@@ -698,7 +712,7 @@ the [roadmap-workflow skill](.claude/skills/roadmap-workflow/SKILL.md).
 ## Commands
 
 ```sh
-npm test                       # 877 tests, ~9s
+npm test                       # 899 tests, ~9s
 npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above

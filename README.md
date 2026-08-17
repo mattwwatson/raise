@@ -81,6 +81,12 @@ status we can honestly read. Restart it and it becomes an ordinary row.
 Then open the URL `raise serve` prints and leave the tab pinned. Click "Enable alerts" once if
 you want desktop notifications when something starts waiting on you.
 
+A tab left pinned for days is running the JavaScript it downloaded on the day you opened it, so
+upgrading Raise underneath it changes the server and not the page. When that happens the header
+says **Page out of date - reload**, and pressing it is the whole fix. Raise will not reload the
+tab for you: it would throw away whatever you had expanded, at a moment you did not pick, on a
+page you are watching because something needs you.
+
 Codex and pi each take one more command - [Codex sessions](#codex-sessions),
 [pi sessions](#pi-sessions).
 

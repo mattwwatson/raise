@@ -789,6 +789,22 @@
       <div class="counts" id="counts"></div>
       <div class="spacer"></div>
       <button id="notify">Enable alerts</button>
+      <!--
+        Housekeeping, so it wears the ordinary header-button style and no colour
+        of its own. `blocked` red says a person is needed; this says only that
+        the tab is running superseded code, and the attention ordering in
+        AGENTS.md is deliberate - a notice about the page must never compete
+        with a card about the work. It sits here, beside the alerts button and
+        left of the connection indicator, because that is where the page's other
+        facts about itself already live: the liveness dot and the alerts state
+        are both about this tab's relationship with the server rather than about
+        any session, and so is this. The warning slot inside <main> is for
+        `payload.warning`, which is about the data being degraded.
+
+        Hidden until there is genuinely something to reload for, which keeps the
+        affordance rule: a control that is offered must work.
+      -->
+      <button id="build" hidden>Page out of date - reload</button>
       <span class="conn" id="conn"
         ><span class="dot" id="dot"></span><span id="connText">connecting</span></span
       >
@@ -803,10 +819,16 @@
 
     <script type="module">
       const TOKEN = '__RAISE_TOKEN__';
+      // Substituted by `servePage` at the moment these bytes were sent, so it
+      // identifies the code this tab is actually running - not the code the
+      // server happened to be serving when the first frame arrived. Left as the
+      // literal placeholder only when the file is opened directly rather than
+      // served, in which case there is no stream to compare it against anyway.
+      const BUILD = '__RAISE_BUILD__';
 
       // Imported with the token, so serving it needs no exception to the rule
       // that /health is the only unauthenticated route.
-      const { createConnectionWatch, connectionLabel } = await import(
+      const { createConnectionWatch, connectionLabel, createBuildWatch } = await import(
         '/connection.js?t=' + TOKEN
       );
 
@@ -818,6 +840,7 @@
       const connTextEl = document.getElementById('connText');
       const toastEl = document.getElementById('toast');
       const notifyBtn = document.getElementById('notify');
+      const buildBtn = document.getElementById('build');
       const faviconEl = document.getElementById('favicon');
 
       let lastBlocked = new Set();
@@ -1617,7 +1640,27 @@
       updateNotifyButton(hasNotifications() ? Notification.permission : 'denied');
 
       const watch = createConnectionWatch();
+      // Seeded with what this tab loaded, which is the only thing it can know
+      // first-hand about its own code.
+      const buildWatch = createBuildWatch(BUILD);
       let source = null;
+
+      /**
+       * Offer the reload; never take it.
+       *
+       * An auto-reloading dashboard would discard whatever the user has
+       * expanded, at an arbitrary moment, on a page they are watching precisely
+       * because something needs them - so this only ever shows a button. The
+       * button is the whole of the behaviour.
+       */
+      function showBuildNotice() {
+        buildBtn.hidden = !buildWatch.isStale();
+      }
+
+      buildBtn.title =
+        'This tab is running the page it loaded with. Raise is serving a newer one - ' +
+        'reload to pick it up.';
+      buildBtn.addEventListener('click', () => location.reload());
 
       function showConnection() {
         const { text, tone } = connectionLabel(watch.status(), watch.quietForMs());
@@ -1640,7 +1683,14 @@
         source.addEventListener('state', (event) => {
           watch.noteMessage();
           showConnection();
-          render(JSON.parse(event.data));
+          const payload = JSON.parse(event.data);
+          // Before the render rather than after it, so a frame this page is too
+          // old to render correctly is still the frame that says so. A server
+          // that predates the field sends nothing here, and the watch treats
+          // that as no answer rather than as disagreement.
+          buildWatch.noteServed(payload.build);
+          showBuildNotice();
+          render(payload);
         });
         // Nothing to render; its whole purpose is being evidence that the
         // server is still on the other end.

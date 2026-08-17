@@ -16,6 +16,7 @@ import {
   KEEPALIVE_MS,
   STALE_AFTER_MS,
   RECONNECT_GRACE_MS,
+  createBuildWatch,
 } from '../public/connection.js';
 
 /** A clock you can shove forwards. */
@@ -171,4 +172,79 @@ test('a custom stale window is honoured', () => {
   watch.noteMessage();
   c.advance(101);
   assert.equal(watch.status(), 'stale');
+});
+
+test('a page whose build matches the server says nothing', () => {
+  const build = createBuildWatch('abc123');
+  build.noteServed('abc123');
+  assert.equal(build.isStale(), false);
+});
+
+test('a pinned tab notices when the served build moves past the one it loaded', () => {
+  // The whole ticket in four lines. The tab loaded `abc123` and has been open
+  // for days; the server has since restarted onto `def456` and the stream
+  // reconnected without a word. Nothing errors, nothing looks wrong, and the
+  // page has been rendering with superseded code the entire time.
+  const build = createBuildWatch('abc123');
+  build.noteServed('abc123');
+  build.noteServed('def456');
+  assert.equal(build.isStale(), true);
+  assert.equal(build.loaded(), 'abc123', 'and it still knows which code it is running');
+  assert.equal(build.served(), 'def456');
+});
+
+test('a frame that states no build never makes a current page announce itself stale', () => {
+  // The load-bearing rule, and the liveness dot's own: positive evidence, never
+  // the absence of a signal. A server older than this field sends frames with
+  // nothing in them, and silence is not disagreement.
+  const build = createBuildWatch('abc123');
+  for (const nothing of [undefined, null, '', 0, false, {}]) {
+    build.noteServed(nothing);
+    assert.equal(build.isStale(), false, `a ${JSON.stringify(nothing) ?? 'undefined'} said nothing`);
+  }
+  assert.equal(build.served(), null, 'the server has still never stated a build');
+});
+
+test('a silent frame does not clear a mismatch already known', () => {
+  // Otherwise the notice would flicker: one frame carrying a build, the next
+  // one somehow not, on a page you are meant to be able to glance at.
+  const build = createBuildWatch('abc123');
+  build.noteServed('def456');
+  assert.equal(build.isStale(), true);
+  build.noteServed(undefined);
+  assert.equal(build.isStale(), true, 'saying nothing cannot un-say the last answer');
+  assert.equal(build.served(), 'def456');
+});
+
+test('a page that does not know its own build never claims to be out of date', () => {
+  // What `servePage` substitutes when it could not read the page to hash it,
+  // and what the placeholder resolves to for a file opened directly. Neither is
+  // grounds for telling somebody to reload.
+  for (const unknown of [undefined, null, '']) {
+    const build = createBuildWatch(unknown);
+    build.noteServed('def456');
+    assert.equal(build.isStale(), false);
+    assert.equal(build.loaded(), null);
+  }
+});
+
+test('a server that goes back to the build this tab holds agrees with it again', () => {
+  // Deliberately not sticky. A branch switched back or an upgrade rolled back
+  // genuinely leaves this tab running the code being served, and there is
+  // nothing left to reload for - so the honest answer is to stop asking.
+  const build = createBuildWatch('abc123');
+  build.noteServed('def456');
+  assert.equal(build.isStale(), true);
+  build.noteServed('abc123');
+  assert.equal(build.isStale(), false);
+});
+
+test('the watch holds no clock, because being out of date does not age', () => {
+  // Every other rule on this page is about the passage of time; this one is
+  // not, and a stale build is exactly as stale a minute later.
+  const build = createBuildWatch('abc123');
+  build.noteServed('def456');
+  const first = build.isStale();
+  assert.equal(build.isStale(), first);
+  assert.equal(build.isStale(), first);
 });
