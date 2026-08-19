@@ -419,6 +419,42 @@ test('list drops sessions whose process has died', () => {
   }
 });
 
+test('read tells a directory holding nothing from one it could not read', () => {
+  // `list` returns the same empty array for both, and a caller acting on the
+  // absence of a session needs to know which it got: nobody running an agent is
+  // an answer, and `readdirSync` throwing is not. The conflation used to be
+  // resolved by guessing, and guessing either way is wrong in one of the two
+  // cases - one asserts firstmate rulings nobody is waiting on, the other clears
+  // rulings that are still open on a momentary filesystem error.
+  const { dir, cleanup } = scratch();
+  try {
+    const registry = new SessionRegistry({ dir });
+    registry.record({ session_id: 's1', hook_event_name: 'SessionStart', host: { pid: 111 } });
+    const held = registry.read({ isAlive: alwaysAlive });
+    assert.deepEqual(held.sessions.map((r) => r.sessionId), ['s1']);
+    assert.equal(held.readable, true);
+
+    // Everybody quits. The directory is still perfectly readable.
+    registry.record({ session_id: 's1', hook_event_name: 'SessionEnd', host: { pid: 111 } });
+    const empty = registry.read({ isAlive: alwaysAlive });
+    assert.deepEqual(empty.sessions, []);
+    assert.equal(empty.readable, true, 'an empty directory is a reading, not a failure');
+
+    // And `list` is unchanged for every caller that only wants the sessions.
+    assert.deepEqual(registry.list({ isAlive: alwaysAlive }), []);
+
+    // The directory goes out from under it, which is what a failed read looks
+    // like. The constructor makes the directory, so this has to happen after it.
+    rmSync(dir, { recursive: true, force: true });
+    const unreadable = registry.read({ isAlive: alwaysAlive });
+    assert.deepEqual(unreadable.sessions, []);
+    assert.equal(unreadable.readable, false, 'a directory we could not read says so');
+    assert.deepEqual(registry.list({ isAlive: alwaysAlive }), []);
+  } finally {
+    cleanup();
+  }
+});
+
 test('a session with no recorded pid is kept', () => {
   const { dir, cleanup } = scratch();
   try {

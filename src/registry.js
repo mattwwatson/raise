@@ -394,18 +394,50 @@ export class SessionRegistry {
   }
 
   /**
+   * The live sessions, for the callers that only ever need those.
+   *
+   * An empty array here means one of two things and does not say which - see
+   * `read`, which is the same walk and does say.
+   *
    * @param {object} [options]
    * @param {(pid: number) => boolean} [options.isAlive] pid liveness probe,
    *   injected so tests never probe the machine running them
    * @param {number} [options.now]
    * @returns {Session[]}
    */
-  list({ isAlive = defaultIsAlive, now = Date.now() } = {}) {
+  list(options = {}) {
+    return this.read(options).sessions;
+  }
+
+  /**
+   * The live sessions, and whether the directory could be read at all.
+   *
+   * **The empty array is two different facts and a caller that acts on the
+   * absence of a session needs to know which.** Nobody is running an agent is
+   * an *answer* - the ordinary state of a machine at the end of the day, with
+   * `raise serve` still running. `readdirSync` throwing is a reading we did not
+   * get, and is rare. `list` cannot separate them because its own `catch`
+   * returns the same empty array, so anything downstream that treats one as the
+   * other is wrong in the ordinary case or the rare one, and there is no third
+   * option: this is where the two are still distinguishable, one line apart.
+   *
+   * `src/server.js` is the caller that needs it, for the firstmate reading -
+   * take an empty list for a failed read and an ordinary end of day asserts
+   * rulings nobody is waiting on; take a failed read for an empty list and a
+   * momentary filesystem error clears rulings that are still open.
+   *
+   * @param {object} [options]
+   * @param {(pid: number) => boolean} [options.isAlive] pid liveness probe,
+   *   injected so tests never probe the machine running them
+   * @param {number} [options.now]
+   * @returns {{sessions: Session[], readable: boolean}}
+   */
+  read({ isAlive = defaultIsAlive, now = Date.now() } = {}) {
     let names;
     try {
       names = readdirSync(this.#dir);
     } catch {
-      return [];
+      return { sessions: [], readable: false };
     }
     /** @type {Session[]} */
     const records = [];
@@ -432,7 +464,10 @@ export class SessionRegistry {
       }
       records.push(record);
     }
-    return records.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    return {
+      sessions: records.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)),
+      readable: true,
+    };
   }
 
   /**

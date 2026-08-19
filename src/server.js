@@ -187,7 +187,10 @@ export function createMonitorServer({
   let writtenInfoPath = null;
 
   function snapshot() {
-    const sessions = registry.list();
+    // `read` rather than `list` because one caller below acts on the *absence*
+    // of a session and an empty array alone cannot say whether that absence was
+    // read or merely returned - see `SessionRegistry.read`.
+    const { sessions, readable: sessionsReadable } = registry.read();
     const candidateDirs = [...new Set(sessions.map((s) => s.cwd).filter(Boolean))];
     const { runs, pullRequests, source, warning } = nmState.read({ candidateDirs });
 
@@ -280,40 +283,39 @@ export function createMonitorServer({
     // loop has one.
     //
     // No captain among sessions we did read is positive evidence that firstmate
-    // has gone, and clears every ruling off the page. Two things reach the same
-    // null without meaning anything of the kind, and both are `CAPTAIN_UNREADABLE`.
+    // has gone, and clears every ruling off the page. What decides the answer
+    // here is only ever whether a reading was *obtained*, never what went wrong
+    // when one was not.
     //
-    // **An empty session list is one of them, and mapping it to "unreadable" is
-    // deliberate rather than an oversight.** `registry.list()` returns `[]` both
-    // when everybody genuinely left and when `readdirSync` on the sessions
-    // directory threw, and nothing here can tell those apart - so it is a
-    // reading we did not get about whether the captain is there. It used to skip
-    // the call outright, which read as a cheap fast exit and was the last route
-    // with no ceiling on it: `#home`, `#at`, `#failures` and `#tasks` all froze,
-    // and nothing could ever clear the reading again. Reverting it to a fast
-    // exit costs this, concretely: close every terminal with four rulings open
-    // and `raise serve` still running, and the page keeps a *Rulings waiting*
-    // card carrying all four, the tab title keeps claiming somebody is waiting,
-    // and a desktop notification fires for a firstmate that exited - until the
-    // server is restarted.
+    // **An empty session list is an answer, and only a directory we could not
+    // read is not.** `list` returns the same empty array for both, which is why
+    // this reads through `registry.read` instead - the two are separable there
+    // and nowhere after it. Getting the split wrong is costly in both
+    // directions, which is what stops them being collapsed again. Take an empty
+    // list for a failed read, and quitting every agent at the end of the day
+    // with `raise serve` still running leaves a *Rulings waiting* card carrying
+    // four rulings, a tab title claiming somebody is waiting, and a desktop
+    // notification for a firstmate that has exited - for a quarter of an hour,
+    // until the ceiling counts it out. Take a failed read for an empty list, and
+    // a momentary filesystem error clears rulings that are still open.
     //
-    // **A lock we could not read is the other**, and it is asked about *one
-    // directory at a time*. The question is only "has the captain gone", and the
-    // sole lock that can answer it is the one at the home the standing reading
-    // came from - no other session was ever the captain, so no other session's
-    // lock speaks to it. Asked across every session instead, a single stray
-    // `state/.lock` in an unrelated checkout would suppress this refresh for the
-    // whole machine. With no reading in hand there is no assertion to protect,
-    // so the answer is a plain no.
+    // **A lock we could not read is the other non-answer**, and it is asked
+    // about *one directory at a time*. The question is only "has the captain
+    // gone", and the sole lock that can answer it is the one at the home the
+    // standing reading came from - no other session was ever the captain, so no
+    // other session's lock speaks to it. Asked across every session instead, a
+    // single stray `state/.lock` in an unrelated checkout would suppress this
+    // refresh for the whole machine. With no reading in hand there is no
+    // assertion to protect, so the answer is a plain no.
     //
     // Three answers, one call, and the call is always made. All this decides is
-    // *which* answer; what an answer costs is decided in one place, on one
-    // counter, over there - which is what bounds how long either hold can last.
+    // *which* answer; what a non-answer costs is decided in one place, on one
+    // counter, over there - which is what bounds how long a hold can last.
     const captain = firstmate.captainSession(sessions);
     firstmateDecisions.refresh(
       captain
         ? captain.cwd
-        : sessions.length === 0 || firstmate.lockUnreadableAt(firstmateDecisions.home)
+        : !sessionsReadable || firstmate.lockUnreadableAt(firstmateDecisions.home)
           ? CAPTAIN_UNREADABLE
           : null,
     );

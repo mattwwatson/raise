@@ -1404,10 +1404,10 @@ test('a ruling leaves the page only when the captain provably has, not on a read
 
     // The sessions directory cannot be read for a tick. There is no captain in
     // that reading, because there is no reading - and nothing may be cleared on
-    // one. An empty list is reported as the non-answer it is rather than
-    // skipping the refresh, so the hold is counted and bounded like every other;
-    // what must not happen, and is what this asserts, is it being taken for the
-    // captain leaving.
+    // one. It is reported as the non-answer it is rather than skipping the
+    // refresh, so the hold is counted and bounded like every other; what must
+    // not happen, and is what this asserts, is it being taken for the captain
+    // leaving.
     renameSync(sessionsPath, movedAside);
     await state();
     renameSync(movedAside, sessionsPath);
@@ -1461,6 +1461,104 @@ test('a ruling leaves the page only when the captain provably has, not on a read
     );
     assert.equal(gone.get('stopped').attention !== 'decision', true);
     assert.equal(gone.get('captain').decisionsPending, null);
+  } finally {
+    await monitor?.stop();
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
+    cleanup();
+  }
+});
+
+test('quitting every session clears the rulings, because an empty list is an answer', async () => {
+  // The ordinary end of a day: the last agent is closed while `raise serve`
+  // keeps running. The sessions directory is perfectly readable and holds
+  // nothing, which is positive evidence that the captain has gone, so the
+  // rulings must leave with it. Held instead - which is what treating every
+  // empty list as a failed read does - the page carries a *Rulings waiting*
+  // card, the tab title claims somebody is waiting and a desktop notification
+  // fires, all for a firstmate that exited.
+  const { dir, cleanup } = scratch();
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = dir;
+  const sessionsPath = join(dir, 'sessions');
+  let monitor;
+  try {
+    const fmHome = join(dir, 'firstmate');
+    mkdirSync(join(fmHome, 'state'), { recursive: true });
+    writeFileSync(join(fmHome, 'state', '.lock'), `${process.pid}\n`);
+    writeFileSync(join(fmHome, 'state', `${APX_412}.status`), 'needs-decision: ...\n');
+
+    const port = await freePort();
+    monitor = createMonitorServer({
+      port,
+      token: 'test-token',
+      dbPath: join(dir, 'no-such.sqlite'),
+      sessionsPath,
+      exec: () => assert.fail('no blocking commands from the server'),
+      fetch: () => assert.fail('no outbound requests from the server'),
+      execAsync: async (command) => {
+        if (command === 'tmux') return ['%0\tFirst Mate', `%1\tfm-${APX_412}`].join('\n');
+        if (command === 'bash') return fleetSnapshotJson();
+        return '';
+      },
+    });
+    await monitor.start();
+
+    const post = (body) =>
+      fetch(`http://127.0.0.1:${port}/event`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-raise-token': 'test-token' },
+        body: JSON.stringify(body),
+      });
+    for (const [sessionId, cwd, pane] of [
+      ['captain', fmHome, '%0'],
+      ['stopped', join(dir, 'crewmate'), '%1'],
+    ]) {
+      const registered = await post({
+        session_id: sessionId,
+        hook_event_name: 'SessionStart',
+        cwd,
+        host: { tmux: '', tmux_pane: pane, pid: process.pid },
+      });
+      assert.equal(registered.status, 204);
+    }
+
+    const state = async () => {
+      const body = await (await fetch(`http://127.0.0.1:${port}/state?t=test-token`)).json();
+      for (let i = 0; i < 10; i += 1) await nextTick();
+      return body;
+    };
+
+    for (let i = 0; i < 3; i += 1) await state();
+    const waiting = await state();
+    assert.equal(
+      waiting.rows.find((r) => r.sessionId === 'stopped').decisions.length,
+      4,
+      'the rulings are on the page to begin with',
+    );
+
+    // Every session goes at once, which is what closing a terminal window with
+    // several panes in it does: the pids die together and one `list` prunes the
+    // lot. Removing the records directly is that tick, and it is the state the
+    // rule turns on - the directory is perfectly readable and holds nothing.
+    // Ending them one at a time would not reach it, because the tick in between
+    // still sees a session, reads firstmate's lock, and gets its answer there.
+    for (const name of readdirSync(sessionsPath)) {
+      if (name.endsWith('.json')) rmSync(join(sessionsPath, name));
+    }
+
+    const after = await state();
+    assert.deepEqual(
+      after.rows.flatMap((row) => row.decisions),
+      [],
+      'no ruling is rendered anywhere',
+    );
+    assert.equal(
+      after.rows.some((row) => row.kind === 'decision'),
+      false,
+      'and no card claims to be holding one',
+    );
+    assert.equal(after.summary.decision, 0, 'so the tab title says nobody is waiting');
   } finally {
     await monitor?.stop();
     if (previousHome === undefined) delete process.env.RAISE_HOME;
