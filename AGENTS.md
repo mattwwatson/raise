@@ -364,6 +364,9 @@ stratified on purpose, so read the whole file rather than one section.
 | everything a lock contains is an answer; only a read that threw after a successful `stat` is not | `src/firstmate.js` (`LOCK_UNREADABLE`) |
 | only the lock at the home a reading came from may hold it open - one session's lock cannot speak for the machine | `src/firstmate.js` (`lockUnreadableAt`), `src/server.js` |
 | a reading is dropped after enough consecutive failed refreshes, because a re-dispatch that always fails is not evidence | `src/firstmate-decisions.js` (`MAX_CONSECUTIVE_FAILURES`) |
+| one counter for every way of not getting a reading, the lock included; no branch asks which kind it was | `src/firstmate-decisions.js` (`CAPTAIN_UNREADABLE`, `refresh`), `src/server.js` |
+| a failing state re-dispatches on the ceiling whether or not anything is asserted - a stopped crewmate writes no status line | `src/firstmate-decisions.js` (`refresh`) |
+| rulings with no captain row to carry them get a card that says so, rather than being counted nowhere | `src/dashboard.js` (`buildRows`), `public/index.html` |
 | `decision` sits between `review` and `parked`, and the captain carries the count rather than a colour | `src/dashboard.js` (`ATTENTION_ORDER`, `buildRows`) |
 | a pi session can never be `blocked`, because pi has no approval gate | `src/registry.js` |
 | a Codex row may go red and will never say why - no `Notification` at all | `src/registry.js` |
@@ -514,6 +517,15 @@ Keep it that way - it has no build step and must open as a file.
   bounded the list without saying so would be this item's own failure reintroduced by its fix.
   One marker per row, never two - the captain's counts the whole crew and its own list is a
   subset of that, so both would be one number explaining another.
+- **A ruling with no row to sit on gets a card of its own, and the card is why the section
+  heading is not about pipelines.** The captain's row carries whatever could not be placed,
+  and there is not always a captain's row - firstmate's own lock will not read for a bounded
+  run of ticks, and the reading is deliberately held through them. Until that card existed the
+  remainder went nowhere and was counted nowhere, which is the set silently bounded. It follows
+  the unattributable run exactly: `attributable: false`, no `Focus`, and the same *Not
+  traceable to a session* line in both renderers. It expands, though - the words of a ruling
+  live only in the panel, so a card holding rulings must be openable whether or not a session
+  is behind it.
 - **The agent chip names pi and Codex and stays silent about Claude Code**, and `AGENT_LABELS`
   has no entry for it. Claude Code is most of the rows, and a chip on every card saying so is
   noise on a page whose whole job is to be scannable - the same reason `mode` hides `normal`.

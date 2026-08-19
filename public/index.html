@@ -1226,7 +1226,9 @@
           expanded.delete(row.id);
         } else {
           expanded.add(row.id);
-          loadRecent(row.sessionId);
+          // Only a session has a transcript to read. A card of rulings expands
+          // to the rulings and to nothing else.
+          if (row.sessionId) loadRecent(row.sessionId);
         }
         if (latest) render(latest);
       }
@@ -1291,11 +1293,17 @@
             item.appendChild(bodyEl);
             panel.appendChild(item);
           }
-          const activity = document.createElement('div');
-          activity.className = 'panel-heading';
-          activity.textContent = 'Recent activity';
-          panel.appendChild(activity);
+          // Only where there is activity to head. A card of rulings has no
+          // session behind it, so the heading would introduce a section that
+          // never arrives.
+          if (row.sessionId) {
+            const activity = document.createElement('div');
+            activity.className = 'panel-heading';
+            activity.textContent = 'Recent activity';
+            panel.appendChild(activity);
+          }
         }
+        if (!row.sessionId) return panel;
 
         const events = recent.get(row.sessionId);
         if (!events) {
@@ -1659,8 +1667,12 @@
           });
           meta.appendChild(hint);
         }
-        // A run with no session behind it has no transcript to expand.
-        if (row.sessionId) {
+        // A run with no session behind it has no transcript to expand - but a
+        // card holding rulings does have something, and it is the only place the
+        // words of them appear. Gating this on the session alone would have put
+        // every ruling on the unplaceable card behind a control that was not
+        // rendered, which is the set silently bounded by a missing button.
+        if (row.sessionId || (row.decisions || []).length > 0) {
           const toggle = document.createElement('button');
           const open = expanded.has(row.id);
           // Named for what is actually behind it. On a row holding rulings the
@@ -1767,7 +1779,11 @@
         if (unattributed.length > 0) {
           const title = document.createElement('div');
           title.className = 'group-title';
-          title.textContent = 'Pipelines we cannot place';
+          // Named for the one thing every card under it has in common, rather
+          // than for the pipeline that was the only one when it was written: a
+          // set of rulings with no crewmate row to sit on lands here too, and a
+          // heading calling it a pipeline would be wrong about it.
+          title.textContent = 'We could not place these';
           rowsEl.appendChild(title);
           for (const row of unattributed) rowsEl.appendChild(card(row));
         }

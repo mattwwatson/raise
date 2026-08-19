@@ -107,9 +107,11 @@ import { pullRequestKey } from './forge.js';
  *
  * @typedef {object} Row
  * @property {string} id stable across polls, so the page can diff on it
- * @property {'session'|'run'|'untracked'} kind `untracked` is a session found on
- *   disk that no hook has ever reported - it carries where it is and what it was
- *   about, and deliberately nothing about what it is doing
+ * @property {'session'|'run'|'decision'|'untracked'} kind `untracked` is a
+ *   session found on disk that no hook has ever reported - it carries where it
+ *   is and what it was about, and deliberately nothing about what it is doing.
+ *   `decision` is firstmate rulings with no row to sit on, which exists for the
+ *   same reason the unattributable run card does
  * @property {string|null} sessionId null for a run with no session attached, and
  *   for an untracked session, which is not in the registry that `/focus`,
  *   `/dismiss` and `/recent` all read
@@ -162,12 +164,14 @@ import { pullRequestKey } from './forge.js';
  *   `pipeline` below rather than taking this
  * @property {Pipeline|null} pipeline what no-mistakes is doing for this row,
  *   which is a different question from what the session is doing
- * @property {boolean} attributable whether this row is a session, or a run we
- *   could not tie to one. False is the whole content of the unattributable
- *   card, which exists to say so rather than to be quietly wrong
+ * @property {boolean} attributable whether this row is a session, or something
+ *   we could not tie to one - a run, or a set of rulings. False is the whole
+ *   content of the unattributable card, which exists to say so rather than to
+ *   be quietly wrong
  * @property {number|null} candidateSessions how many live sessions share this
  *   run's repository; only set when `attributable` is false, to say how far the
- *   uncertainty reaches
+ *   uncertainty reaches. Null on a rulings card, which has no repository and so
+ *   nothing to narrow it to
  * @property {string|null} activity the tool it is running right now
  * @property {string|null} mode 'plan' and the like; null for an ordinary turn
  * @property {string|null} reviewUrl the Lavish page this row is waiting on
@@ -1522,6 +1526,66 @@ export function buildRows({
     });
   }
 
+  // Rulings that had nowhere to go, on a card that says so.
+  //
+  // The captain's row carries the remainder whenever there is one, because the
+  // captain is where a ruling is given whoever it is about. There is not always
+  // one: the reading is held for a bounded run of ticks in which firstmate's own
+  // lock will not read, and in those the captain cannot be identified even
+  // though its session is very likely still on the page. Until this existed the
+  // remainder went to no row and was counted nowhere - the set silently bounded,
+  // which is the one thing this feature may never do to a decision.
+  //
+  // So it follows the unattributable run, which exists for exactly this: an
+  // attribute we cannot place belongs to nobody *and says so*. It carries every
+  // ruling rather than a count of them, because a count with nothing behind it
+  // is the same omission wearing a number.
+  if (unplacedDecisions.length > 0 && !human.some((s) => s.sessionId === captainSessionId)) {
+    rows.push({
+      id: 'decisions:unplaced',
+      kind: 'decision',
+      sessionId: null,
+      cwd: null,
+      title: 'Rulings waiting',
+      titlePath: null,
+      sessionName: null,
+      branch: null,
+      attention: 'decision',
+      attentionLabel: attentionLabel('decision'),
+      message: null,
+      sessionState: null,
+      sessionStateSince: null,
+      waitingForMs: null,
+      // No session announced these, so there is nothing anybody could answer.
+      dismissible: false,
+      dismissed: false,
+      focusable: false,
+      hostKind: null,
+      agentKind: null,
+      spawnedBy: null,
+      decisions: unplacedDecisions,
+      // The crew-wide count belongs to the captain's row and to no other, and
+      // this is not it. Its own list is what it holds, and that is what it says.
+      decisionsPending: null,
+      run: null,
+      updatedAt: null,
+      summary: null,
+      pipeline: null,
+      // The whole point of this card, and the same boolean the run card uses:
+      // it is here *because* we could not place it.
+      attributable: false,
+      // No repository, so there is no set of sessions to narrow it to. The run
+      // card can say "probably one of your three on this repo"; this cannot, and
+      // guessing would be the confident wrong claim the card exists to avoid.
+      candidateSessions: null,
+      activity: null,
+      mode: null,
+      reviewUrl: null,
+      pr: null,
+      lastActivityAt: null,
+    });
+  }
+
   return sortRows(disambiguateTitles(rows));
 }
 
@@ -1782,8 +1846,13 @@ export function disambiguateTitles(rows) {
  * An untracked session sorts below even that. The unplaceable run may still have
  * a gate somebody has to answer; an untracked row is, by construction, waiting
  * on nothing we can name.
+ *
+ * Rulings we could not place sit between the two, above the run for the one
+ * reason that separates them: a ruling is by definition a person's to give,
+ * where a run we cannot place may be working away perfectly well. Both are still
+ * below every session, because neither can take you anywhere.
  */
-const KIND_ORDER = { session: 0, run: 1, untracked: 2 };
+const KIND_ORDER = { session: 0, decision: 1, run: 2, untracked: 3 };
 
 /**
  * @param {Row[]} rows

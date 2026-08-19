@@ -2915,6 +2915,64 @@ test('the captain carries the whole crew count and stays focusable', () => {
   assert.equal(byId.get('crew').decisionsPending, null);
 });
 
+test('with no captain row, an unplaceable ruling gets a card rather than disappearing', () => {
+  // The window this closes: firstmate's own lock will not read for a bounded run
+  // of ticks, so the captain cannot be identified while the reading is still
+  // held. Every ruling that joined to a crewmate is still on its row, and the
+  // remainder used to render nowhere and be counted nowhere - the set silently
+  // bounded, which is the one thing this feature may never do.
+  const input = {
+    sessions: [
+      session({ sessionId: 'captain', cwd: '/Users/x/work/firstmate' }),
+      session({ sessionId: 'crew', cwd: '/Users/x/trees/1/repo' }),
+    ],
+    branches: new Map(),
+    runs: [],
+    decisions: [
+      decisionTask({ decisions: [{ key: 'a', verb: 'needs-decision', summary: 'one' }] }),
+      decisionTask({
+        id: 'gone',
+        window: 'fm-gone',
+        worktree: '/Users/x/trees/2/gone',
+        decisions: [
+          { key: 'b', verb: 'needs-decision', summary: 'two' },
+          { key: 'c', verb: 'blocked', summary: 'three' },
+        ],
+      }),
+    ],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+  };
+
+  const withCaptain = buildRows({ ...input, captainSessionId: 'captain' });
+  assert.equal(withCaptain.some((r) => r.kind === 'decision'), false, 'no card when it has a row');
+  assert.deepEqual(
+    withCaptain.find((r) => r.sessionId === 'captain').decisions.map((d) => d.key),
+    ['b', 'c'],
+  );
+
+  const orphaned = buildRows({ ...input, captainSessionId: null });
+  // The crewmate that could be placed is untouched by any of this.
+  assert.deepEqual(
+    orphaned.find((r) => r.sessionId === 'crew').decisions.map((d) => d.key),
+    ['a'],
+  );
+  const card = orphaned.find((r) => r.kind === 'decision');
+  assert.ok(card, 'the remainder is on a card of its own');
+  // Every one of them, not a count of them: a number with nothing behind it is
+  // the same omission wearing a number.
+  assert.deepEqual(card.decisions.map((d) => d.key), ['b', 'c']);
+  assert.equal(card.attention, 'decision');
+  // It says it could not be placed, by the same boolean the unattributable run
+  // card uses, and offers no control it cannot honour.
+  assert.equal(card.attributable, false);
+  assert.equal(card.focusable, false);
+  assert.equal(card.sessionId, null);
+  // The crew-wide count belongs to the captain's row and there is not one.
+  assert.equal(card.decisionsPending, null);
+  // And it sorts below every session, because it cannot take you to anybody.
+  assert.equal(orphaned.indexOf(card), orphaned.length - 1);
+});
+
 test('a task placed on a crewmate is not counted again on the captain', () => {
   // Claimed on the match rather than on there being something to show, so a
   // crewmate whose decisions were all resolved does not have its silence
@@ -2976,9 +3034,16 @@ test('a run row and an untracked row never carry a decision', () => {
     decisions: [decisionTask()],
   });
   for (const row of rows) {
+    if (row.kind === 'decision') continue;
     assert.deepEqual(row.decisions, []);
     assert.equal(row.decisionsPending, null);
   }
+  // Not carried by either of them, and not dropped either: with no session on
+  // the page to claim it and no captain to hand it to, the ruling is on the one
+  // card whose whole content is that it could not be placed.
+  const card = rows.find((r) => r.kind === 'decision');
+  assert.deepEqual(card.decisions.map((d) => d.key), ['k1']);
+  assert.equal(card.attributable, false);
 });
 
 test('four open decisions on one crewmate reach the row as four', () => {

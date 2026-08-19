@@ -58,7 +58,7 @@ import { ForgeState } from './forge.js';
 import { watchForgeConfig } from './forge-config.js';
 import { PollWatch } from './poll-watch.js';
 import { FirstmateWatch } from './firstmate.js';
-import { FirstmateDecisions } from './firstmate-decisions.js';
+import { CAPTAIN_UNREADABLE, FirstmateDecisions } from './firstmate-decisions.js';
 import { UntrackedScan } from './untracked.js';
 import { buildRows, isDismissibleBlock, summarise } from './dashboard.js';
 import { BuildStamp, PUBLIC_DIR } from './build-stamp.js';
@@ -295,13 +295,23 @@ export function createMonitorServer({
     // session instead, a single stray `state/.lock` in an unrelated checkout
     // would suppress this refresh for the whole machine and leave every
     // crewmate's ruling open for the life of the process. With no reading in
-    // hand there is no assertion to protect, so nothing is suppressed either.
+    // hand there is no assertion to protect, so the answer is a plain no.
+    //
+    // Three answers, one call, and the call is always made. This used to skip
+    // `refresh` on an unreadable lock, which was the one path where the failure
+    // ceiling never applied - the reading was held for as long as the lock
+    // stayed unreadable, which for a `state/.lock` directory is for ever. All
+    // this decides is *which* answer; what an answer costs is decided in one
+    // place, on one counter, over there.
     const captain = firstmate.captainSession(sessions);
     if (sessions.length > 0) {
-      const home = captain?.cwd || null;
-      if (home || !firstmate.lockUnreadableAt(firstmateDecisions.home)) {
-        firstmateDecisions.refresh(home);
-      }
+      firstmateDecisions.refresh(
+        captain
+          ? captain.cwd
+          : firstmate.lockUnreadableAt(firstmateDecisions.home)
+            ? CAPTAIN_UNREADABLE
+            : null,
+      );
     }
 
     // Sessions nothing has ever reported, so the first page a stranger sees is

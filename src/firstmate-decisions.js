@@ -71,6 +71,24 @@
  * past a small number of consecutive non-answers the reading is dropped rather
  * than held.
  *
+ * **One counter, one ceiling, one decision - and that is a rule about the shape
+ * of this file, not just about its numbers.** Every way of failing to get a
+ * reading increments the same `#failures`: a snapshot that rejected, a snapshot
+ * that returned something we cannot read, and a captain lock the caller could
+ * not read are one fact between them, which is that we did not get a reading.
+ * Any successful reading resets the count. While the count is above zero the
+ * ceiling keeps re-dispatching whether or not anything is currently asserted,
+ * because recovery may never depend on a crewmate writing a status line - the
+ * crewmate this feature exists for is *stopped* and will write nothing further,
+ * so a gate that waits for one is a gate that never opens again.
+ *
+ * **Do not add a branch that asks which kind of failure it was.** Earlier
+ * versions of this had four independent gates plus a suppression path in the
+ * caller that skipped the refresh entirely, and each new rule created a state
+ * in which another rule could not fire - a reading held with no ceiling on one
+ * path, and a reading dropped that then never retried on another. The failure
+ * kinds may differ in what they say; they must not differ in what they decide.
+ *
  * **Nothing here goes looking for firstmate.** The home is the captain
  * session's own `cwd`, and the captain is identified by `src/firstmate.js` from
  * the lock holding that session's agent pid. A machine without firstmate has no
@@ -116,9 +134,24 @@ export const REFRESH_MS = 30000;
 /**
  * The ceiling on how stale an *assertion* may get - see the header.
  *
- * Only reached while decisions are open, so an idle fleet never pays it.
+ * Reached while decisions are open, and while a run of failures is standing.
+ * A healthy fleet with nothing open pays neither, so an idle machine still
+ * costs nothing at all.
  */
 export const ASSERTION_MAX_AGE_MS = 300000;
+
+/**
+ * What the caller passes when it could not tell whether the captain is still
+ * there - a lock that is present and would not read.
+ *
+ * It is neither a home nor `null`, because it is neither "here it is" nor "the
+ * captain has gone": it is a reading we did not get, and it is accounted for as
+ * exactly that. Passing `null` would clear the rulings on a failed read, and
+ * skipping the call altogether - which is what the caller used to do - left the
+ * one path where the failure ceiling never applied and the reading was held for
+ * as long as the lock stayed unreadable.
+ */
+export const CAPTAIN_UNREADABLE = Symbol('firstmate captain unreadable');
 
 /**
  * How many refreshes in a row may come back as non-answers before the reading
@@ -137,11 +170,21 @@ export const ASSERTION_MAX_AGE_MS = 300000;
  * stdout past `exec.js`'s 1MB cap, which a fleet four to five times the
  * measured 223-224KB reaches.
  *
+ * A fourth route reaches it from the caller rather than from the command: a
+ * captain lock that is there and will not read. It is the same fact and is
+ * counted by the same counter - see `CAPTAIN_UNREADABLE`.
+ *
  * Three, because one or two failures must never clear anything - a timeout
  * while the machine is busy is ordinary. Three is at soonest three `REFRESH_MS`
  * apart, so a minute and a half, and at latest three `ASSERTION_MAX_AGE_MS`
  * apart on a fleet writing no status lines, so a quarter of an hour. Any
  * successful read resets it.
+ *
+ * Dropping the reading does not stop the retry. The count stays where it is, so
+ * the ceiling goes on re-dispatching at its own cadence until a reading arrives
+ * - a fourteen-second bash every five minutes on a firstmate that is broken for
+ * good, which is the price of a stopped crewmate reappearing the moment it can
+ * rather than never.
  */
 export const MAX_CONSECUTIVE_FAILURES = 3;
 
@@ -366,15 +409,23 @@ export class FirstmateDecisions {
    * against. The caller owes us the difference between "no captain" and "no
    * session list to look in" - see the guard on this call in `server.js`.
    *
-   * @param {string|null} home `$FM_HOME`, or null when there is no captain
+   * **`CAPTAIN_UNREADABLE` is the third answer**, and it keeps the home it
+   * already had. It does not clear and it does not dispatch: it is a reading we
+   * did not get, so it goes through the same accounting every other non-answer
+   * does, on the same cadence a dispatch would have used. That is what stops it
+   * being the one path with no ceiling on it.
+   *
+   * @param {string|null|typeof CAPTAIN_UNREADABLE} home `$FM_HOME`, null when
+   *   there is no captain, or `CAPTAIN_UNREADABLE` when we could not tell
    * @param {number} [now]
    */
   refresh(home, now = Date.now()) {
     if (!this.#execAsync) return;
+    const unreadable = home === CAPTAIN_UNREADABLE;
     // One value for "no captain", so an `undefined` from a caller reading an
     // absent field is not a different home from a `null` and does not clear a
     // reading that is already cleared.
-    const captainHome = home || null;
+    const captainHome = unreadable ? this.#home : /** @type {string|null} */ (home) || null;
     if (captainHome !== this.#home) {
       // A different firstmate, or none at all, is positive evidence that the
       // reading in hand is not ours to keep - the one thing that may clear it
@@ -402,11 +453,29 @@ export class FirstmateDecisions {
     // *can* take differs from it, so the cost is one extra snapshot rather than
     // a gate that stopped opening.
     const moved = signature !== null && signature !== this.#signature;
+    // Two states re-take a reading on the ceiling rather than waiting for the
+    // mtime gate, and they are one condition because they are one worry: what
+    // we have in hand may no longer be true and the gate cannot see it. While
+    // asserting, because a decision clears when the crew resumes past it and
+    // resuming writes no status line. While failing, because the reading in
+    // hand is old and the only thing that could refresh it is another attempt -
+    // waiting for a crewmate to write is waiting for the one thing a stopped
+    // crewmate will never do.
     const asserting = this.#tasks.some((task) => task.decisions.length > 0);
-    const aged = asserting && !first && now - this.#at >= ASSERTION_MAX_AGE_MS;
+    const aged =
+      (asserting || this.#failures > 0) && !first && now - this.#at >= ASSERTION_MAX_AGE_MS;
     if (!first && !moved && !aged) return;
     this.#at = now;
     this.#signature = signature;
+    // The whole of the difference an unreadable captain makes, and it is in
+    // what happens rather than in what is decided: there is nothing to run a
+    // snapshot against, so the attempt is recorded as the non-answer it is. The
+    // gate above, the cadence, the counter and the ceiling are the ones every
+    // other failure goes through.
+    if (unreadable) {
+      this.#recordFailure();
+      return;
+    }
     this.#read(captainHome);
   }
 
@@ -501,7 +570,11 @@ export class FirstmateDecisions {
    * Not evidence, so it never *replaces* the reading with anything - it lets go
    * of it. Holding an assertion open behind a refresh that can never succeed is
    * the appearance of freshness, which is worse than saying nothing at all.
-   * See `MAX_CONSECUTIVE_FAILURES` for the number and the three routes here.
+   * See `MAX_CONSECUTIVE_FAILURES` for the number and the routes here.
+   *
+   * Clamped at the ceiling rather than counting on, which is what makes it safe
+   * to call for ever: the reading is dropped exactly once, and the count stays
+   * above zero so `refresh` keeps re-taking on the ceiling until one arrives.
    */
   #recordFailure() {
     if (this.#failures >= MAX_CONSECUTIVE_FAILURES) return;

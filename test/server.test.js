@@ -1421,14 +1421,24 @@ test('a ruling leaves the page only when the captain provably has, not on a read
 
     // The captain's *own* lock becomes unreadable - a directory where the file
     // was, which is what `stat` accepts and the read rejects. That is a reading
-    // we did not get about the one thing that decides this, so the refresh is
-    // skipped and the rulings stay.
+    // we did not get about the one thing that decides this, so the rulings stay
+    // - counted as one missed reading rather than suppressing anything, and
+    // bounded by the same ceiling every other missed reading is.
     rmSync(lock);
     mkdirSync(lock);
+    const unreadable = await state();
     assert.equal(
-      (await state()).get('stopped').decisions.length,
+      unreadable.get('stopped').decisions.length,
       4,
       'a lock we could not read is not the captain leaving',
+    );
+    // And no ruling goes missing while the captain cannot be identified. There
+    // is no captain row to carry an unplaceable one through this window, so the
+    // count that matters is the whole reading rather than any single row's.
+    assert.equal(
+      [...unreadable.values()].reduce((n, row) => n + row.decisions.length, 0),
+      4,
+      'every open ruling is still on some row',
     );
     assert.equal(
       ran.filter(([command]) => command === 'bash').length,

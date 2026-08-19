@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import {
   ASSERTION_MAX_AGE_MS,
+  CAPTAIN_UNREADABLE,
   FirstmateDecisions,
   MAX_CONSECUTIVE_FAILURES,
   REFRESH_MS,
@@ -368,19 +369,99 @@ test('a snapshot that can never succeed eventually drops the reading it was hold
   await settle();
   assert.deepEqual(decisions.tasks, [], 'a refresh that can never succeed is not evidence');
 
-  // Nothing is asserted now, so the expensive ceiling stops firing and only the
-  // mtime gate can re-open it - which is what a crewmate writing a status line
-  // does. A reading that arrives resets the count.
-  const quiet = runs;
+  // Dropping it does not stop the retry, and nothing here touches a status
+  // file. Waiting for one would be waiting for the very thing a stopped
+  // crewmate cannot do: it wrote its `needs-decision` line before all this and
+  // will write nothing further, so a gate that waits for a write is a gate that
+  // never opens and the crewmate is a quiet card again for good.
+  const dropped = runs;
+  at += ASSERTION_MAX_AGE_MS;
+  decisions.refresh(HOME, at);
+  await settle();
+  assert.equal(runs, dropped + 1, 'a failing state keeps trying with no status file moving');
+  assert.deepEqual(decisions.tasks, [], 'and holds nothing while it does');
+
+  // And a snapshot that starts working again restores the reading on its own.
+  answer = fleetSnapshotJson();
+  at += ASSERTION_MAX_AGE_MS;
+  decisions.refresh(HOME, at);
+  await settle();
+  assert.equal(decisions.tasks.length, 3, 'the reading comes back when the snapshot does');
+
+  // The count is reset by that success, so the ceiling stops costing anything:
+  // a healthy fleet with nothing open is back to paying only the mtime gate.
+  answer = JSON.stringify({ schema: 'fm-fleet-snapshot.v1', tasks: [] });
+  mtimes['crew.status'] = 2;
+  at += ASSERTION_MAX_AGE_MS;
+  decisions.refresh(HOME, at);
+  await settle();
+  assert.deepEqual(decisions.tasks, []);
+  const healthy = runs;
   decisions.refresh(HOME, at + ASSERTION_MAX_AGE_MS * 10);
   await settle();
-  assert.equal(runs, quiet, 'with nothing asserted there is nothing to re-take');
+  assert.equal(runs, healthy, 'healthy and asserting nothing pays no ceiling');
+});
 
-  answer = fleetSnapshotJson();
-  mtimes['crew.status'] = 2;
-  decisions.refresh(HOME, at + ASSERTION_MAX_AGE_MS * 20);
+test('a captain lock we could not read is counted like any other missed reading', async () => {
+  // The route that used to have no ceiling on it at all: the caller skipped the
+  // refresh outright, so nothing advanced and the rulings were held for as long
+  // as the lock stayed unreadable - which for a `state/.lock` directory is for
+  // ever. It is the same fact as a snapshot that would not run, so it goes
+  // through the same counter and the same ceiling.
+  let runs = 0;
+  const decisions = new FirstmateDecisions({
+    execAsync: async () => {
+      runs += 1;
+      return fleetSnapshotJson();
+    },
+    files: files({ mtimes: { 'crew.status': 1 } }),
+  });
+  decisions.refresh(HOME, 0);
   await settle();
-  assert.equal(decisions.tasks.length, 3, 'and the reading comes back when the snapshot does');
+  assert.equal(decisions.tasks.length, 3);
+
+  // The home is kept - this is not the captain leaving - and nothing is run,
+  // because there is nothing to run a snapshot against.
+  let at = 0;
+  for (let failure = 1; failure < MAX_CONSECUTIVE_FAILURES; failure += 1) {
+    at += ASSERTION_MAX_AGE_MS;
+    decisions.refresh(CAPTAIN_UNREADABLE, at);
+    await settle();
+    assert.equal(decisions.home, HOME, 'the reading still belongs to that home');
+    assert.equal(decisions.tasks.length, 3, `${failure} unreadable ticks hold the reading`);
+  }
+  assert.equal(runs, 1, 'and none of them ran a snapshot');
+
+  at += ASSERTION_MAX_AGE_MS;
+  decisions.refresh(CAPTAIN_UNREADABLE, at);
+  await settle();
+  assert.deepEqual(decisions.tasks, [], 'past the ceiling the assertion is let go of');
+
+  // A lock that reads again recovers by the ordinary route, on the ceiling and
+  // with no status file moving.
+  at += ASSERTION_MAX_AGE_MS;
+  decisions.refresh(HOME, at);
+  await settle();
+  assert.equal(decisions.tasks.length, 3);
+  assert.equal(runs, 2);
+});
+
+test('an unreadable captain with no reading in hand costs nothing at all', async () => {
+  // There is no assertion to protect, so there is nothing to account for. It
+  // must not invent a home to fail against, and it must not run anything.
+  let runs = 0;
+  const decisions = new FirstmateDecisions({
+    execAsync: async () => {
+      runs += 1;
+      return fleetSnapshotJson();
+    },
+    files: files(),
+  });
+  decisions.refresh(CAPTAIN_UNREADABLE, 0);
+  await settle();
+  assert.equal(decisions.home, null);
+  assert.deepEqual(decisions.tasks, []);
+  assert.equal(runs, 0);
 });
 
 test('a snapshot that answers with no tasks does clear the reading', async () => {
