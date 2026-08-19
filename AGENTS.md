@@ -356,11 +356,12 @@ stratified on purpose, so read the whole file rather than one section.
 | a firstmate decision is read from the fleet snapshot, never folded here and never matched in prose | `src/firstmate-decisions.js` |
 | the snapshot's own reconciliation is the half that matters, so the schema is checked exactly | `src/firstmate-decisions.js` |
 | an unreadable snapshot keeps the last answer; a snapshot with no tasks replaces it | `src/firstmate-decisions.js` (`parseSnapshot`) |
-| gated on a status-file mtime, never more often than `REFRESH_MS`, and re-taken on a ceiling only while asserting | `src/firstmate-decisions.js` |
+| gated on a status-file mtime, never more often than `REFRESH_MS`, and re-taken on a ceiling while asserting or while failing | `src/firstmate-decisions.js` |
+| the mtime signature is consumed only by a read that went out, so a tick that dispatched nothing cannot swallow a write | `src/firstmate-decisions.js` (`refresh`) |
 | a decision joins by the pinned window name or the worktree, and an ambiguous join places nothing | `src/dashboard.js` (`matchDecisionTask`) |
 | ambiguity is guarded in both directions, and the second one is only visible once every session has been asked | `src/dashboard.js` (`buildRows`) |
 | the joins are ranked, so ambiguity is only between claims of one kind - a lone window claim beats any number of worktree ones | `src/dashboard.js` (`matchDecisionTask`, `buildRows`) |
-| a reading may not outlive the captain it came from, and an unreadable session list is not the captain leaving | `src/firstmate-decisions.js` (`refresh`), `src/server.js` |
+| a reading may not outlive the captain it came from, and an empty or unreadable session list is not the captain leaving - it is one more non-answer, counted like the rest | `src/firstmate-decisions.js` (`refresh`), `src/server.js` |
 | everything a lock contains is an answer; only a read that threw after a successful `stat` is not | `src/firstmate.js` (`LOCK_UNREADABLE`) |
 | only the lock at the home a reading came from may hold it open - one session's lock cannot speak for the machine | `src/firstmate.js` (`lockUnreadableAt`), `src/server.js` |
 | a reading is dropped after enough consecutive failed refreshes, because a re-dispatch that always fails is not evidence | `src/firstmate-decisions.js` (`MAX_CONSECUTIVE_FAILURES`) |

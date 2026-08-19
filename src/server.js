@@ -279,40 +279,44 @@ export function createMonitorServer({
     // the command is bash walking a fleet and takes tens of seconds, where this
     // loop has one.
     //
-    // Guarded on a non-empty reading, exactly as `release` above and `prune`
-    // below are, and for the same reason: no captain among sessions we did read
-    // is positive evidence that firstmate has gone, and clears every ruling off
-    // the page - but an empty list is also what `registry.list()` returns when
-    // `readdirSync` throws, and a reading we did not get is not evidence of
-    // anything. Clearing on one would drop the rulings and then pay a fresh
-    // fourteen-second snapshot to learn they were still open.
+    // No captain among sessions we did read is positive evidence that firstmate
+    // has gone, and clears every ruling off the page. Two things reach the same
+    // null without meaning anything of the kind, and both are `CAPTAIN_UNREADABLE`.
     //
-    // A lock we could not read is the same non-answer one level down, and it is
-    // asked about **one directory at a time**. The question here is only "has
-    // the captain gone", and the sole lock that can answer it is the one at the
-    // home the standing reading came from - no other session was ever the
-    // captain, so no other session's lock speaks to it. Asked across every
-    // session instead, a single stray `state/.lock` in an unrelated checkout
-    // would suppress this refresh for the whole machine and leave every
-    // crewmate's ruling open for the life of the process. With no reading in
-    // hand there is no assertion to protect, so the answer is a plain no.
+    // **An empty session list is one of them, and mapping it to "unreadable" is
+    // deliberate rather than an oversight.** `registry.list()` returns `[]` both
+    // when everybody genuinely left and when `readdirSync` on the sessions
+    // directory threw, and nothing here can tell those apart - so it is a
+    // reading we did not get about whether the captain is there. It used to skip
+    // the call outright, which read as a cheap fast exit and was the last route
+    // with no ceiling on it: `#home`, `#at`, `#failures` and `#tasks` all froze,
+    // and nothing could ever clear the reading again. Reverting it to a fast
+    // exit costs this, concretely: close every terminal with four rulings open
+    // and `raise serve` still running, and the page keeps a *Rulings waiting*
+    // card carrying all four, the tab title keeps claiming somebody is waiting,
+    // and a desktop notification fires for a firstmate that exited - until the
+    // server is restarted.
     //
-    // Three answers, one call, and the call is always made. This used to skip
-    // `refresh` on an unreadable lock, which was the one path where the failure
-    // ceiling never applied - the reading was held for as long as the lock
-    // stayed unreadable, which for a `state/.lock` directory is for ever. All
-    // this decides is *which* answer; what an answer costs is decided in one
-    // place, on one counter, over there.
+    // **A lock we could not read is the other**, and it is asked about *one
+    // directory at a time*. The question is only "has the captain gone", and the
+    // sole lock that can answer it is the one at the home the standing reading
+    // came from - no other session was ever the captain, so no other session's
+    // lock speaks to it. Asked across every session instead, a single stray
+    // `state/.lock` in an unrelated checkout would suppress this refresh for the
+    // whole machine. With no reading in hand there is no assertion to protect,
+    // so the answer is a plain no.
+    //
+    // Three answers, one call, and the call is always made. All this decides is
+    // *which* answer; what an answer costs is decided in one place, on one
+    // counter, over there - which is what bounds how long either hold can last.
     const captain = firstmate.captainSession(sessions);
-    if (sessions.length > 0) {
-      firstmateDecisions.refresh(
-        captain
-          ? captain.cwd
-          : firstmate.lockUnreadableAt(firstmateDecisions.home)
-            ? CAPTAIN_UNREADABLE
-            : null,
-      );
-    }
+    firstmateDecisions.refresh(
+      captain
+        ? captain.cwd
+        : sessions.length === 0 || firstmate.lockUnreadableAt(firstmateDecisions.home)
+          ? CAPTAIN_UNREADABLE
+          : null,
+    );
 
     // Sessions nothing has ever reported, so the first page a stranger sees is
     // not blank. Deduped against the registry on every tick rather than at scan

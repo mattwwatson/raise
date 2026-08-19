@@ -464,6 +464,40 @@ test('an unreadable captain with no reading in hand costs nothing at all', async
   assert.equal(runs, 0);
 });
 
+test('a tick that dispatched nothing does not swallow the write it saw', async () => {
+  // The signature records the status files a *reading* covers, so a tick that
+  // ran no snapshot has covered nothing. Consuming it there loses the one write
+  // that would have opened the gate: a crewmate opens a decision during a
+  // two-second lock blip, and the ruling then waits on the five-minute ceiling
+  // instead of arriving as soon as the lock reads again.
+  let runs = 0;
+  const mtimes = { 'crew.status': 1 };
+  const decisions = new FirstmateDecisions({
+    execAsync: async () => {
+      runs += 1;
+      return JSON.stringify({ schema: 'fm-fleet-snapshot.v1', tasks: [] });
+    },
+    files: files({ mtimes }),
+  });
+  decisions.refresh(HOME, 0);
+  await settle();
+  assert.equal(runs, 1);
+  assert.deepEqual(decisions.tasks, [], 'nothing is open, so nothing is asserted');
+
+  // A crewmate opens a decision while the captain's lock will not read.
+  mtimes['crew.status'] = 2;
+  decisions.refresh(CAPTAIN_UNREADABLE, REFRESH_MS);
+  await settle();
+  assert.equal(runs, 1, 'there was nothing to run a snapshot against');
+
+  // The lock reads again on the next tick the floor allows, and the write is
+  // still there to be acted on - no ceiling wait, and no status file has moved
+  // since.
+  decisions.refresh(HOME, REFRESH_MS * 2);
+  await settle();
+  assert.equal(runs, 2, 'the write the unreadable tick saw still opens the gate');
+});
+
 test('a snapshot that answers with no tasks does clear the reading', async () => {
   // The other side of that rule, and it has to be the other side: the fleet
   // genuinely draining to nothing is a reading, and holding the last decisions

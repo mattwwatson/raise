@@ -1404,7 +1404,10 @@ test('a ruling leaves the page only when the captain provably has, not on a read
 
     // The sessions directory cannot be read for a tick. There is no captain in
     // that reading, because there is no reading - and nothing may be cleared on
-    // one.
+    // one. An empty list is reported as the non-answer it is rather than
+    // skipping the refresh, so the hold is counted and bounded like every other;
+    // what must not happen, and is what this asserts, is it being taken for the
+    // captain leaving.
     renameSync(sessionsPath, movedAside);
     await state();
     renameSync(movedAside, sessionsPath);

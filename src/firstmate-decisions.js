@@ -57,10 +57,11 @@
  * past it, and the crew resuming is a live run-step or a busy pane - neither of
  * which touches a status file. So a gate on file mtimes alone can hold a
  * decision that has already been answered for as long as nobody writes a status
- * line. While we are asserting nothing the gate is enough, because opening a
- * decision always writes one; while we are asserting something, the reading is
- * re-taken on a ceiling as well. Cheap where it does not matter and honest
- * where it does.
+ * line. So while we are asserting something the reading is re-taken on a
+ * ceiling as well as on the gate. While healthy and asserting nothing the gate
+ * is enough, because opening a decision always writes a status line - and the
+ * fifth rule below extends the ceiling to cover the other state where the gate
+ * is not enough. Cheap where it does not matter and honest where it does.
  *
  * **`MAX_CONSECUTIVE_FAILURES` is the fifth, and it is the other half of that
  * ceiling.** Re-taking a reading only helps if a reading can arrive: a snapshot
@@ -465,8 +466,15 @@ export class FirstmateDecisions {
     const aged =
       (asserting || this.#failures > 0) && !first && now - this.#at >= ASSERTION_MAX_AGE_MS;
     if (!first && !moved && !aged) return;
+    // Stamped on every attempt, because it is what the floor and the ceiling
+    // are measured from and an attempt is what they bound. The signature is
+    // not, and the two part company here on purpose: it records the status
+    // files a *reading* covers, so a tick that dispatched nothing has covered
+    // nothing and must not consume the evidence. Consuming it swallowed the
+    // write that would have opened the gate - a crewmate opening a decision
+    // during a two-second lock blip then waited on the five-minute ceiling
+    // instead of arriving as soon as the lock read again.
     this.#at = now;
-    this.#signature = signature;
     // The whole of the difference an unreadable captain makes, and it is in
     // what happens rather than in what is decided: there is nothing to run a
     // snapshot against, so the attempt is recorded as the non-answer it is. The
@@ -476,6 +484,7 @@ export class FirstmateDecisions {
       this.#recordFailure();
       return;
     }
+    this.#signature = signature;
     this.#read(captainHome);
   }
 

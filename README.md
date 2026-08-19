@@ -518,8 +518,11 @@ nobody can answer.
 Two things are worth knowing about the cost, because it is the one real constraint here:
 
 - **The monitor never waits for it.** The snapshot takes seconds - measured at 3.5s and again at
-  14s on the same machine - and Raise runs it off to one side, only when a crewmate has written
-  to its own event log since the last reading. The page updates on the next tick.
+  14s on the same machine - and Raise runs it off to one side, normally only when a crewmate has
+  written to its own event log since the last reading. The exceptions are the two states where
+  that is not enough to trust what is on the page: while a ruling is being shown, and while
+  readings are failing, it is re-taken every few minutes as well. The page updates on the next
+  tick.
 - **`raise status` does wait**, because a one-shot command has no later tick to answer on and
   printing before the answer arrives would mean printing a wrong one. So on a machine where
   firstmate is running, `raise status` takes about as long as the snapshot does, and says so
