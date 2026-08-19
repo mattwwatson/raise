@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
 import { createMonitorServer, writeFrame, stableJson } from '../src/server.js';
+import { APX_412, ZED_207, fleetSnapshotJson } from './fixtures/fm-fleet-snapshot.js';
 import { SERVED_FILES, PUBLIC_DIR } from '../src/build-stamp.js';
 import { probeHealth } from '../src/health.js';
 
@@ -1113,10 +1114,14 @@ test('a machine with neither no-mistakes nor lavish-axi runs quietly', async () 
 
     // Whatever the process scan runs is fair game; these are not. `tmux` is
     // here for the same reason as the other two: a session with no pane has no
-    // window name to read, so nothing may go looking for one.
+    // window name to read, so nothing may go looking for one. `bash` is
+    // firstmate's fleet snapshot, which is gated on a captain session - and a
+    // machine with no firstmate has no lock holding a live session's pid, so
+    // there is no captain and nothing to run.
     assert.equal(ran.includes('no-mistakes'), false);
     assert.equal(ran.includes('lavish-axi'), false);
     assert.equal(ran.includes('tmux'), false);
+    assert.equal(ran.includes('bash'), false);
 
     await monitor.stop();
   } finally {
@@ -1195,6 +1200,242 @@ test('a firstmate crewmate is marked on the page, and its neighbours are not', a
     // And someone with firstmate's source open is not the first mate: the cwd
     // matches, the lock is right there, and the pid in it is somebody else's.
     assert.equal(byId.get('editing-firstmate')?.spawnedBy, null);
+  } finally {
+    await monitor?.stop();
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
+    cleanup();
+  }
+});
+
+test('a firstmate ruling reaches the page, and a superseded one does not', async () => {
+  // The item end to end and against the real reading: the fleet snapshot as
+  // firstmate emits it, joined onto live sessions by the pinned window name it
+  // publishes as its own endpoint.
+  const { dir, cleanup } = scratch();
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = dir;
+  let monitor;
+  try {
+    const fmHome = join(dir, 'firstmate');
+    mkdirSync(join(fmHome, 'state'), { recursive: true });
+    writeFileSync(join(fmHome, 'state', '.lock'), `${process.pid}\n`);
+    // What the mtime gate watches. Its content is never read - firstmate folds
+    // the log, we read the fold - but its existence and mtime are what say
+    // something may have changed.
+    writeFileSync(join(fmHome, 'state', `${APX_412}.status`), 'needs-decision: ...\n');
+
+    const panes = [
+      '%0\tFirst Mate',
+      `%1\tfm-${APX_412}`,
+      `%2\tfm-${ZED_207}`,
+    ].join('\n');
+
+    const ran = [];
+    const port = await freePort();
+    monitor = createMonitorServer({
+      port,
+      token: 'test-token',
+      dbPath: join(dir, 'no-such.sqlite'),
+      sessionsPath: join(dir, 'sessions'),
+      exec: () => assert.fail('no blocking commands from the server'),
+      fetch: () => assert.fail('no outbound requests from the server'),
+      execAsync: async (command, args) => {
+        ran.push([command, args]);
+        if (command === 'tmux') return panes;
+        if (command === 'bash') return fleetSnapshotJson();
+        return '';
+      },
+    });
+    await monitor.start();
+
+    const sessions = [
+      ['captain', fmHome, '%0'],
+      ['stopped', join(dir, 'example-webapp'), '%1'],
+      ['moved-on', join(dir, 'example-scheduling'), '%2'],
+    ];
+    for (const [sessionId, cwd, pane] of sessions) {
+      const registered = await fetch(`http://127.0.0.1:${port}/event`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-raise-token': 'test-token' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          hook_event_name: 'SessionStart',
+          cwd,
+          host: { tmux: '', tmux_pane: pane, pid: process.pid },
+        }),
+      });
+      assert.equal(registered.status, 204);
+    }
+
+    // Asking is what schedules both reads, so the first two readings predate
+    // them: the pane table on the first, the snapshot on the second, since the
+    // window names are what the decisions join on.
+    for (let i = 0; i < 3; i += 1) {
+      await (await fetch(`http://127.0.0.1:${port}/state?t=test-token`)).json();
+      for (let j = 0; j < 10; j += 1) await nextTick();
+    }
+
+    const body = await (await fetch(`http://127.0.0.1:${port}/state?t=test-token`)).json();
+    const byId = new Map(body.rows.map((r) => [r.sessionId, r]));
+
+    // Four rulings, said as four and shown as four.
+    assert.equal(byId.get('stopped').attention, 'decision');
+    assert.equal(byId.get('stopped').decisions.length, 4);
+    assert.deepEqual(
+      byId.get('stopped').decisions.map((d) => d.key),
+      [
+        'apx-412-review-gate',
+        'apx-412-numbers-confirmed',
+        'apx-412-flag-ticket',
+        'apx-412-migration-order',
+      ],
+    );
+    // And the crewmate whose decisions firstmate reconciled away shows nothing.
+    assert.deepEqual(byId.get('moved-on').decisions, []);
+    assert.equal(byId.get('moved-on').attention !== 'decision', true);
+    // The captain carries the count and can still be focused, because that is
+    // where the ruling is actually given.
+    assert.equal(byId.get('captain').decisionsPending, 4);
+    assert.equal(byId.get('captain').focusable, true);
+    assert.equal(body.summary.decision, 1, 'one row is waiting, holding four rulings');
+
+    // The snapshot is bash and nothing else, and it did not go out once per
+    // tick: four `/state` reads above, and the mtime gate has seen no change.
+    const snapshots = ran.filter(([command]) => command === 'bash');
+    assert.equal(snapshots.length, 1);
+    assert.equal(snapshots[0][1][0], join(fmHome, 'bin', 'fm-fleet-snapshot.sh'));
+    assert.deepEqual(snapshots[0][1].slice(1), ['--json']);
+  } finally {
+    await monitor?.stop();
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
+    cleanup();
+  }
+});
+
+test('a ruling leaves the page only when the captain provably has, not on a reading we missed', async () => {
+  // Two halves of one rule. firstmate's lock naming a live session is the whole
+  // basis for a reading, so with the captain gone the reading must go too - and
+  // an empty session list is what `registry.list()` also returns when the
+  // sessions directory cannot be read, which is a reading we did not get rather
+  // than a captain that left.
+  const { dir, cleanup } = scratch();
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = dir;
+  const sessionsPath = join(dir, 'sessions');
+  const movedAside = join(dir, 'sessions-unreadable');
+  let monitor;
+  try {
+    const fmHome = join(dir, 'firstmate');
+    mkdirSync(join(fmHome, 'state'), { recursive: true });
+    const lock = join(fmHome, 'state', '.lock');
+    writeFileSync(lock, `${process.pid}\n`);
+    writeFileSync(join(fmHome, 'state', `${APX_412}.status`), 'needs-decision: ...\n');
+
+    const panes = ['%0\tFirst Mate', `%1\tfm-${APX_412}`].join('\n');
+    const ran = [];
+    const port = await freePort();
+    monitor = createMonitorServer({
+      port,
+      token: 'test-token',
+      dbPath: join(dir, 'no-such.sqlite'),
+      sessionsPath,
+      exec: () => assert.fail('no blocking commands from the server'),
+      fetch: () => assert.fail('no outbound requests from the server'),
+      execAsync: async (command, args) => {
+        ran.push([command, args]);
+        if (command === 'tmux') return panes;
+        if (command === 'bash') return fleetSnapshotJson();
+        return '';
+      },
+    });
+    await monitor.start();
+
+    // A session sitting in a checkout that happens to hold its own `state/.lock`
+    // holding something other than a pid. That is an answer - not firstmate's
+    // lock - and it must not be able to suppress the refresh for the whole
+    // machine, because `captainReading` reports one unreadable lock across every
+    // session and the rulings below would then never clear.
+    const bystanderCwd = join(dir, 'bystander');
+    mkdirSync(join(bystanderCwd, 'state'), { recursive: true });
+    writeFileSync(join(bystanderCwd, 'state', '.lock'), 'held-by=some-other-tool\n');
+
+    for (const [sessionId, cwd, pane] of [
+      ['captain', fmHome, '%0'],
+      ['stopped', join(dir, 'crewmate'), '%1'],
+      ['bystander', bystanderCwd, '%3'],
+    ]) {
+      const registered = await fetch(`http://127.0.0.1:${port}/event`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-raise-token': 'test-token' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          hook_event_name: 'SessionStart',
+          cwd,
+          host: { tmux: '', tmux_pane: pane, pid: process.pid },
+        }),
+      });
+      assert.equal(registered.status, 204);
+    }
+
+    const state = async () => {
+      const body = await (await fetch(`http://127.0.0.1:${port}/state?t=test-token`)).json();
+      for (let i = 0; i < 10; i += 1) await nextTick();
+      return new Map(body.rows.map((r) => [r.sessionId, r]));
+    };
+
+    // Asking is what schedules the reads: the pane table first, the snapshot on
+    // the tick after, since the window names are what a decision joins on.
+    for (let i = 0; i < 3; i += 1) await state();
+    assert.equal((await state()).get('stopped').decisions.length, 4);
+    assert.equal(ran.filter(([command]) => command === 'bash').length, 1);
+
+    // The sessions directory cannot be read for a tick. There is no captain in
+    // that reading, because there is no reading - and nothing may be cleared on
+    // one.
+    renameSync(sessionsPath, movedAside);
+    await state();
+    renameSync(movedAside, sessionsPath);
+    assert.equal(
+      (await state()).get('stopped').decisions.length,
+      4,
+      'a directory we could not read is not the captain leaving',
+    );
+    assert.equal(
+      ran.filter(([command]) => command === 'bash').length,
+      1,
+      'and it did not cost a fresh snapshot either',
+    );
+
+    // A lock that is there and empty is what a torn or partial write looks like -
+    // firstmate writes it with one `printf`, so a partial read is either nothing
+    // yet or a prefix of digits, and a digit prefix parses. It is not the
+    // captain leaving: `stat` answered, so firstmate's lock still exists and
+    // only the read of it failed.
+    writeFileSync(lock, '');
+    assert.equal(
+      (await state()).get('stopped').decisions.length,
+      4,
+      'a lock we could not read is not the captain leaving',
+    );
+    assert.equal(
+      ran.filter(([command]) => command === 'bash').length,
+      1,
+      'and it did not cost a fresh snapshot either',
+    );
+
+    // firstmate exits and takes its lock with it. Now there is no captain among
+    // sessions we did read, which is positive evidence, and the rulings go.
+    rmSync(lock);
+    const gone = await state();
+    assert.deepEqual(
+      gone.get('stopped').decisions,
+      [],
+      'the bystander\'s own lock is an answer and must not hold the reading open',
+    );
+    assert.equal(gone.get('stopped').attention !== 'decision', true);
+    assert.equal(gone.get('captain').decisionsPending, null);
   } finally {
     await monitor?.stop();
     if (previousHome === undefined) delete process.env.RAISE_HOME;

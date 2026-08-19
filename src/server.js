@@ -58,6 +58,7 @@ import { ForgeState } from './forge.js';
 import { watchForgeConfig } from './forge-config.js';
 import { PollWatch } from './poll-watch.js';
 import { FirstmateWatch } from './firstmate.js';
+import { FirstmateDecisions } from './firstmate-decisions.js';
 import { UntrackedScan } from './untracked.js';
 import { buildRows, isDismissibleBlock, summarise } from './dashboard.js';
 import { BuildStamp, PUBLIC_DIR } from './build-stamp.js';
@@ -168,6 +169,11 @@ export function createMonitorServer({
   // Reads a tmux pane name once per pane and a pid file once per lock change,
   // so it costs a `list-panes` only when a window we have never seen turns up.
   const firstmate = new FirstmateWatch({ execAsync, files: gitFiles });
+  // Gated twice over: nothing runs unless a captain session is on the page, and
+  // then only when a crewmate has written to its own event log since the last
+  // reading. So a machine with no firstmate never spawns it, and a machine with
+  // an idle fleet spawns it once.
+  const firstmateDecisions = new FirstmateDecisions({ execAsync });
   // Outlives a poll on purpose: `axi run` returns at every gate, so the process
   // that proves ownership is absent for exactly as long as the run is parked.
   const runOwners = new RunOwners();
@@ -229,6 +235,13 @@ export function createMonitorServer({
     const reviewUrls = new Map();
     /** Which tool started each session's window, when the tool said so. */
     const spawnedBy = new Map();
+    /**
+     * The tmux window each session's pane sits in, which is how a firstmate
+     * decision finds its crewmate: `endpoint.target` names the same pinned
+     * `fm-<id>` window. Off the table `spawnedBy` already keeps warm, so this
+     * costs a map lookup and no query of its own.
+     */
+    const windowNames = new Map();
     /** Sessions with a no-mistakes run still going underneath them. */
     const pipelines = new Set();
     for (const session of sessions) {
@@ -240,6 +253,7 @@ export function createMonitorServer({
       // Cached per pane and per lock, so this is a map lookup on all but the
       // first tick a session is seen.
       spawnedBy.set(session.sessionId, firstmate.spawnedBy(session));
+      windowNames.set(session.sessionId, firstmate.windowName(session));
       // The process table is the authority on whether a poll is still running.
       // A transcript can say the poll returned when only the tool call did -
       // Claude Code backgrounds anything past its own timeout, and a review
@@ -256,6 +270,27 @@ export function createMonitorServer({
       if (summary.lavishFile) {
         reviewUrls.set(session.sessionId, lavish.urlFor(summary.lavishFile));
       }
+    }
+
+    // The captain runs firstmate, and its own working directory is `$FM_HOME` -
+    // so finding it is also what schedules the fleet snapshot. A machine
+    // without firstmate has no lock holding a live session's pid, so there is
+    // no captain, nothing is scheduled and no subprocess runs. Never awaited:
+    // the command is bash walking a fleet and takes tens of seconds, where this
+    // loop has one.
+    //
+    // Guarded on a non-empty reading, exactly as `release` above and `prune`
+    // below are, and for the same reason: no captain among sessions we did read
+    // is positive evidence that firstmate has gone, and clears every ruling off
+    // the page - but an empty list is also what `registry.list()` returns when
+    // `readdirSync` throws, and a reading we did not get is not evidence of
+    // anything. Clearing on one would drop the rulings and then pay a fresh
+    // fourteen-second snapshot to learn they were still open. A lock we could
+    // not read is the same non-answer one level down, so `captainReading`
+    // reports it and it is skipped here too.
+    const { session: captain, unreadable: lockUnreadable } = firstmate.captainReading(sessions);
+    if (sessions.length > 0 && !lockUnreadable) {
+      firstmateDecisions.refresh(captain?.cwd || null);
     }
 
     // Sessions nothing has ever reported, so the first page a stranger sees is
@@ -311,6 +346,9 @@ export function createMonitorServer({
       forgeStates: forge.readings,
       untracked,
       spawnedBy,
+      decisions: firstmateDecisions.tasks,
+      windowNames,
+      captainSessionId: captain?.sessionId || null,
     });
     // Asking is what schedules the next answer, the same arrangement `lavish.js`
     // uses: the rows are what say which pull requests are worth a request, so

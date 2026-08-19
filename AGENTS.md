@@ -34,6 +34,7 @@ right - and every one of them eventually put a confident wrong answer on a card.
 | a no-mistakes run | it is tied to *this* session | the no-mistakes database and the process table |
 | a pull request | it is on this checkout's branch | the database, or the session's own transcript - and, when it is switched on, the forge that hosts it |
 | a Lavish review | this session is sitting in a poll | the process table |
+| a firstmate ruling | firstmate says this crewmate has stopped on one | the fleet snapshot |
 
 Two consequences that everything below keeps returning to. **A session and its pipeline run at
 the same time** - you talk to a session while no-mistakes works for it - so the card shows
@@ -149,6 +150,7 @@ of its design - it is what stops the first page a stranger sees being blank. See
 | `src/update-check.js` | asking npm whether a newer Raise exists, at most once a day |
 | `src/poll-watch.js` | which sessions are in a `lavish-axi poll`, which have a pipeline running, and which are driving one |
 | `src/firstmate.js` | which sessions firstmate started, from the markers it sets on itself |
+| `src/firstmate-decisions.js` | which crewmates are stopped waiting for a ruling from you |
 | `src/run-owner.js` | which session started which run, remembered across the gaps |
 | `src/dashboard.js` | joins them all into ranked rows (pure) |
 | `src/focus/` | tmux resolution, per-terminal adapters, and raising Claude Desktop |
@@ -262,8 +264,9 @@ card is one you distrust everywhere. An unattributable run gets a single card th
 it, and run nothing looking for it.** no-mistakes, lavish-axi and firstmate are each somebody
 else's tool, and the hooks and the transcript answer this product's question without them. So a
 machine with none installed is a supported setup - no warning banner, no `fail` in `doctor`, no
-subprocess. `server.test.js` asserts that neither `lavish-axi` nor `no-mistakes` is ever run on
-a machine without them; that is negative evidence, so it has to be asserted or it is lost.
+subprocess. `server.test.js` asserts that none of `lavish-axi`, `no-mistakes`, `tmux` or the
+`bash` behind firstmate's fleet snapshot is ever run on a machine without them; that is
+negative evidence, so it has to be asserted or it is lost.
 
 **One answer per fact.** The page never argues with itself. Where two sources disagree the
 ranking decides and the loser is silent - a disagreement with no-mistakes is not surfaced,
@@ -350,6 +353,16 @@ stratified on purpose, so read the whole file rather than one section.
 | the resume link is an import and is not used; raising the app is the whole behaviour | `src/focus/claude-desktop.js` |
 | a firstmate crewmate is the `fm-` window; the captain is the lock holding its pid | `src/firstmate.js` |
 | the pane table is keyed by socket path, resolved once per pane, never awaited | `src/firstmate.js` |
+| a firstmate decision is read from the fleet snapshot, never folded here and never matched in prose | `src/firstmate-decisions.js` |
+| the snapshot's own reconciliation is the half that matters, so the schema is checked exactly | `src/firstmate-decisions.js` |
+| an unreadable snapshot keeps the last answer; a snapshot with no tasks replaces it | `src/firstmate-decisions.js` (`parseSnapshot`) |
+| gated on a status-file mtime, never more often than `REFRESH_MS`, and re-taken on a ceiling only while asserting | `src/firstmate-decisions.js` |
+| a decision joins by the pinned window name or the worktree, and an ambiguous join places nothing | `src/dashboard.js` (`matchDecisionTask`) |
+| ambiguity is guarded in both directions, and the second one is only visible once every session has been asked | `src/dashboard.js` (`buildRows`) |
+| the joins are ranked, so ambiguity is only between claims of one kind - a lone window claim beats any number of worktree ones | `src/dashboard.js` (`matchDecisionTask`, `buildRows`) |
+| a reading may not outlive the captain it came from, and an unreadable session list is not the captain leaving | `src/firstmate-decisions.js` (`refresh`), `src/server.js` |
+| three answers, not two: a lock that is gone retires a reading, one that will not read does not, and one that is not firstmate's is an ordinary no | `src/firstmate.js` (`captainReading`), `src/server.js` |
+| `decision` sits between `review` and `parked`, and the captain carries the count rather than a colour | `src/dashboard.js` (`ATTENTION_ORDER`, `buildRows`) |
 | a pi session can never be `blocked`, because pi has no approval gate | `src/registry.js` |
 | a Codex row may go red and will never say why - no `Notification` at all | `src/registry.js` |
 | pi's transcript is normalised, never summarised separately | `src/pi-transcript.js` |
@@ -433,10 +446,13 @@ Keep it that way - it has no build step and must open as a file.
 
 - Colour comes from the CSS custom properties in `:root`, with a
   `@media (prefers-color-scheme: dark)` block. **Add a variable to both blocks or neither.**
-- Attention colour is semantic and ordered: `blocked` > `review` > `parked` > `failed` >
-  `idle` > `working`, matching `ATTENTION_ORDER` in `dashboard.js`. Do not introduce a colour
-  that competes with `blocked` red - `review` sits under it because it is the same thing
-  wearing work clothes. There is no state for a run that finished quietly: it leaves the page
+- Attention colour is semantic and ordered: `blocked` > `review` > `decision` > `parked` >
+  `failed` > `idle` > `working`, matching `ATTENTION_ORDER` in `dashboard.js`. Do not introduce
+  a colour that competes with `blocked` red - `review` sits under it because it is the same
+  thing wearing work clothes, and `decision` takes the same colour family for the same reason.
+  The same family and **not** the same colour: they are two different facts, and a reader who
+  cannot tell them apart at a glance has one word doing the work of two. There is no state
+  for a run that finished quietly: it leaves the page
   rather than settling into one, `isDisplayable` being the exact complement of the condition
   that would have produced it. `untracked` is last in that list and is **not** one of these: it
   is the absence of an attention level, it is `--faint` rather than a colour, and it is not in
@@ -481,6 +497,21 @@ Keep it that way - it has no build step and must open as a file.
   alarm. It explains a *quiet* row and appears on no other kind: a row red for its pipeline
   agent, or working because the transcript ran past the block, is not quiet and has nothing for
   it to explain.
+- **No attention level may be used as a bare class selector, and `decision` is why the rule
+  is written down.** Every level is a class on four different elements - `.card.decision`,
+  `.bar.decision`, `.state.decision`, `.pill.decision` - so a rule written as plain
+  `.decision` matches all of them at the same specificity and, sitting later in the sheet,
+  quietly wins every property those rules do not restate. It did: the header pill lost its
+  padding and the card lost half its height, and nothing in the markup looked wrong. The
+  panel's own class is `.decision-item` for that reason.
+- **A firstmate ruling is said in three places and they are one sentence.** The state word
+  says a decision is open, the marker beside it says how many, and the expanded panel carries
+  the summaries - which run to paragraphs, so they may not go on the card. A card carries the
+  session's line and the pipeline's line and grows no third stacked block. The panel shows
+  **every** open decision: four on one crewmate is the ordinary case, and a renderer that
+  bounded the list without saying so would be this item's own failure reintroduced by its fix.
+  One marker per row, never two - the captain's counts the whole crew and its own list is a
+  subset of that, so both would be one number explaining another.
 - **The agent chip names pi and Codex and stays silent about Claude Code**, and `AGENT_LABELS`
   has no entry for it. Claude Code is most of the rows, and a chip on every card saying so is
   noise on a page whose whole job is to be scannable - the same reason `mode` hides `normal`.
@@ -516,7 +547,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 899 tests, no network, no dependencies, ~9s
+npm test          # 941 tests, no network, no dependencies, ~9s
 npm run lint      # oxlint over src, bin, hooks, public, test, scripts
 npm run typecheck # tsc --noEmit over src, bin, hooks, public, scripts
 ```
@@ -712,7 +743,7 @@ the [roadmap-workflow skill](.claude/skills/roadmap-workflow/SKILL.md).
 ## Commands
 
 ```sh
-npm test                       # 899 tests, ~9s
+npm test                       # 941 tests, ~9s
 npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above

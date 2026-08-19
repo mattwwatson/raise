@@ -53,6 +53,7 @@ import {
 } from './update-check.js';
 import { PollWatch } from './poll-watch.js';
 import { FirstmateWatch } from './firstmate.js';
+import { FirstmateDecisions } from './firstmate-decisions.js';
 import { UntrackedScan } from './untracked.js';
 import { focusSession } from './focus/index.js';
 import { ALL_TERMINALS } from './focus/terminals.js';
@@ -89,6 +90,10 @@ const dim = (s) => `[2m${s}[0m`;
 const green = (s) => `[32m${s}[0m`;
 const red = (s) => `[31m${s}[0m`;
 const yellow = (s) => `[33m${s}[0m`;
+// Only for the `decision` state, so the terminal tells the same story the page
+// does: a firstmate ruling is a human gate, and it is not the red that belongs
+// to a session stopped in front of you.
+const magenta = (s) => `[35m${s}[0m`;
 
 /**
  * What `serve` says it is reading pipeline state from.
@@ -113,6 +118,49 @@ const SOURCE_LABELS = {
  */
 const UNTRACKED_REASON =
   'Found on disk, never reported - restart the session and Raise will follow it';
+
+/**
+ * How much of a decision's summary a line shows.
+ *
+ * A crewmate writes these at whatever length it needs, and they run to
+ * paragraphs. The page has an expanded panel to put them in and this does not,
+ * so it clips - **visibly**, with an ellipsis, because the one thing neither
+ * renderer may do is drop part of what is waiting without saying so. The *set*
+ * is never bounded: every open decision gets its line.
+ */
+const DECISION_SUMMARY_CHARS = 100;
+
+/**
+ * Shorten text to `limit` characters, saying so.
+ *
+ * @param {string} text
+ * @param {number} limit
+ * @returns {string}
+ */
+function clip(text, limit) {
+  const value = String(text || '').replace(/\s+/g, ' ').trim();
+  return value.length > limit ? `${value.slice(0, limit - 1).trimEnd()}…` : value;
+}
+
+/**
+ * The count beside a row's state word, in the same position and for the same
+ * reason the `dismissed` marker sits there - the count and the state are one
+ * sentence.
+ *
+ * One marker per row, never two. The captain's is the whole crew's total, and
+ * its own list is a subset of that, so printing both would be one number
+ * explaining another.
+ *
+ * @param {import('./dashboard.js').Row} row
+ * @returns {string}
+ */
+function decisionCount(row) {
+  if (row.decisionsPending) return `${row.decisionsPending} across the crew`;
+  // One is what "Waiting on your decision" already says. More than one is the
+  // number that changes what you do about it.
+  if (row.decisions.length > 1) return `${row.decisions.length} open`;
+  return '';
+}
 
 /**
  * How each `doctor` check state is marked. Padded to a common width so the
@@ -439,6 +487,15 @@ async function cmdStatus() {
   const firstmate = new FirstmateWatch({ execAsync });
   await firstmate.load(sessions);
   const spawnedBy = new Map(sessions.map((s) => [s.sessionId, firstmate.spawnedBy(s)]));
+  const windowNames = new Map(sessions.map((s) => [s.sessionId, firstmate.windowName(s)]));
+  // One shot, so the snapshot is waited for rather than answered from a cache
+  // that is empty on the only tick there is - the same trade `PollWatch.load`
+  // and `LavishState.load` make. It costs seconds and runs only when a captain
+  // is on the machine, so a machine without firstmate prints just as fast as it
+  // ever did.
+  const captain = firstmate.captainSession(sessions);
+  const firstmateDecisions = new FirstmateDecisions({ execAsync });
+  await firstmateDecisions.load(captain?.cwd || null);
   const summaries = new Map(
     sessions.map((s) => {
       const read = transcripts.read(s.transcriptPath, branches.get(s.sessionId), s.agent);
@@ -502,6 +559,9 @@ async function cmdStatus() {
     runOwners: runOwners.owners,
     untracked,
     spawnedBy,
+    decisions: firstmateDecisions.tasks,
+    windowNames,
+    captainSessionId: captain?.sessionId || null,
   };
   let rows = buildRows(projection);
 
@@ -531,9 +591,11 @@ async function cmdStatus() {
     const colour =
       row.attention === 'blocked' || row.attention === 'review'
         ? red
-        : row.attention === 'parked'
-          ? yellow
-          : dim;
+        : row.attention === 'decision'
+          ? magenta
+          : row.attention === 'parked'
+            ? yellow
+            : dim;
     // Same place as on the page - between the repo and the branch - so the two
     // tell one story about which session is which. The separator is the one
     // thing the page does without: there the name is prose beside a monospace
@@ -555,9 +617,22 @@ async function cmdStatus() {
     // and a signal suppressed without a word is the quiet staleness this tool is
     // built against.
     const dismissed = row.dismissed ? ` ${dim('dismissed')}` : '';
-    console.log(
-      `${colour(row.attentionLabel.padEnd(26))} ${bold(row.title)}${named}${spawner}${dismissed}${unplaceable}`,
-    );
+    // How many firstmate rulings this row is holding up, said in the same
+    // position and the same words as on the page - the two renderers are one
+    // protocol, and a row counted on one and bare on the other is them
+    // disagreeing about the same session.
+    const rulings = decisionCount(row);
+    const decisions = rulings ? ` ${dim(rulings)}` : '';
+    const head = `${bold(row.title)}${named}${spawner}${decisions}${dismissed}${unplaceable}`;
+    console.log(`${colour(row.attentionLabel.padEnd(26))} ${head}`);
+    // Every open decision, never a bounded subset: four rulings on one crewmate
+    // is the ordinary case, and a renderer that showed one of them would be this
+    // feature's own failure reintroduced by its fix. Only each summary is
+    // clipped, and it says so.
+    for (const decision of row.decisions) {
+      const summary = clip(decision.summary, DECISION_SUMMARY_CHARS);
+      console.log(`  ${dim(`${decision.verb} ${decision.key}`)} ${dim(summary)}`);
+    }
     if (row.message) console.log(`  ${dim(row.message)}`);
     // Always, pipeline or no pipeline. This used to be dropped whenever a step
     // existed, so the moment no-mistakes started, what you had been talking to
@@ -979,6 +1054,21 @@ async function cmdDoctor() {
     ok('lavish-axi', 'available');
   } else {
     off('lavish-axi', 'not installed - review gates will not be detected');
+  }
+
+  // Optional again, and reported without running anything, which is the point.
+  // firstmate is not a command on the PATH as far as Raise is concerned - it is
+  // recognised by the lock in a live session's own directory holding that
+  // session's pid, and that session's directory is where the fleet snapshot is
+  // read from. No captain, no read: this line is the whole of what a machine
+  // without firstmate is ever told, and it costs one `stat` per session.
+  const firstmateCaptain = new FirstmateWatch().captainSession(
+    new SessionRegistry({ dir: sessionsDir() }).list(),
+  );
+  if (firstmateCaptain) {
+    ok('firstmate', `running in ${firstmateCaptain.cwd} - crew decisions will show`);
+  } else {
+    off('firstmate', 'not running - no crew decisions; everything else works');
   }
 
   // One of the two outbound requests Raise makes - the update check below is the

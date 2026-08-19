@@ -161,6 +161,27 @@ export function lockedPid(text) {
  */
 const LOCK_PATH = ['state', '.lock'];
 
+/**
+ * A lock that is there and would not read, as distinct from one that is not
+ * there and one that is not firstmate's.
+ *
+ * The other two are *answers*. No lock is what every session but the captain's
+ * returns on every tick, and a lock holding something other than a pid is
+ * `lockedPid`'s documented "a file that happens to be called `.lock`" - which is
+ * the whole reason it parses strictly rather than leniently. This is neither: it
+ * is a reading we did not get.
+ *
+ * **The difference has to hold in both directions and the cost of confusing it
+ * is not symmetric.** Downstream, `firstmate-decisions.js` treats "no captain"
+ * as positive evidence that firstmate has gone and clears every open ruling off
+ * the page. Calling an unreadable lock an answer retires rulings that are still
+ * open; calling an answer unreadable suppresses the refresh for the *whole
+ * machine*, because `captainReading` reports one unreadable lock across every
+ * session - so a single stray `state/.lock` in somebody's checkout would leave
+ * every crewmate row asserting a ruling for the life of the server process.
+ */
+const LOCK_UNREADABLE = Symbol('firstmate lock unreadable');
+
 export class FirstmateWatch {
   #execAsync;
   #files;
@@ -213,6 +234,69 @@ export class FirstmateWatch {
     if (this.#isCrew(session?.host, now)) return 'firstmate';
     if (this.#isCaptain(session)) return 'firstmate';
     return null;
+  }
+
+  /**
+   * The session running firstmate itself, or null.
+   *
+   * Its own `cwd` is `$FM_HOME`, which is how `firstmate-decisions.js` finds
+   * the fleet snapshot without a hardcoded path and without going looking for
+   * firstmate on a machine that has none. It lives here because this is where
+   * the lock is already read and cached: identification is this module's whole
+   * job, and asking a second module to re-derive it would be two answers to one
+   * question.
+   *
+   * @param {Session[]} sessions
+   * @returns {Session|null}
+   */
+  captainSession(sessions) {
+    return this.captainReading(sessions).session;
+  }
+
+  /**
+   * The captain, and whether a null one is an answer.
+   *
+   * `captainSession` says who it is, which is all a one-shot command needs. The
+   * monitor needs more, because it acts on the *absence* of a captain: no
+   * captain among sessions we did read is what tells `firstmate-decisions.js`
+   * that firstmate has gone and every open ruling should leave the page. A lock
+   * that would not read reaches the same null by a different route and means
+   * nothing of the kind, so it is reported separately and the caller skips the
+   * refresh on it - the same way it already skips when the session list itself
+   * could not be read.
+   *
+   * A lock read after an unreadable one still settles it: `unreadable` is only
+   * true of a reading that found no captain at all.
+   *
+   * @param {Session[]} sessions
+   * @returns {{session: Session|null, unreadable: boolean}}
+   */
+  captainReading(sessions) {
+    let unreadable = false;
+    for (const session of sessions || []) {
+      const verdict = this.#captainVerdict(session);
+      if (verdict === 'yes') return { session, unreadable: false };
+      if (verdict === 'unreadable') unreadable = true;
+    }
+    return { session: null, unreadable };
+  }
+
+  /**
+   * The tmux window a session's pane sits in, when we have already read it.
+   *
+   * Deliberately does not schedule a read of its own. `spawnedBy` is called for
+   * every session on every tick and is what keeps the table warm; a second
+   * scheduler here would only add a way for the two to disagree about when a
+   * pane was last looked up.
+   *
+   * @param {Session} session
+   * @returns {string|null}
+   */
+  windowName(session) {
+    const pane = session?.host?.tmux_pane;
+    if (!pane) return null;
+    const server = this.#servers.get(socketPath(session.host.tmux));
+    return server?.names.get(pane) ?? null;
   }
 
   /**
@@ -270,32 +354,67 @@ export class FirstmateWatch {
    * @param {Session} session
    */
   #isCaptain(session) {
-    const cwd = session?.cwd;
-    const pid = session?.host?.pid;
-    if (!cwd || !pid) return false;
-    return this.#lockPidFor(cwd) === pid;
+    return this.#captainVerdict(session) === 'yes';
   }
 
-  /** @param {string} cwd */
+  /**
+   * Whether this session is the captain, or whether we could not tell.
+   *
+   * Three answers rather than two, because two of the ways this can fail to say
+   * yes are not the same fact: `no` is a session with no lock in its directory
+   * or a lock naming somebody else, and `unreadable` is a lock we could not
+   * read. Only the first is evidence.
+   *
+   * @param {Session} session
+   * @returns {'yes'|'no'|'unreadable'}
+   */
+  #captainVerdict(session) {
+    const cwd = session?.cwd;
+    const pid = session?.host?.pid;
+    if (!cwd || !pid) return 'no';
+    const locked = this.#lockPidFor(cwd);
+    if (locked === LOCK_UNREADABLE) return 'unreadable';
+    return locked === pid ? 'yes' : 'no';
+  }
+
+  /**
+   * @param {string} cwd
+   * @returns {number|null|typeof LOCK_UNREADABLE}
+   */
   #lockPidFor(cwd) {
     const path = join(cwd, ...LOCK_PATH);
     let info;
     try {
       info = this.#files.stat(path);
     } catch {
-      // No lock here, which is every session but one.
+      // No lock here, which is every session but one - and the one path that
+      // runs for every session on every tick, so it stays a single `stat`.
       this.#locks.delete(cwd);
       return null;
     }
     const cached = this.#locks.get(cwd);
     if (cached && cached.size === info.size && cached.mtimeMs === info.mtimeMs) return cached.pid;
-    let pid = null;
+    let text;
     try {
-      pid = lockedPid(this.#files.readText(path));
+      text = this.#files.readText(path);
     } catch {
-      // Readable a moment ago and not now. Not cached, so the next ask retries.
-      return null;
+      // Readable a moment ago and not now, which is also where a `state/.lock`
+      // *directory* lands: `stat` accepts one and the read rejects it. Not
+      // cached, so the next ask retries.
+      return LOCK_UNREADABLE;
     }
+    // Empty is the only shape a torn read can take here, and that is a fact
+    // about how firstmate writes the file rather than a guess: `bin/fm-lock.sh`
+    // writes it with a single `printf '%s\n' "$me"`, so a partial read is either
+    // nothing yet or a prefix of digits - and a digit prefix parses, so it never
+    // reaches this branch. Not cached either, because it is expected to be over
+    // by the next tick.
+    if (!text || !text.trim()) return LOCK_UNREADABLE;
+    // Anything else present is an answer, and cached like one. It says this is
+    // not firstmate's lock, which is a stable fact about somebody else's file -
+    // re-reading it every tick would cost a read per session forever, and
+    // reporting it as unreadable would take the whole machine's refresh with it.
+    const pid = lockedPid(text);
     this.#locks.set(cwd, { size: info.size, mtimeMs: info.mtimeMs, pid });
     return pid;
   }

@@ -10,6 +10,8 @@ of your fifteen terminal tabs it was in. That is what this fixes.
 ```
 WAITING FOR YOU
   payments     PAY-56-retry-backoff     Waiting for you - Claude needs your response   2m   tmux
+WAITING ON YOUR DECISION
+  search-api   SRCH-88-reindex-order    Waiting on your decision   4 open              41m  tmux
 PIPELINE PARKED
   storefront   feat/checkout-redesign   Pipeline parked at a gate                      12s  tab
                NO-MISTAKES  review
@@ -18,8 +20,9 @@ WORKING
                NO-MISTAKES  test · Running npm test
 ```
 
-The `NO-MISTAKES` lines are one of the [optional signals](#optional-signals): they appear if
-you have that tool and are simply absent if you do not. Nothing else on the page changes.
+The `NO-MISTAKES` lines and the decision row are [optional signals](#optional-signals): they
+appear if you have those tools and are simply absent if you do not. Nothing else on the page
+changes.
 
 ## What you need
 
@@ -166,12 +169,13 @@ confirmed before it is written, and left with a `.raise-backup` beside it.
 
 ## What it watches
 
-Three different things, because they answer three different questions.
+Four different things, because they answer four different questions.
 
 | Signal | Where it comes from | What it means |
 | --- | --- | --- |
 | **Waiting for you** | the agent's own hooks | The agent hit a permission prompt, or Claude Code has been idle waiting for input. This is the one worth interrupting yourself for. **Not pi**, which has no permission prompt - see [the support matrix](#which-agent-reports-what). |
 | **Waiting on your review** | the running `lavish-axi poll` | The agent is sitting in a `lavish-axi poll`, waiting for you to open a review page and respond. It looks busy from the outside; it is not. |
+| **Waiting on your decision** | firstmate's own fleet snapshot | A firstmate crewmate reached something only you can settle and stopped. It asked once, in the captain's window, and that line has long since scrolled - see [firstmate rulings](#firstmate-rulings). |
 | **Pipeline parked** | the no-mistakes database | A run stopped at a gate. Usually the agent answers it itself within seconds, so it is informational. |
 
 **There is nothing to configure per project.** Sessions report themselves through the agent's
@@ -407,13 +411,14 @@ place Claude Code's `/rename` does.
 
 ## Optional signals
 
-Three tools light up extra rows if you have them. **Raise runs with none of them**, and says
+Four tools light up extra rows if you have them. **Raise runs with none of them**, and says
 nothing about the ones you do not have:
 
 | Optional | Without it |
 | --- | --- |
 | `no-mistakes` | No pipeline rows: nothing is parked, failed or running a step, and no pull request comes from the database. Sessions, blocks, reviews and focusing are unaffected. |
 | `lavish-axi` | No "waiting on your review" rows. That state is detected by watching for a live `lavish-axi poll` and by nothing else, so without Lavish there is nothing to detect. |
+| `firstmate` | No "waiting on your decision" rows and no crew count. The whole feature hangs off firstmate's own lock file naming a live session, so on a machine without it nothing is read and nothing is run. |
 | `gh` | No pull request state from GitHub, if you turned that on at all - see [pull request state](#pull-request-state-from-the-forge). It is off by default, so on an unconfigured machine `gh` is never looked for. |
 
 Absence is not degradation and is never reported as a fault: no warning banner, no `fail` in
@@ -487,6 +492,41 @@ This matters more than it sounds. A connection can stop carrying data long befor
 breaks - a suspended laptop, a frozen server, a dropped NAT entry - and for a tool whose only
 job is telling you something needs you, quietly showing stale data is the worst thing it can
 do. So the page never infers that it is live; it waits to be told.
+
+## firstmate rulings
+
+[firstmate](https://github.com/kunchenguid/firstmate) runs a crew of agents on your behalf.
+When a crewmate reaches something only a person can settle - a design choice, a review finding
+it will not overrule, two instructions that conflict - it stops and says so, once, in the
+captain's window. That line then scrolls, and the crewmate sits stopped until you happen to
+wonder what became of it.
+
+Raise puts it on the crewmate's row: **Waiting on your decision**, with the count beside it and
+every open ruling in the expanded panel. Four open on one crewmate is ordinary rather than
+exceptional, so the panel lists all of them and never bounds the list quietly. The captain's own
+row carries the total for the whole crew, because that is the window where a ruling is actually
+given.
+
+It comes from firstmate's own `fm-fleet-snapshot.sh --json`, and **the transcript is never read
+and no prose is ever matched.** A phrase that turns up in ordinary conversation would put a
+coloured row on a session that is working fine, and a wording change upstream would remove a
+signal you had learned to trust without a word. The snapshot is also the only source that
+reconciles what a crewmate wrote against what it is doing now: a decision the crew resumed past
+is absent from the reading, so a row that has moved on says nothing rather than raising an alarm
+nobody can answer.
+
+Two things are worth knowing about the cost, because it is the one real constraint here:
+
+- **The monitor never waits for it.** The snapshot takes seconds - measured at 3.5s and again at
+  14s on the same machine - and Raise runs it off to one side, only when a crewmate has written
+  to its own event log since the last reading. The page updates on the next tick.
+- **`raise status` does wait**, because a one-shot command has no later tick to answer on and
+  printing before the answer arrives would mean printing a wrong one. So on a machine where
+  firstmate is running, `raise status` takes about as long as the snapshot does. The page is
+  where to watch; the CLI is where to get a complete answer once.
+
+`raise doctor` says whether firstmate was found. On a machine without it there is no lock naming
+a live session, so nothing is read, nothing is run, and no row ever mentions it.
 
 ## Telling a nudge it was not needed
 

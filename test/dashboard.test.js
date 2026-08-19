@@ -16,6 +16,14 @@ import {
   blockReason,
 } from '../src/dashboard.js';
 import { pullRequestFromRecords } from '../src/transcript.js';
+import { parseSnapshot } from '../src/firstmate-decisions.js';
+import {
+  APX_412,
+  APX_412_WORKTREE,
+  ZED_207,
+  ZED_207_WORKTREE,
+  fleetSnapshotJson,
+} from './fixtures/fm-fleet-snapshot.js';
 
 /** The wording a block Claude Code cannot describe honestly falls back to. */
 const NEEDS_RESPONSE = 'Claude needs your response';
@@ -903,10 +911,21 @@ test('summarise counts what the tab title and alerts need', () => {
     { attention: 'blocked' },
     { attention: 'blocked' },
     { attention: 'review' },
+    { attention: 'decision' },
     { attention: 'parked' },
     { attention: 'idle' },
   ];
-  assert.deepEqual(summarise(rows), { blocked: 2, review: 1, parked: 1, failed: 0, total: 5 });
+  assert.deepEqual(summarise(rows), {
+    blocked: 2,
+    review: 1,
+    // Rows, not decisions: this feeds the tab title and the pills, which answer
+    // "how many things want me" - a question about sessions. The number of
+    // rulings open on one of them is on that row.
+    decision: 1,
+    parked: 1,
+    failed: 0,
+    total: 6,
+  });
 });
 
 test('a lone repo keeps its bare name', () => {
@@ -2630,4 +2649,386 @@ test('an untracked row is disambiguated against a tracked one on the same name',
     untracked: [untracked({ cwd: '/Users/x/trees/1/repo' })],
   });
   assert.deepEqual(rows.map((r) => r.title).sort(), ['1/repo', 'work/repo']);
+});
+
+// ------------------------------------------ firstmate decisions on the rows
+
+/**
+ * The reading firstmate publishes, reduced to the two fields a join uses.
+ *
+ * The real one is in `test/fixtures/fm-fleet-snapshot.js` and is used where the
+ * point is what firstmate actually emits; this is for the cases that are about
+ * the join and the row, where four paragraphs of a crewmate's prose would be
+ * noise.
+ */
+const decisionTask = (over = {}) => ({
+  id: 'crew-1',
+  window: 'fm-crew-1',
+  worktree: '/Users/x/trees/1/repo',
+  decisions: [{ key: 'k1', verb: 'needs-decision', summary: 'which option' }],
+  ...over,
+});
+
+test('a crewmate with an open decision says so, and sorts above a parked pipeline', () => {
+  // The whole item: a crewmate that has stopped for a ruling used to look like a
+  // quiet card, which is to say it looked fine.
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'crew', cwd: '/Users/x/trees/1/repo' }),
+      session({ sessionId: 'other', cwd: '/Users/x/work/repo' }),
+    ],
+    branches: new Map([
+      ['crew', 'main'],
+      ['other', 'main'],
+    ]),
+    runs: [run({ parked: true, parkedSince: 900 })],
+    decisions: [decisionTask()],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+  });
+  const crew = rows.find((r) => r.sessionId === 'crew');
+  assert.equal(crew.attention, 'decision');
+  assert.equal(crew.attentionLabel, 'Waiting on your decision');
+  assert.deepEqual(crew.decisions, [{ key: 'k1', verb: 'needs-decision', summary: 'which option' }]);
+  // Above the parked run, and below nothing that outranks it here.
+  assert.deepEqual(rows.map((r) => r.sessionId), ['crew', 'other']);
+});
+
+test('a permission prompt still outranks a decision, and a live review does too', () => {
+  // `blocked` is a gate on the session in front of you and nothing may compete
+  // with it; `review` is a person already sitting in a browser tab.
+  assert.equal(
+    attentionFor({ session: { state: 'blocked' }, run: null, decisions: 4 }),
+    'blocked',
+  );
+  assert.equal(
+    attentionFor({
+      session: { state: 'working' },
+      run: null,
+      summary: { lavishFile: '/x/plan.html' },
+      decisions: 4,
+    }),
+    'review',
+  );
+  // And a parked pipeline does not: firstmate's gate is on you, where a parked
+  // no-mistakes run usually answers itself.
+  assert.equal(
+    attentionFor({ session: { state: 'working' }, run: run({ parked: true }), decisions: 1 }),
+    'decision',
+  );
+  assert.equal(
+    attentionFor({ session: { state: 'working' }, run: run({ parked: true }), decisions: 0 }),
+    'parked',
+  );
+});
+
+test('a crewmate is joined by its worktree when no window name has been read yet', () => {
+  // The pane table is read a tick after a session is first seen, so the window
+  // name is missing on exactly the tick a new crewmate appears. The worktree is
+  // the second join and it needs no tmux at all.
+  const rows = buildRows({
+    sessions: [session({ sessionId: 'crew', cwd: '/Users/x/trees/1/repo/src' })],
+    branches: new Map([['crew', 'main']]),
+    runs: [],
+    decisions: [decisionTask({ window: null })],
+  });
+  assert.equal(rows[0].attention, 'decision');
+  assert.equal(rows[0].decisions.length, 1);
+});
+
+test('a decision that could belong to two sessions belongs to neither', () => {
+  // An attribute we cannot place belongs to nobody. Shown on both it is false on
+  // one of them with no way to tell which, and a line you learn to distrust on
+  // one card is one you distrust everywhere.
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'captain', cwd: '/Users/x/work/firstmate' }),
+      session({ sessionId: 'a', cwd: '/Users/x/trees/1/repo' }),
+      session({ sessionId: 'b', cwd: '/Users/x/trees/1/repo' }),
+    ],
+    branches: new Map(),
+    runs: [],
+    // Two tasks whose worktrees both contain both sessions, so neither join can
+    // say which is which.
+    decisions: [
+      decisionTask({ id: 'one', window: null, worktree: '/Users/x/trees/1/repo' }),
+      decisionTask({ id: 'two', window: null, worktree: '/Users/x/trees/1' }),
+    ],
+    captainSessionId: 'captain',
+  });
+  const byId = new Map(rows.map((r) => [r.sessionId, r]));
+  assert.deepEqual(byId.get('a').decisions, []);
+  assert.deepEqual(byId.get('b').decisions, []);
+  assert.equal(byId.get('a').attention !== 'decision', true);
+  // It stays with the captain, which is the one row that is certainly right
+  // about it - a ruling is given there whoever it is about.
+  assert.equal(byId.get('captain').decisions.length, 2);
+  assert.equal(byId.get('captain').decisionsPending, 2);
+});
+
+test('a decision two sessions could own belongs to neither of them either', () => {
+  // The same invariant in the direction one session at a time cannot see. Both
+  // of these sit under the crewmate's worktree - the second is somebody opening
+  // their own agent in it, or the crewmate's own entry before a restart pruned
+  // it - so both match the one task, and shown on both the ruling is false on
+  // one of them.
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'captain', cwd: '/Users/x/work/firstmate' }),
+      session({ sessionId: 'crew', cwd: '/Users/x/trees/1/repo' }),
+      session({ sessionId: 'visitor', cwd: '/Users/x/trees/1/repo/src' }),
+    ],
+    branches: new Map(),
+    runs: [],
+    decisions: [decisionTask({ id: 'one', window: null, worktree: '/Users/x/trees/1/repo' })],
+    captainSessionId: 'captain',
+  });
+  const byId = new Map(rows.map((r) => [r.sessionId, r]));
+  assert.deepEqual(byId.get('crew').decisions, []);
+  assert.deepEqual(byId.get('visitor').decisions, []);
+  assert.equal(byId.get('crew').attention !== 'decision', true);
+  assert.equal(byId.get('visitor').attention !== 'decision', true);
+  // Not dropped: it goes to the captain, and it is still counted once.
+  assert.equal(byId.get('captain').decisions.length, 1);
+  assert.equal(byId.get('captain').attention, 'decision');
+  assert.equal(byId.get('captain').decisionsPending, 1);
+});
+
+test('an exact window match keeps the ruling when a bystander is merely inside the worktree', () => {
+  // The two joins are not equal evidence. `fm-one` is the name firstmate pinned
+  // on this crewmate; the visitor only satisfies a containment test, which is
+  // what you do the moment you open your own agent in there to read what the
+  // crewmate is asking. Treating those as one kind of claim would quieten the
+  // row firstmate itself named, in exactly that situation.
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'captain', cwd: '/Users/x/work/firstmate' }),
+      session({ sessionId: 'crew', cwd: '/Users/x/trees/1/repo' }),
+      session({ sessionId: 'visitor', cwd: '/Users/x/trees/1/repo/src' }),
+    ],
+    branches: new Map(),
+    runs: [],
+    decisions: [decisionTask({ id: 'one', window: 'fm-one', worktree: '/Users/x/trees/1/repo' })],
+    windowNames: new Map([['crew', 'fm-one']]),
+    captainSessionId: 'captain',
+  });
+  const byId = new Map(rows.map((r) => [r.sessionId, r]));
+  assert.equal(byId.get('crew').decisions.length, 1);
+  assert.equal(byId.get('crew').attention, 'decision');
+  assert.deepEqual(byId.get('visitor').decisions, []);
+  // Placed, so the captain holds none of it - only the crew total, which is the
+  // one number on its row either way.
+  assert.deepEqual(byId.get('captain').decisions, []);
+  assert.equal(byId.get('captain').decisionsPending, 1);
+});
+
+test('two window claimants stay unplaceable, and a worktree one does not inherit it', () => {
+  // The better evidence being ambiguous does not promote the weaker one. Two
+  // panes both answer to the pinned name, so the name cannot say which - and
+  // falling back to the containment test would hand the ruling to a bystander
+  // at the moment the evidence that outranks it disagreed with itself.
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'captain', cwd: '/Users/x/work/firstmate' }),
+      session({ sessionId: 'pane-a', cwd: '/Users/x/elsewhere' }),
+      session({ sessionId: 'pane-b', cwd: '/Users/x/elsewhere' }),
+      session({ sessionId: 'visitor', cwd: '/Users/x/trees/1/repo/src' }),
+    ],
+    branches: new Map(),
+    runs: [],
+    decisions: [decisionTask({ id: 'one', window: 'fm-one', worktree: '/Users/x/trees/1/repo' })],
+    windowNames: new Map([
+      ['pane-a', 'fm-one'],
+      ['pane-b', 'fm-one'],
+    ]),
+    captainSessionId: 'captain',
+  });
+  const byId = new Map(rows.map((r) => [r.sessionId, r]));
+  assert.deepEqual(byId.get('pane-a').decisions, []);
+  assert.deepEqual(byId.get('pane-b').decisions, []);
+  // And least of all the visitor, who is the only unambiguous claimant left and
+  // is claiming on the weaker evidence.
+  assert.deepEqual(byId.get('visitor').decisions, []);
+  assert.equal(byId.get('captain').decisions.length, 1);
+  assert.equal(byId.get('captain').decisionsPending, 1);
+});
+
+test('two panes of one crewmate window place the ruling on neither', () => {
+  // The window join has the same shape as the worktree one, so it needs the
+  // same guard: a crewmate window split into two panes reports two sessions
+  // under the one pinned name.
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'captain', cwd: '/Users/x/work/firstmate' }),
+      session({ sessionId: 'pane-a', cwd: '/Users/x/elsewhere' }),
+      session({ sessionId: 'pane-b', cwd: '/Users/x/elsewhere' }),
+    ],
+    branches: new Map(),
+    runs: [],
+    decisions: [decisionTask({ id: 'one', window: 'fm-one', worktree: null })],
+    windowNames: new Map([
+      ['pane-a', 'fm-one'],
+      ['pane-b', 'fm-one'],
+    ]),
+    captainSessionId: 'captain',
+  });
+  const byId = new Map(rows.map((r) => [r.sessionId, r]));
+  assert.deepEqual(byId.get('pane-a').decisions, []);
+  assert.deepEqual(byId.get('pane-b').decisions, []);
+  assert.equal(byId.get('captain').decisions.length, 1);
+  assert.equal(byId.get('captain').decisionsPending, 1);
+});
+
+test('the captain carries the whole crew count and stays focusable', () => {
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'captain', cwd: '/Users/x/work/firstmate' }),
+      session({ sessionId: 'crew', cwd: '/Users/x/trees/1/repo' }),
+    ],
+    branches: new Map(),
+    runs: [],
+    decisions: [
+      decisionTask({
+        decisions: [
+          { key: 'a', verb: 'needs-decision', summary: 'one' },
+          { key: 'b', verb: 'blocked', summary: 'two' },
+        ],
+      }),
+      decisionTask({
+        id: 'gone',
+        window: 'fm-gone',
+        worktree: '/Users/x/trees/2/gone',
+        decisions: [{ key: 'c', verb: 'needs-decision', summary: 'three' }],
+      }),
+    ],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+    captainSessionId: 'captain',
+  });
+  const byId = new Map(rows.map((r) => [r.sessionId, r]));
+  // Decisions, not tasks: two tasks, three rulings.
+  assert.equal(byId.get('captain').decisionsPending, 3);
+  assert.equal(byId.get('captain').focusable, true);
+  // The one that joined to nobody is readable on the captain's row rather than
+  // being a number with nothing behind it.
+  assert.deepEqual(byId.get('captain').decisions.map((d) => d.key), ['c']);
+  assert.deepEqual(byId.get('crew').decisions.map((d) => d.key), ['a', 'b']);
+  // And only the captain carries the count.
+  assert.equal(byId.get('crew').decisionsPending, null);
+});
+
+test('a task placed on a crewmate is not counted again on the captain', () => {
+  // Claimed on the match rather than on there being something to show, so a
+  // crewmate whose decisions were all resolved does not have its silence
+  // repeated as an unplaceable row on the captain.
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'captain', cwd: '/Users/x/work/firstmate' }),
+      session({ sessionId: 'crew', cwd: '/Users/x/trees/1/repo' }),
+    ],
+    branches: new Map(),
+    runs: [],
+    decisions: [decisionTask()],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+    captainSessionId: 'captain',
+  });
+  const captain = rows.find((r) => r.sessionId === 'captain');
+  assert.deepEqual(captain.decisions, []);
+  assert.equal(captain.attention !== 'decision', true);
+  assert.equal(captain.decisionsPending, 1);
+});
+
+test('with no firstmate at all a row is exactly what it was before', () => {
+  // The rule every optional integration here is held to: its absence is not a
+  // degraded state. Empty inputs must leave the projection byte-identical.
+  const input = {
+    sessions: [session({ sessionId: 's1', state: 'idle' })],
+    branches: new Map([['s1', 'main']]),
+    runs: [run()],
+  };
+  const without = buildRows(input);
+  const withEmpty = buildRows({
+    ...input,
+    decisions: [],
+    windowNames: new Map(),
+    captainSessionId: null,
+  });
+  assert.deepEqual(withEmpty, without);
+  assert.deepEqual(without[0].decisions, []);
+  assert.equal(without[0].decisionsPending, null);
+});
+
+test('a run row and an untracked row never carry a decision', () => {
+  // A decision belongs to a crewmate's session or to the captain's. A pipeline
+  // run is a different tool's business, and placing one on an untracked row
+  // would be attributing something to a row that refuses to attribute anything.
+  const rows = buildRows({
+    sessions: [],
+    branches: new Map(),
+    runs: [run({ parked: true })],
+    untracked: [
+      {
+        key: '/t/x.jsonl',
+        transcriptPath: '/t/x.jsonl',
+        cwd: '/Users/x/trees/1/repo',
+        agent: 'claude',
+        lastSeenAt: 10,
+      },
+    ],
+    decisions: [decisionTask()],
+  });
+  for (const row of rows) {
+    assert.deepEqual(row.decisions, []);
+    assert.equal(row.decisionsPending, null);
+  }
+});
+
+test('four open decisions on one crewmate reach the row as four', () => {
+  // Against the real reading, because "renders a set, never one" is the decision
+  // this item turns on and a fixture somebody imagined could not test it.
+  const tasks = parseSnapshot(fleetSnapshotJson());
+  const rows = buildRows({
+    sessions: [
+      session({
+        sessionId: 'crew',
+        cwd: APX_412_WORKTREE,
+      }),
+    ],
+    branches: new Map(),
+    runs: [],
+    decisions: tasks,
+    windowNames: new Map([['crew', `fm-${APX_412}`]]),
+  });
+  assert.equal(rows[0].attention, 'decision');
+  assert.equal(rows[0].decisions.length, 4);
+  assert.deepEqual(
+    rows[0].decisions.map((d) => d.key),
+    [
+      'apx-412-review-gate',
+      'apx-412-numbers-confirmed',
+      'apx-412-flag-ticket',
+      'apx-412-migration-order',
+    ],
+  );
+});
+
+test('a crewmate whose decision was overtaken by live work shows nothing', () => {
+  // zed-207 from the same snapshot: its status log carries seven unclosed
+  // `needs-decision` lines, and firstmate's reconciliation against the live
+  // run-step means the reading holds none. A Raise that folded the file itself
+  // would have put a confident stale alarm on this row.
+  const tasks = parseSnapshot(fleetSnapshotJson());
+  const rows = buildRows({
+    sessions: [
+      session({
+        sessionId: 'crew',
+        state: 'working',
+        cwd: ZED_207_WORKTREE,
+      }),
+    ],
+    branches: new Map(),
+    runs: [],
+    decisions: tasks,
+    windowNames: new Map([['crew', `fm-${ZED_207}`]]),
+  });
+  assert.equal(rows[0].attention, 'working');
+  assert.deepEqual(rows[0].decisions, []);
 });
