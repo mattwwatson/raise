@@ -62,6 +62,15 @@
  * re-taken on a ceiling as well. Cheap where it does not matter and honest
  * where it does.
  *
+ * **`MAX_CONSECUTIVE_FAILURES` is the fifth, and it is the other half of that
+ * ceiling.** Re-taking a reading only helps if a reading can arrive: a snapshot
+ * that always fails re-dispatches forever and replaces nothing, so the
+ * assertion stands for the life of the process while a fourteen-second bash
+ * runs every thirty seconds to keep it looking fresh. An assertion may not
+ * outlive its evidence, and a re-dispatch that always fails is not evidence, so
+ * past a small number of consecutive non-answers the reading is dropped rather
+ * than held.
+ *
  * **Nothing here goes looking for firstmate.** The home is the captain
  * session's own `cwd`, and the captain is identified by `src/firstmate.js` from
  * the lock holding that session's agent pid. A machine without firstmate has no
@@ -110,6 +119,31 @@ export const REFRESH_MS = 30000;
  * Only reached while decisions are open, so an idle fleet never pays it.
  */
 export const ASSERTION_MAX_AGE_MS = 300000;
+
+/**
+ * How many refreshes in a row may come back as non-answers before the reading
+ * is dropped rather than held.
+ *
+ * `ASSERTION_MAX_AGE_MS` bounds how stale a *successful* reading may get, and
+ * on its own that is only half the rule: it re-dispatches, and a re-dispatch
+ * that can never succeed replaces nothing, so the assertion stands for the life
+ * of the process while paying a fourteen-second bash to do it. That is the
+ * appearance of freshness rather than freshness, which is the quiet staleness
+ * this whole product is written against.
+ *
+ * Three routes get there with the captain still present and all of them are
+ * reachable: firstmate bumping `schema`, which `SNAPSHOT_SCHEMA` refuses by
+ * design; `bin/fm-fleet-snapshot.sh` renamed or removed by an upgrade; and
+ * stdout past `exec.js`'s 1MB cap, which a fleet four to five times the
+ * measured 223-224KB reaches.
+ *
+ * Three, because one or two failures must never clear anything - a timeout
+ * while the machine is busy is ordinary. Three is at soonest three `REFRESH_MS`
+ * apart, so a minute and a half, and at latest three `ASSERTION_MAX_AGE_MS`
+ * apart on a fleet writing no status lines, so a quarter of an hour. Any
+ * successful read resets it.
+ */
+export const MAX_CONSECUTIVE_FAILURES = 3;
 
 /**
  * Generous, and deliberately so. The measurements either side of this module
@@ -277,6 +311,13 @@ export class FirstmateDecisions {
   /** null means never asked, which is not the same as asked long ago. */
   #at = null;
   #reading = false;
+  /**
+   * How many reads in a row have come back as non-answers, counted only while
+   * the home has not moved - a read against a home that has gone was already
+   * discarded by `refresh`, and counting it would blame this fleet for the last
+   * one's answer.
+   */
+  #failures = 0;
 
   /**
    * @param {{execAsync?: Function, files?: DecisionFileAccess}} [deps] the
@@ -291,6 +332,20 @@ export class FirstmateDecisions {
   /** @returns {DecisionTask[]} the last reading, which is what the rows join against */
   get tasks() {
     return this.#tasks;
+  }
+
+  /**
+   * The `$FM_HOME` the standing reading was taken from, or null.
+   *
+   * Exposed for exactly one caller and one question. When no captain is found,
+   * the monitor has to tell "firstmate has gone" from "we could not read the
+   * lock", and the only lock that can settle that is the one at this home - see
+   * `FirstmateWatch.lockUnreadableAt`.
+   *
+   * @returns {string|null}
+   */
+  get home() {
+    return this.#home;
   }
 
   /**
@@ -330,6 +385,10 @@ export class FirstmateDecisions {
       this.#signature = null;
       this.#at = null;
       this.#tasks = [];
+      // A run of failures is a fact about one fleet's snapshot, so it goes with
+      // the reading it would have cleared rather than being carried into the
+      // next captain's first read.
+      this.#failures = 0;
     }
     if (!captainHome) return;
     if (this.#reading) return;
@@ -366,6 +425,7 @@ export class FirstmateDecisions {
     this.#home = home;
     this.#signature = this.#statusSignature(home);
     this.#at = Date.now();
+    this.#failures = 0;
     await this.#read(home);
   }
 
@@ -418,13 +478,34 @@ export class FirstmateDecisions {
         // seconds and the captain can leave while bash is still walking the
         // fleet. Clearing a reading has to mean it stays cleared, or the answer
         // in flight puts it straight back.
-        if (tasks && home === this.#home) this.#tasks = tasks;
+        if (home !== this.#home) return;
+        if (!tasks) {
+          this.#recordFailure();
+          return;
+        }
+        this.#tasks = tasks;
+        this.#failures = 0;
       })
       .catch(() => {
         // Same rule, by the other route.
+        if (home === this.#home) this.#recordFailure();
       })
       .finally(() => {
         this.#reading = false;
       });
+  }
+
+  /**
+   * Count one non-answer, and drop the reading once there have been enough.
+   *
+   * Not evidence, so it never *replaces* the reading with anything - it lets go
+   * of it. Holding an assertion open behind a refresh that can never succeed is
+   * the appearance of freshness, which is worse than saying nothing at all.
+   * See `MAX_CONSECUTIVE_FAILURES` for the number and the three routes here.
+   */
+  #recordFailure() {
+    if (this.#failures >= MAX_CONSECUTIVE_FAILURES) return;
+    this.#failures += 1;
+    if (this.#failures >= MAX_CONSECUTIVE_FAILURES) this.#tasks = [];
   }
 }

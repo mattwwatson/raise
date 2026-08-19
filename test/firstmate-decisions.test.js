@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import {
   ASSERTION_MAX_AGE_MS,
   FirstmateDecisions,
+  MAX_CONSECUTIVE_FAILURES,
   REFRESH_MS,
   parseSnapshot,
   windowFromTarget,
@@ -324,6 +325,62 @@ test('a failing or empty snapshot leaves the previous reading in place', async (
   decisions.refresh(HOME, REFRESH_MS * 2);
   await settle();
   assert.equal(decisions.tasks, before, 'and neither is empty output');
+});
+
+test('a snapshot that can never succeed eventually drops the reading it was holding', async () => {
+  // The other half of `ASSERTION_MAX_AGE_MS`. The ceiling re-dispatches, and a
+  // re-dispatch that always fails replaces nothing - so the assertion would
+  // stand for the life of the process while a fourteen-second bash ran every
+  // thirty seconds to keep it looking fresh. An assertion may not outlive its
+  // evidence, and this is the reachable case: a schema bump we refuse by
+  // design, the script renamed by an upgrade, or output past `exec.js`'s 1MB
+  // cap.
+  let answer = fleetSnapshotJson();
+  const mtimes = { 'crew.status': 1 };
+  let runs = 0;
+  const decisions = new FirstmateDecisions({
+    execAsync: async () => {
+      runs += 1;
+      if (answer === null) throw new Error('bash: no such file or directory');
+      return answer;
+    },
+    files: files({ mtimes }),
+  });
+  decisions.refresh(HOME, 0);
+  await settle();
+  assert.equal(decisions.tasks.length, 3);
+
+  // The script goes away, and the reading is held through the first failures -
+  // a timeout on a busy machine must never take the rulings off the page.
+  answer = null;
+  let at = 0;
+  for (let failure = 1; failure < MAX_CONSECUTIVE_FAILURES; failure += 1) {
+    at += ASSERTION_MAX_AGE_MS;
+    decisions.refresh(HOME, at);
+    await settle();
+    assert.equal(runs, failure + 1, `failure ${failure} was re-dispatched`);
+    assert.equal(decisions.tasks.length, 3, `failure ${failure} held the reading`);
+  }
+
+  // And past the ceiling it is dropped rather than held.
+  at += ASSERTION_MAX_AGE_MS;
+  decisions.refresh(HOME, at);
+  await settle();
+  assert.deepEqual(decisions.tasks, [], 'a refresh that can never succeed is not evidence');
+
+  // Nothing is asserted now, so the expensive ceiling stops firing and only the
+  // mtime gate can re-open it - which is what a crewmate writing a status line
+  // does. A reading that arrives resets the count.
+  const quiet = runs;
+  decisions.refresh(HOME, at + ASSERTION_MAX_AGE_MS * 10);
+  await settle();
+  assert.equal(runs, quiet, 'with nothing asserted there is nothing to re-take');
+
+  answer = fleetSnapshotJson();
+  mtimes['crew.status'] = 2;
+  decisions.refresh(HOME, at + ASSERTION_MAX_AGE_MS * 20);
+  await settle();
+  assert.equal(decisions.tasks.length, 3, 'and the reading comes back when the snapshot does');
 });
 
 test('a snapshot that answers with no tasks does clear the reading', async () => {

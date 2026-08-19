@@ -1352,19 +1352,30 @@ test('a ruling leaves the page only when the captain provably has, not on a read
     });
     await monitor.start();
 
-    // A session sitting in a checkout that happens to hold its own `state/.lock`
-    // holding something other than a pid. That is an answer - not firstmate's
-    // lock - and it must not be able to suppress the refresh for the whole
-    // machine, because `captainReading` reports one unreadable lock across every
-    // session and the rulings below would then never clear.
+    // Two sessions sitting in checkouts that happen to hold their own
+    // `state/.lock` - one holding something other than a pid, one empty. Neither
+    // was ever the captain, so neither may have any say in whether the captain
+    // has gone: the refresh consults the lock at the home the reading came from
+    // and at no other, or one stray file in an unrelated checkout would suppress
+    // it for the whole machine and the rulings below would never clear.
     const bystanderCwd = join(dir, 'bystander');
     mkdirSync(join(bystanderCwd, 'state'), { recursive: true });
     writeFileSync(join(bystanderCwd, 'state', '.lock'), 'held-by=some-other-tool\n');
+    const emptyLockCwd = join(dir, 'empty-lock');
+    mkdirSync(join(emptyLockCwd, 'state'), { recursive: true });
+    writeFileSync(join(emptyLockCwd, 'state', '.lock'), '');
+    // And one whose `state/.lock` is a directory, which is the genuinely
+    // unreadable case: `stat` accepts it and the read rejects it with EISDIR.
+    // Still not the captain's, so still no say.
+    const eisdirCwd = join(dir, 'eisdir');
+    mkdirSync(join(eisdirCwd, 'state', '.lock'), { recursive: true });
 
     for (const [sessionId, cwd, pane] of [
       ['captain', fmHome, '%0'],
       ['stopped', join(dir, 'crewmate'), '%1'],
       ['bystander', bystanderCwd, '%3'],
+      ['empty-lock', emptyLockCwd, '%4'],
+      ['eisdir', eisdirCwd, '%5'],
     ]) {
       const registered = await fetch(`http://127.0.0.1:${port}/event`, {
         method: 'POST',
@@ -1408,12 +1419,12 @@ test('a ruling leaves the page only when the captain provably has, not on a read
       'and it did not cost a fresh snapshot either',
     );
 
-    // A lock that is there and empty is what a torn or partial write looks like -
-    // firstmate writes it with one `printf`, so a partial read is either nothing
-    // yet or a prefix of digits, and a digit prefix parses. It is not the
-    // captain leaving: `stat` answered, so firstmate's lock still exists and
-    // only the read of it failed.
-    writeFileSync(lock, '');
+    // The captain's *own* lock becomes unreadable - a directory where the file
+    // was, which is what `stat` accepts and the read rejects. That is a reading
+    // we did not get about the one thing that decides this, so the refresh is
+    // skipped and the rulings stay.
+    rmSync(lock);
+    mkdirSync(lock);
     assert.equal(
       (await state()).get('stopped').decisions.length,
       4,
@@ -1426,13 +1437,14 @@ test('a ruling leaves the page only when the captain provably has, not on a read
     );
 
     // firstmate exits and takes its lock with it. Now there is no captain among
-    // sessions we did read, which is positive evidence, and the rulings go.
-    rmSync(lock);
+    // sessions we did read, the lock at the home the reading came from is
+    // simply absent, which is an answer, and the rulings go.
+    rmSync(lock, { recursive: true });
     const gone = await state();
     assert.deepEqual(
       gone.get('stopped').decisions,
       [],
-      'the bystander\'s own lock is an answer and must not hold the reading open',
+      'an unrelated session\'s lock is not ours to read and must not hold the reading open',
     );
     assert.equal(gone.get('stopped').attention !== 'decision', true);
     assert.equal(gone.get('captain').decisionsPending, null);

@@ -522,8 +522,10 @@ Two things are worth knowing about the cost, because it is the one real constrai
   to its own event log since the last reading. The page updates on the next tick.
 - **`raise status` does wait**, because a one-shot command has no later tick to answer on and
   printing before the answer arrives would mean printing a wrong one. So on a machine where
-  firstmate is running, `raise status` takes about as long as the snapshot does. The page is
-  where to watch; the CLI is where to get a complete answer once.
+  firstmate is running, `raise status` takes about as long as the snapshot does, and says so
+  before it waits rather than sitting silent - the wait can reach a minute before it gives up,
+  and an unexplained one reads as a hung command. The page is where to watch; the CLI is where
+  to get a complete answer once.
 
 `raise doctor` says whether firstmate was found. On a machine without it there is no lock naming
 a live session, so nothing is read, nothing is run, and no row ever mentions it.

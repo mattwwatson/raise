@@ -323,68 +323,74 @@ test('captainSession names the session whose own directory is $FM_HOME', () => {
   assert.equal(watch.captainSession(null), null);
 });
 
-test('captainReading tells a lock that is gone from one it could not read', () => {
+test('only a read that threw is unreadable - everything a lock contains is an answer', () => {
   // The caller acts on the absence of a captain - it is what says firstmate has
   // gone and takes every open ruling off the page - so a null that came from a
   // read we did not get has to be distinguishable from a null that is an answer.
-  const path = '/Users/x/work/firstmate/state/.lock';
-  const captain = session({
-    sessionId: 'captain',
-    cwd: '/Users/x/work/firstmate',
-    host: { pid: 49672, tmux: '', tmux_pane: null },
-  });
-  const crew = session({ sessionId: 'crew' });
-
-  const present = files({ [path]: '49672\n' });
-  assert.deepEqual(new FirstmateWatch({ files: present }).captainReading([crew, captain]), {
-    session: captain,
-    unreadable: false,
-  });
+  // The line between them is drawn by the *read*, never by the text: `stat` said
+  // a lock is there and `readText` then threw.
+  const home = '/Users/x/work/firstmate';
+  const path = `${home}/state/.lock`;
 
   // The lock is gone, which is the ordinary every-session case and an answer.
   const gone = files({ [path]: '49672\n' });
   gone.remove(path);
-  assert.deepEqual(new FirstmateWatch({ files: gone }).captainReading([crew, captain]), {
-    session: null,
-    unreadable: false,
-  });
+  assert.equal(new FirstmateWatch({ files: gone }).lockUnreadableAt(home), false);
 
-  // There and unreadable. `stat` answered, so we know a lock exists.
-  const failing = files({ [path]: '49672\n' });
+  // Held by firstmate, and read: also an answer.
+  assert.equal(
+    new FirstmateWatch({ files: files({ [path]: '49672\n' }) }).lockUnreadableAt(home),
+    false,
+  );
+
+  // There and unreadable. `stat` answered, so a lock exists, and this is where
+  // a `state/.lock` *directory* lands: `stat` accepts one and the read rejects
+  // it with EISDIR.
   const throwing = {
-    ...failing,
+    ...files({ [path]: '49672\n' }),
     readText() {
-      throw new Error('EIO');
+      throw Object.assign(new Error('EISDIR'), { code: 'EISDIR' });
     },
   };
-  assert.deepEqual(new FirstmateWatch({ files: throwing }).captainReading([crew, captain]), {
-    session: null,
-    unreadable: true,
-  });
+  assert.equal(new FirstmateWatch({ files: throwing }).lockUnreadableAt(home), true);
 
-  // There and empty, which is the only shape a torn write can leave: firstmate
-  // writes the lock with one `printf`, so a partial read is either nothing yet
-  // or a prefix of digits - and a digit prefix parses and is an answer.
-  const torn = files({ [path]: '' });
-  assert.deepEqual(new FirstmateWatch({ files: torn }).captainReading([crew, captain]), {
-    session: null,
-    unreadable: true,
-  });
-  // And it is not cached, so the next ask reads again rather than holding a
-  // non-answer until the file's size or mtime happens to move.
-  torn.write(path, '49672\n');
-  const watch = new FirstmateWatch({ files: torn });
-  assert.equal(watch.captainReading([crew, captain]).session?.sessionId, 'captain');
+  // Empty, whitespace and a foreign tool's own format are each an answer, and
+  // none of them needs a case of its own. Four rounds of review narrowed a
+  // predicate about lock text and each narrowing let a different shape through,
+  // so there is no predicate left to walk past.
+  for (const text of ['', '   \n', 'held-by=some-other-tool\n', '  ']) {
+    assert.equal(
+      new FirstmateWatch({ files: files({ [path]: text }) }).lockUnreadableAt(home),
+      false,
+      `${JSON.stringify(text)} is an answer`,
+    );
+  }
+
+  // And with no home there is nothing to ask about, which is not a failed read.
+  assert.equal(new FirstmateWatch({ files: files({ [path]: '49672\n' }) }).lockUnreadableAt(null), false);
+});
+
+test('a lock at one session says nothing about any other session directory', () => {
+  // The question `lockUnreadableAt` answers is "has the captain gone", and the
+  // only lock that can answer it is the one at the home the standing reading
+  // came from. Asked across every session instead, a single stray `state/.lock`
+  // in an unrelated checkout would suppress the refresh for the whole machine
+  // and leave every crewmate row asserting a ruling for the life of the process.
+  const access = {
+    stat: () => ({ size: 1, mtimeMs: 1 }),
+    readText: (path) => {
+      if (path.startsWith('/Users/x/other/')) throw new Error('EIO');
+      return '49672\n';
+    },
+  };
+  const watch = new FirstmateWatch({ files: access });
+  assert.equal(watch.lockUnreadableAt('/Users/x/other'), true);
+  assert.equal(watch.lockUnreadableAt('/Users/x/work/firstmate'), false);
 });
 
 test('a lock that reads fine and holds no pid is an answer, and is read once', () => {
   // `lockedPid` parses strictly on purpose: content that is not one line of
   // digits is a file that happens to be called `.lock` and is not firstmate's.
-  // Calling that unreadable is the mirror of calling an unreadable lock an
-  // answer, and it is the more expensive mistake - `captainReading` reports one
-  // unreadable lock across every session, so a single stray file in somebody's
-  // checkout would suppress the refresh for the whole machine and leave every
-  // crewmate row asserting a ruling for the life of the process.
   const path = '/Users/x/other/state/.lock';
   const bystander = session({
     sessionId: 'bystander',
@@ -393,27 +399,30 @@ test('a lock that reads fine and holds no pid is an answer, and is read once', (
   });
   const access = files({ [path]: 'held-by=some-other-tool\n' });
   const watch = new FirstmateWatch({ files: access });
-  assert.deepEqual(watch.captainReading([bystander]), { session: null, unreadable: false });
+  assert.equal(watch.captainSession([bystander]), null);
   // And cached like any other answer. It is a stable fact about somebody else's
   // file, where `#lockPidFor` runs twice per session per tick.
-  watch.captainReading([bystander]);
+  watch.captainSession([bystander]);
   watch.spawnedBy(bystander);
   assert.equal(access.reads, 1);
 });
 
-test('captainSession still answers with the session alone, unreadable lock or not', () => {
-  // The one-shot commands only ever ask who it is, so the extra fact stays off
-  // their path rather than making every caller unpack a result object.
+test('an empty lock is cached as an answer, and the completed write moves past it', () => {
+  // Caching it is safe by the key rather than by a predicate: `bin/fm-lock.sh`
+  // writes the lock with a single `printf`, so the only torn read possible is
+  // an empty one - and the entry it caches is keyed on a size and mtime the
+  // completed write immediately moves past.
   const path = '/Users/x/work/firstmate/state/.lock';
   const captain = session({
     sessionId: 'captain',
     cwd: '/Users/x/work/firstmate',
     host: { pid: 49672, tmux: '', tmux_pane: null },
   });
-  const access = files({ [path]: '49672\n' });
-  assert.equal(new FirstmateWatch({ files: access }).captainSession([captain])?.sessionId, 'captain');
   const torn = files({ [path]: '' });
-  assert.equal(new FirstmateWatch({ files: torn }).captainSession([captain]), null);
+  const watch = new FirstmateWatch({ files: torn });
+  assert.equal(watch.captainSession([captain]), null);
+  torn.write(path, '49672\n');
+  assert.equal(watch.captainSession([captain])?.sessionId, 'captain');
 });
 
 test('windowName answers from the table and never schedules a read of its own', async () => {

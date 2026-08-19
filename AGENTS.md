@@ -361,7 +361,9 @@ stratified on purpose, so read the whole file rather than one section.
 | ambiguity is guarded in both directions, and the second one is only visible once every session has been asked | `src/dashboard.js` (`buildRows`) |
 | the joins are ranked, so ambiguity is only between claims of one kind - a lone window claim beats any number of worktree ones | `src/dashboard.js` (`matchDecisionTask`, `buildRows`) |
 | a reading may not outlive the captain it came from, and an unreadable session list is not the captain leaving | `src/firstmate-decisions.js` (`refresh`), `src/server.js` |
-| three answers, not two: a lock that is gone retires a reading, one that will not read does not, and one that is not firstmate's is an ordinary no | `src/firstmate.js` (`captainReading`), `src/server.js` |
+| everything a lock contains is an answer; only a read that threw after a successful `stat` is not | `src/firstmate.js` (`LOCK_UNREADABLE`) |
+| only the lock at the home a reading came from may hold it open - one session's lock cannot speak for the machine | `src/firstmate.js` (`lockUnreadableAt`), `src/server.js` |
+| a reading is dropped after enough consecutive failed refreshes, because a re-dispatch that always fails is not evidence | `src/firstmate-decisions.js` (`MAX_CONSECUTIVE_FAILURES`) |
 | `decision` sits between `review` and `parked`, and the captain carries the count rather than a colour | `src/dashboard.js` (`ATTENTION_ORDER`, `buildRows`) |
 | a pi session can never be `blocked`, because pi has no approval gate | `src/registry.js` |
 | a Codex row may go red and will never say why - no `Notification` at all | `src/registry.js` |

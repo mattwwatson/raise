@@ -285,12 +285,23 @@ export function createMonitorServer({
     // the page - but an empty list is also what `registry.list()` returns when
     // `readdirSync` throws, and a reading we did not get is not evidence of
     // anything. Clearing on one would drop the rulings and then pay a fresh
-    // fourteen-second snapshot to learn they were still open. A lock we could
-    // not read is the same non-answer one level down, so `captainReading`
-    // reports it and it is skipped here too.
-    const { session: captain, unreadable: lockUnreadable } = firstmate.captainReading(sessions);
-    if (sessions.length > 0 && !lockUnreadable) {
-      firstmateDecisions.refresh(captain?.cwd || null);
+    // fourteen-second snapshot to learn they were still open.
+    //
+    // A lock we could not read is the same non-answer one level down, and it is
+    // asked about **one directory at a time**. The question here is only "has
+    // the captain gone", and the sole lock that can answer it is the one at the
+    // home the standing reading came from - no other session was ever the
+    // captain, so no other session's lock speaks to it. Asked across every
+    // session instead, a single stray `state/.lock` in an unrelated checkout
+    // would suppress this refresh for the whole machine and leave every
+    // crewmate's ruling open for the life of the process. With no reading in
+    // hand there is no assertion to protect, so nothing is suppressed either.
+    const captain = firstmate.captainSession(sessions);
+    if (sessions.length > 0) {
+      const home = captain?.cwd || null;
+      if (home || !firstmate.lockUnreadableAt(firstmateDecisions.home)) {
+        firstmateDecisions.refresh(home);
+      }
     }
 
     // Sessions nothing has ever reported, so the first page a stranger sees is

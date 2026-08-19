@@ -165,20 +165,23 @@ const LOCK_PATH = ['state', '.lock'];
  * A lock that is there and would not read, as distinct from one that is not
  * there and one that is not firstmate's.
  *
- * The other two are *answers*. No lock is what every session but the captain's
- * returns on every tick, and a lock holding something other than a pid is
- * `lockedPid`'s documented "a file that happens to be called `.lock`" - which is
- * the whole reason it parses strictly rather than leniently. This is neither: it
- * is a reading we did not get.
+ * The other two are *answers*, and everything a lock can contain is one of
+ * them. No lock is what every session but the captain's returns on every tick.
+ * A lock holding anything else - a pid that is not this session's, a foreign
+ * tool's own key-value line, nothing at all - is `lockedPid`'s documented "a
+ * file that happens to be called `.lock`", which is the whole reason it parses
+ * strictly rather than leniently. **There is deliberately no predicate about
+ * what the text means**: four rounds of review narrowed one, and each narrowing
+ * let a different shape through, so the door is gone rather than narrower.
  *
- * **The difference has to hold in both directions and the cost of confusing it
- * is not symmetric.** Downstream, `firstmate-decisions.js` treats "no captain"
- * as positive evidence that firstmate has gone and clears every open ruling off
- * the page. Calling an unreadable lock an answer retires rulings that are still
- * open; calling an answer unreadable suppresses the refresh for the *whole
- * machine*, because `captainReading` reports one unreadable lock across every
- * session - so a single stray `state/.lock` in somebody's checkout would leave
- * every crewmate row asserting a ruling for the life of the server process.
+ * This symbol is the one case that is not an answer, and it is defined by the
+ * read rather than by the content: `stat` said a lock is there and `readText`
+ * then threw. An EIO, and a `state/.lock` that is a *directory* - `stat`
+ * accepts one and the read rejects it. That is a reading we did not get, and
+ * downstream `firstmate-decisions.js` treats "no captain" as positive evidence
+ * that firstmate has gone and clears every open ruling off the page, so the two
+ * may not be confused - see `lockUnreadableAt`, which is how the one lock that
+ * can answer that question is asked about on its own.
  */
 const LOCK_UNREADABLE = Symbol('firstmate lock unreadable');
 
@@ -250,35 +253,32 @@ export class FirstmateWatch {
    * @returns {Session|null}
    */
   captainSession(sessions) {
-    return this.captainReading(sessions).session;
+    for (const session of sessions || []) {
+      if (this.#isCaptain(session)) return session;
+    }
+    return null;
   }
 
   /**
-   * The captain, and whether a null one is an answer.
+   * Whether the lock in one named directory is a reading we did not get.
    *
-   * `captainSession` says who it is, which is all a one-shot command needs. The
-   * monitor needs more, because it acts on the *absence* of a captain: no
-   * captain among sessions we did read is what tells `firstmate-decisions.js`
-   * that firstmate has gone and every open ruling should leave the page. A lock
-   * that would not read reaches the same null by a different route and means
-   * nothing of the kind, so it is reported separately and the caller skips the
-   * refresh on it - the same way it already skips when the session list itself
-   * could not be read.
+   * Deliberately about *one* directory, and that narrowness is the point. The
+   * monitor acts on the absence of a captain - it is what tells
+   * `firstmate-decisions.js` that firstmate has gone and every open ruling
+   * should leave the page - so it has to know whether a null captain is an
+   * answer. But only the lock at the home the standing reading came from can
+   * answer that, because no other session was ever the captain. Asked across
+   * every session instead, one stray `state/.lock` in an unrelated checkout
+   * would speak for the whole machine and hold every crewmate's ruling open for
+   * the life of the process.
    *
-   * A lock read after an unreadable one still settles it: `unreadable` is only
-   * true of a reading that found no captain at all.
-   *
-   * @param {Session[]} sessions
-   * @returns {{session: Session|null, unreadable: boolean}}
+   * @param {string|null|undefined} dir the directory whose `state/.lock` to ask
+   *   about - the home a reading was taken from, never a session picked at large
+   * @returns {boolean} true only when a lock is there and would not read
    */
-  captainReading(sessions) {
-    let unreadable = false;
-    for (const session of sessions || []) {
-      const verdict = this.#captainVerdict(session);
-      if (verdict === 'yes') return { session, unreadable: false };
-      if (verdict === 'unreadable') unreadable = true;
-    }
-    return { session: null, unreadable };
+  lockUnreadableAt(dir) {
+    if (!dir) return false;
+    return this.#lockPidFor(dir) === LOCK_UNREADABLE;
   }
 
   /**
@@ -351,30 +351,18 @@ export class FirstmateWatch {
    * agent pid is the one in it. Both halves are required: the first alone is
    * satisfied by anybody with firstmate's source checked out.
    *
+   * A lock we could not read is not the captain either, and needs no case of
+   * its own here: a symbol is not a pid, so it falls out as a plain no. Whether
+   * that no was an answer is a separate question, asked of one directory at a
+   * time through `lockUnreadableAt`.
+   *
    * @param {Session} session
    */
   #isCaptain(session) {
-    return this.#captainVerdict(session) === 'yes';
-  }
-
-  /**
-   * Whether this session is the captain, or whether we could not tell.
-   *
-   * Three answers rather than two, because two of the ways this can fail to say
-   * yes are not the same fact: `no` is a session with no lock in its directory
-   * or a lock naming somebody else, and `unreadable` is a lock we could not
-   * read. Only the first is evidence.
-   *
-   * @param {Session} session
-   * @returns {'yes'|'no'|'unreadable'}
-   */
-  #captainVerdict(session) {
     const cwd = session?.cwd;
     const pid = session?.host?.pid;
-    if (!cwd || !pid) return 'no';
-    const locked = this.#lockPidFor(cwd);
-    if (locked === LOCK_UNREADABLE) return 'unreadable';
-    return locked === pid ? 'yes' : 'no';
+    if (!cwd || !pid) return false;
+    return this.#lockPidFor(cwd) === pid;
   }
 
   /**
@@ -403,17 +391,17 @@ export class FirstmateWatch {
       // cached, so the next ask retries.
       return LOCK_UNREADABLE;
     }
-    // Empty is the only shape a torn read can take here, and that is a fact
-    // about how firstmate writes the file rather than a guess: `bin/fm-lock.sh`
-    // writes it with a single `printf '%s\n' "$me"`, so a partial read is either
-    // nothing yet or a prefix of digits - and a digit prefix parses, so it never
-    // reaches this branch. Not cached either, because it is expected to be over
-    // by the next tick.
-    if (!text || !text.trim()) return LOCK_UNREADABLE;
-    // Anything else present is an answer, and cached like one. It says this is
-    // not firstmate's lock, which is a stable fact about somebody else's file -
-    // re-reading it every tick would cost a read per session forever, and
-    // reporting it as unreadable would take the whole machine's refresh with it.
+    // Everything that reads is an answer, and cached like one - empty,
+    // whitespace and a foreign tool's own format alike. It says this is not
+    // firstmate's lock, which is a stable fact about somebody else's file, and
+    // re-reading it every tick would cost a read per session forever. There is
+    // no case here for what the text means, on purpose: see `LOCK_UNREADABLE`.
+    //
+    // Caching an empty read is safe against the one torn write that can happen,
+    // and safe by the key rather than by the predicate that used to be here:
+    // `bin/fm-lock.sh` writes the lock with a single `printf '%s\n' "$me"`, so
+    // the entry a torn read caches is keyed on a size and mtime the completed
+    // write immediately moves past.
     const pid = lockedPid(text);
     this.#locks.set(cwd, { size: info.size, mtimeMs: info.mtimeMs, pid });
     return pid;

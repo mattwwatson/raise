@@ -495,6 +495,12 @@ async function cmdStatus() {
   // ever did.
   const captain = firstmate.captainSession(sessions);
   const firstmateDecisions = new FirstmateDecisions({ execAsync });
+  // Said before the wait rather than after it, and only when there is one. The
+  // snapshot measured 3.5s and 14s, and its timeout is a minute, so silence
+  // here reads as a hung command - naming what is being waited for is the
+  // difference between the two. On stderr, so the rows stay the whole of what
+  // this command writes to stdout.
+  if (captain) console.error(dim('Waiting for the firstmate fleet snapshot...'));
   await firstmateDecisions.load(captain?.cwd || null);
   const summaries = new Map(
     sessions.map((s) => {
@@ -1056,15 +1062,19 @@ async function cmdDoctor() {
     off('lavish-axi', 'not installed - review gates will not be detected');
   }
 
+  // Listed once and shared, by the firstmate check here and the Sessions check
+  // below. `list()` is not a pure read - it probes each session for liveness and
+  // writes a tombstone for every dead one - so asking twice runs all of that
+  // twice in one command.
+  const sessions = new SessionRegistry({ dir: sessionsDir() }).list();
+
   // Optional again, and reported without running anything, which is the point.
   // firstmate is not a command on the PATH as far as Raise is concerned - it is
   // recognised by the lock in a live session's own directory holding that
   // session's pid, and that session's directory is where the fleet snapshot is
   // read from. No captain, no read: this line is the whole of what a machine
   // without firstmate is ever told, and it costs one `stat` per session.
-  const firstmateCaptain = new FirstmateWatch().captainSession(
-    new SessionRegistry({ dir: sessionsDir() }).list(),
-  );
+  const firstmateCaptain = new FirstmateWatch().captainSession(sessions);
   if (firstmateCaptain) {
     ok('firstmate', `running in ${firstmateCaptain.cwd} - crew decisions will show`);
   } else {
@@ -1204,7 +1214,6 @@ async function cmdDoctor() {
     }
   }
 
-  const sessions = new SessionRegistry({ dir: sessionsDir() }).list();
   if (sessions.length > 0) {
     const focusable = sessions.filter((s) => s.host?.tmux_pane || s.host?.iterm_session_id || s.host?.tty);
     ok('Sessions', `${sessions.length} registered, ${focusable.length} focusable`);
