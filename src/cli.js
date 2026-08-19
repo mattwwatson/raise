@@ -1076,7 +1076,21 @@ async function cmdDoctor() {
   // without firstmate is ever told, and it costs one `stat` per session.
   const firstmateCaptain = new FirstmateWatch().captainSession(sessions);
   if (firstmateCaptain) {
-    ok('firstmate', `running in ${firstmateCaptain.cwd} - crew decisions will show`);
+    // Says what the lock established and stops there. It used to promise that
+    // crew decisions *would* show, which nothing here checks: only `serve` ever
+    // runs the snapshot, and all three ways it can fail for good - a schema we
+    // refuse by design, the script renamed by an upgrade, output past
+    // `exec.js`'s cap - end in no rows and no warning once
+    // `MAX_CONSECUTIVE_FAILURES` drops the reading. The one command somebody
+    // runs when something is already wrong must not be the third thing telling
+    // them it is fine. Taking a reading here is not the answer either: the
+    // snapshot measured 13.7s, and this file already reports the update check
+    // without performing it for the same reason.
+    ok(
+      'firstmate',
+      `running in ${firstmateCaptain.cwd} - its lock names a live session, and that is ` +
+        'where the fleet snapshot is read from',
+    );
   } else {
     off('firstmate', 'not running - no crew decisions; everything else works');
   }
