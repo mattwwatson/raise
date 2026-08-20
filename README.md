@@ -557,6 +557,13 @@ nothing for you to undo. It cannot hide something that matters.
 **A permission-prompt row has no button at all.** That session genuinely cannot proceed without
 you, so there is nothing there to dismiss, and a control that must not be used is not offered.
 
+**Nor does a row waiting on a [firstmate ruling](#firstmate-rulings).** The nudge underneath one
+is an ordinary dismissible nudge - a crewmate that asks for a ruling stops, and a stopped session
+is exactly what raises the nudge - but the row now says a decision is waiting, and a ruling
+cannot be dismissed from here at all: answering one is firstmate's, and Raise never writes to it.
+A button that looked like it would quieten the row and could not is the same rule again, at the
+one place it matters most.
+
 **The word `dismissed` explains a quiet row, so it appears on nothing else.** If the same session
 turns red again for its pipeline, or starts working because its transcript ran on, the row says
 that and only that - the marker is there to tell a quiet row apart from one with nothing to say,

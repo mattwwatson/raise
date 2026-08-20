@@ -3166,3 +3166,43 @@ test('a ruling row offers no dismiss control and does not repeat the nudge wordi
   // The ruling itself is still on the row, which is the whole point.
   assert.equal(rows[0].decisions.length, 1);
 });
+
+test('a crewmate that stopped for a ruling and drew the idle nudge still reads as a decision', () => {
+  // This is not a case a review constructed - it is the sequence the repository
+  // owner hit hand-testing the shipped branch, which is why the ranking changed
+  // at all, and it is recorded here in his order rather than the code's. A
+  // crewmate posts a ruling request and stops. Because it has stopped, Claude
+  // Code's sixty-second idle nudge fires. The row then read "Waiting for you" in
+  // red while the chevron beside it offered to show the decisions - so the row
+  // was holding the specific answer and displaying the generic one, and he had
+  // to go and ask firstmate what his own dashboard meant. The wording only
+  // became correct after he answered the ruling, at the moment it stopped being
+  // true.
+  //
+  // The two assertions are in one test on purpose. Either one passed before the
+  // fix: the row already carried the decisions, and the decision wording already
+  // existed. What it never had was both at once, so the pair is the regression
+  // and splitting them would let it come back between two green tests.
+  const rows = buildRows({
+    sessions: [
+      session({
+        sessionId: 'crew',
+        cwd: '/Users/x/trees/1/repo',
+        state: 'blocked',
+        stateSince: 1000,
+        blockAnnouncedAt: 1000,
+        message: 'Claude is waiting for your input',
+        notificationType: 'idle_prompt',
+      }),
+    ],
+    branches: new Map(),
+    runs: [],
+    decisions: [decisionTask()],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+  });
+  const crew = rows.find((r) => r.sessionId === 'crew');
+  // What the row says, as a renderer reads it - not the generic waiting wording.
+  assert.equal(crew.attentionLabel, 'Waiting on your decision');
+  // And what the chevron was offering all along, on the same row at the same time.
+  assert.deepEqual(crew.decisions, [{ key: 'k1', verb: 'needs-decision', summary: 'which option' }]);
+});
