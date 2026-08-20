@@ -3282,3 +3282,95 @@ test('a crewmate stopped on a ruling keeps its waiting figure rather than fallin
   // What the page reads to choose "Waiting since" over "Last activity".
   assert.equal(crew.sessionStateSince, 1000);
 });
+
+test('one ruling beside a Lavish review still puts the marker on the row', () => {
+  // The marker used to be dropped at exactly one ruling, on the reasoning that
+  // "Waiting on your decision" had already said it. True only while that is the
+  // row's word - and this branch made two other combinations reachable. Here a
+  // live poll takes `review` first, so without the marker the card said nothing
+  // about the ruling at all while `raise status` printed it on the same row.
+  const rows = buildRows({
+    sessions: [
+      session({
+        sessionId: 'crew',
+        cwd: '/Users/x/trees/1/repo',
+        state: 'blocked',
+        stateSince: 1000,
+        blockAnnouncedAt: 1000,
+        message: 'Claude is waiting for your input',
+        notificationType: 'idle_prompt',
+      }),
+    ],
+    branches: new Map(),
+    runs: [],
+    summaries: new Map([
+      ['crew', { title: 't', mode: null, activity: null, lavishFile: '/p.html' }],
+    ]),
+    decisions: [decisionTask()],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+  });
+  const crew = rows.find((r) => r.sessionId === 'crew');
+  assert.equal(crew.attention, 'review');
+  assert.equal(crew.decisions.length, 1);
+  assert.equal(crew.decisionsLabel, '1 open');
+});
+
+test('one ruling beside a permission prompt still puts the marker on the row', () => {
+  // The other reachable combination, and the one that outlives a resumed crew:
+  // a permission prompt keeps `blocked` by design, while the snapshot reading is
+  // deliberately held for a while afterwards. The row must not go quiet about a
+  // ruling it is still holding.
+  const rows = buildRows({
+    sessions: [
+      session({
+        sessionId: 'crew',
+        cwd: '/Users/x/trees/1/repo',
+        state: 'blocked',
+        stateSince: 1000,
+        blockAnnouncedAt: 1000,
+        message: 'Claude needs your permission to use Bash',
+        notificationType: 'permission_prompt',
+      }),
+    ],
+    branches: new Map(),
+    runs: [],
+    decisions: [decisionTask()],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+  });
+  const crew = rows.find((r) => r.sessionId === 'crew');
+  assert.equal(crew.attention, 'blocked');
+  assert.equal(crew.decisions.length, 1);
+  assert.equal(crew.decisionsLabel, '1 open');
+});
+
+test('one ruling on a row that already says so carries no marker', () => {
+  // The case the suppression was written for, and it has to survive the fix:
+  // beside "Waiting on your decision" a marker reading "1 open" is the state
+  // word said twice.
+  const rows = buildRows({
+    sessions: [session({ sessionId: 'crew', cwd: '/Users/x/trees/1/repo' })],
+    branches: new Map(),
+    runs: [],
+    decisions: [decisionTask()],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+  });
+  const crew = rows.find((r) => r.sessionId === 'crew');
+  assert.equal(crew.attention, 'decision');
+  assert.equal(crew.decisionsLabel, null);
+  // And more than one is the number that changes what you do about it.
+  const many = buildRows({
+    sessions: [session({ sessionId: 'crew', cwd: '/Users/x/trees/1/repo' })],
+    branches: new Map(),
+    runs: [],
+    decisions: [
+      decisionTask({
+        decisions: [
+          { key: 'k1', verb: 'needs-decision', summary: 'which option' },
+          { key: 'k2', verb: 'needs-decision', summary: 'and the other' },
+        ],
+      }),
+    ],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+  });
+  assert.equal(many.find((r) => r.sessionId === 'crew').decisionsLabel, '2 open');
+});

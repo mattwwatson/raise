@@ -143,26 +143,6 @@ function clip(text, limit) {
 }
 
 /**
- * The count beside a row's state word, in the same position and for the same
- * reason the `dismissed` marker sits there - the count and the state are one
- * sentence.
- *
- * One marker per row, never two. The captain's is the whole crew's total, and
- * its own list is a subset of that, so printing both would be one number
- * explaining another.
- *
- * @param {import('./dashboard.js').Row} row
- * @returns {string}
- */
-function decisionCount(row) {
-  if (row.decisionsPending) return `${row.decisionsPending} across the crew`;
-  // One is what "Waiting on your decision" already says. More than one is the
-  // number that changes what you do about it.
-  if (row.decisions.length > 1) return `${row.decisions.length} open`;
-  return '';
-}
-
-/**
  * How each `doctor` check state is marked. Padded to a common width so the
  * names line up; a state with no entry here is a failure, which is the one
  * default a diagnostic tool may safely have.
@@ -627,7 +607,7 @@ async function cmdStatus() {
     // position and the same words as on the page - the two renderers are one
     // protocol, and a row counted on one and bare on the other is them
     // disagreeing about the same session.
-    const rulings = decisionCount(row);
+    const rulings = row.decisionsLabel;
     const decisions = rulings ? ` ${dim(rulings)}` : '';
     const head = `${bold(row.title)}${named}${spawner}${decisions}${dismissed}${unplaceable}`;
     console.log(`${colour(row.attentionLabel.padEnd(26))} ${head}`);

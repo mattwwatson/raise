@@ -1035,20 +1035,6 @@
         'Found on disk, never reported - restart the session and Raise will follow it';
 
       /*
-       * The count beside a row's state word, in the same position and for the
-       * same reason the `dismissed` marker sits there - the count and the state
-       * are one sentence. `raise status` prints these exact words; the page and
-       * the CLI are one protocol.
-       */
-      function decisionCount(row) {
-        if (row.decisionsPending) return row.decisionsPending + ' across the crew';
-        // One is what "Waiting on your decision" already says. More than one is
-        // the number that changes what you do about it.
-        const own = (row.decisions || []).length;
-        return own > 1 ? own + ' open' : '';
-      }
-
-      /*
        * The favicon carries the one thing worth knowing from a background tab:
        * whether anything wants you. This page is meant to be left pinned, where
        * the tab strip shows an icon and little else, so a static logo would be
@@ -1418,11 +1404,11 @@
         state.textContent = row.attentionLabel;
         line2.appendChild(state);
 
-        // How many firstmate rulings are waiting, beside the state word and in
-        // the same words `raise status` uses. One marker per row, never two: the
-        // captain's is the whole crew's total and its own list is a subset of
-        // that, so printing both would be one number explaining another.
-        const rulings = decisionCount(row);
+        // How many firstmate rulings are waiting, beside the state word. The
+        // words are computed once in `dashboard.js` and rendered here and by
+        // `raise status` alike - the two are one protocol, and the marker
+        // disagreeing between them was a page that hid a ruling the CLI printed.
+        const rulings = row.decisionsLabel;
         if (rulings) {
           const count = document.createElement('span');
           count.className = 'decisions-open';
@@ -1839,9 +1825,9 @@
             // A notification is a pointer rather than the list, so it carries
             // one summary - but it may not imply there is one when there are
             // four. The count goes in front of it, in the words the card and
-            // `raise status` already use, and is empty for a single ruling
-            // because "wants a decision" has said that already.
-            const rulings = decisionCount(row);
+            // `raise status` already use, and carries nothing for a single
+            // ruling because "wants a decision" has said that already.
+            const rulings = row.decisionsLabel;
             const n = new Notification(
               // In the title rather than the body, because the body already
               // carries the reason and two identically titled notifications for

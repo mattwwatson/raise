@@ -529,7 +529,12 @@ Keep it that way - it has no build step and must open as a file.
   **every** open decision: four on one crewmate is the ordinary case, and a renderer that
   bounded the list without saying so would be this item's own failure reintroduced by its fix.
   One marker per row, never two - the captain's counts the whole crew and its own list is a
-  subset of that, so both would be one number explaining another.
+  subset of that, so both would be one number explaining another. **The marker is dropped only
+  where the state word has already said it**, which is not the same as dropping it at one:
+  a single ruling beside `review` or `blocked` used to leave the card silent about it while
+  `raise status` printed it, which is the two renderers disagreeing about one row. Both now
+  render `Row.decisionsLabel` and neither computes it - see `decisionsLabel` in
+  `src/dashboard.js`, which exists because the page cannot import a shared helper.
 - **A ruling with no row to sit on gets a card of its own, and the card is why the section
   heading is not about pipelines.** The captain's row carries whatever could not be placed,
   and there is not always a captain's row - firstmate's own lock will not read for a bounded
@@ -574,7 +579,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 955 tests, no network, no dependencies, ~9s
+npm test          # 958 tests, no network, no dependencies, ~9s
 npm run lint      # oxlint over src, bin, hooks, public, test, scripts
 npm run typecheck # tsc --noEmit over src, bin, hooks, public, scripts
 ```
@@ -770,7 +775,7 @@ the [roadmap-workflow skill](.claude/skills/roadmap-workflow/SKILL.md).
 ## Commands
 
 ```sh
-npm test                       # 955 tests, ~9s
+npm test                       # 958 tests, ~9s
 npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above

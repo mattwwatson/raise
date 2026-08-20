@@ -158,6 +158,8 @@ import { pullRequestKey } from './forge.js';
  *   the whole crew, on the captain's row and no other. A count of decisions
  *   rather than of tasks, and it belongs there because the captain window is
  *   where a ruling is actually given
+ * @property {string|null} decisionsLabel the marker beside the state word, or
+ *   null where the state word has already said it - see `decisionsLabel`
  * @property {Run|null} run
  * @property {number|null} updatedAt
  * @property {string|null} summary what the session is working on, in Claude's
@@ -237,6 +239,43 @@ const ATTENTION_LABELS = {
 /** @param {Attention} attention */
 export function attentionLabel(attention) {
   return ATTENTION_LABELS[attention] || attention;
+}
+
+/**
+ * The firstmate marker beside a row's state word, in the position and for the
+ * reason the `dismissed` marker sits there - the marker and the state word are
+ * one sentence.
+ *
+ * **It asks whether the state word has already said a ruling is waiting, never
+ * how many there are.** The count was the wrong question, and asking it hid the
+ * one thing this feature exists to show: the marker used to be suppressed at
+ * exactly one ruling on the reasoning that "Waiting on your decision" says it
+ * already - true only while that *is* the row's word. A crewmate with one ruling
+ * and a live Lavish poll reads `review`, and one stopped at a permission prompt
+ * reads `blocked`; on both the card then said nothing about the ruling at all,
+ * leaving a chevron identical to every other row's as the only sign, while
+ * `raise status` printed the ruling on that same row. That is the defect this
+ * whole change was made to remove, one attention level over, and the page was
+ * the surface telling the lie.
+ *
+ * One marker per row, never two. The captain's counts the whole crew and its own
+ * list is a subset of that, so both would be one number explaining another.
+ *
+ * Computed here rather than in either renderer because there is no third place
+ * for it: the page is served as static files and imports only
+ * `public/connection.js`, so a shared helper cannot reach it. It lived as two
+ * copies for that reason and they are exactly what drifted.
+ *
+ * @param {Attention} attention
+ * @param {Decision[]} decisions the rulings this row itself holds
+ * @param {number|null} decisionsPending the crew-wide count, captain's row only
+ * @returns {string|null}
+ */
+export function decisionsLabel(attention, decisions, decisionsPending) {
+  if (decisionsPending) return `${decisionsPending} across the crew`;
+  if (decisions.length === 0) return null;
+  if (decisions.length === 1 && attention === 'decision') return null;
+  return `${decisions.length} open`;
 }
 
 /**
@@ -773,7 +812,7 @@ export function isDismissibleBlock(session) {
  * @param {number} decisions the open rulings joined to this row
  * @returns {boolean}
  */
-export function blockDefersToRuling(session, decisions) {
+function blockDefersToRuling(session, decisions) {
   return decisions > 0 && isIdleNudge(session?.message, session?.notificationType);
 }
 
@@ -1364,6 +1403,7 @@ export function buildRows({
       // marker is: it explains what is waiting, it does not claim this window
       // is the one that stopped.
       decisionsPending: isCaptain ? decisionsPending : null,
+      decisionsLabel: decisionsLabel(attention, rowDecisions, isCaptain ? decisionsPending : null),
       run: run || null,
       updatedAt: session.updatedAt || null,
       // What the *session* is about, always - never the pipeline step. The step
@@ -1495,6 +1535,7 @@ export function buildRows({
       // - never to a pipeline run, which is a different tool's business.
       decisions: [],
       decisionsPending: null,
+      decisionsLabel: null,
       run,
       updatedAt: run.updatedAt || null,
       // No session, so nothing to say about one. What the pipeline is doing goes
@@ -1577,6 +1618,7 @@ export function buildRows({
       // what an untracked row refuses to do.
       decisions: [],
       decisionsPending: null,
+      decisionsLabel: null,
       run: null,
       updatedAt: session.lastSeenAt,
       // Past tense and safe. Null for pi and Codex, neither of which writes a
@@ -1641,6 +1683,7 @@ export function buildRows({
       // The crew-wide count belongs to the captain's row and to no other, and
       // this is not it. Its own list is what it holds, and that is what it says.
       decisionsPending: null,
+      decisionsLabel: decisionsLabel('decision', unplacedDecisions, null),
       run: null,
       updatedAt: null,
       summary: null,
