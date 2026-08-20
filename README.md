@@ -511,11 +511,12 @@ given.
 be holding a ruling and be stopped at a permission prompt, or sitting in a Lavish review, and
 those say **Waiting for you** and **Waiting on your review** instead - so the count appears
 beside them too, and `1 open` next to a red row means exactly what it says. It is dropped only
-where the row already reads **Waiting on your decision**, which has said it. When there is no captain row to put them on - its window has gone, or firstmate's lock
-will not read for a tick or two - the leftovers get a card of their own, **Rulings waiting**, for
-the same reason a pipeline run that cannot be traced to a session does: a ruling shown against
-nobody is still better than a ruling shown against the wrong session, and both beat one quietly
-dropped.
+where the row already reads **Waiting on your decision**, which has said it.
+
+When there is no captain row to put them on - its window has gone, or firstmate's lock will not
+read for a tick or two - the leftovers get a card of their own, **Rulings waiting**, for the same
+reason a pipeline run that cannot be traced to a session does: a ruling shown against nobody is
+still better than a ruling shown against the wrong session, and both beat one quietly dropped.
 
 It comes from firstmate's own `fm-fleet-snapshot.sh --json`, and **the transcript is never read
 and no prose is ever matched.** A phrase that turns up in ordinary conversation would put a
