@@ -131,7 +131,8 @@ import { pullRequestKey } from './forge.js';
  *   replaces it with neutral wording
  * @property {import('./registry.js').SessionState|null} sessionState
  * @property {number|null} sessionStateSince
- * @property {number|null} waitingForMs how long blocked, for the "2m" column
+ * @property {number|null} waitingForMs how long it has been waiting on a human,
+ *   for the "2m" column - `blocked`, `review` and `decision` alike
  * @property {boolean} dismissible whether this row is announcing a block a human
  *   may say is not owed. Only ever Claude Code's idle nudge - a permission
  *   prompt offers no control at all rather than a control that must not be used
@@ -1313,8 +1314,14 @@ export function buildRows({
         null,
       sessionState,
       sessionStateSince: session.stateSince || null,
+      // The same three states the page times, and kept the same deliberately.
+      // Nothing reads this today, which is exactly why it would rot: it is part
+      // of the Row contract, so the next renderer to pick it up would inherit
+      // whichever omission was left here. On a ruling row it measures from the
+      // idle nudge rather than from the ruling - see the page, which carries the
+      // reason.
       waitingForMs:
-        attention === 'blocked' || attention === 'review'
+        attention === 'blocked' || attention === 'review' || attention === 'decision'
           ? now - (session.stateSince || now)
           : null,
       // Offered only while this session's *own* block is what makes the row red.
@@ -1374,6 +1381,13 @@ export function buildRows({
       // On a review row the running tool *is* the waiting - "Running lavish-axi"
       // next to "Waiting on your review" reads as work in progress, which is
       // the one impression this state exists to correct.
+      //
+      // **`decision` is missing here on purpose, and is not the same omission as
+      // the two the ruling change had to fix.** That reasoning does not carry: a
+      // crewmate stopped on a ruling is in the position a `blocked` session is
+      // in, and a `blocked` row shows its activity - a stopped crewmate usually
+      // has no tool in flight to show anyway, so adding it here would only ever
+      // remove a line. Do not complete the set.
       activity: attention === 'review' ? null : summary?.activity || null,
       // 'normal' is the absence of a mode, and saying so on every card would be
       // noise on the one thing this page has to keep scannable.

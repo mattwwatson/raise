@@ -1584,9 +1584,22 @@
         // the ticking re-render below stays accurate between pushes.
         // How long it has been waiting on you, which is the number that decides
         // which row to deal with first. A review waits exactly as visibly as a
-        // permission prompt does.
+        // permission prompt does, and so does a ruling: a request that scrolled
+        // off the captain's window is the longest-waiting case this page has, and
+        // it would be the only waiting state reduced to "last activity".
+        //
+        // **On a ruling row the figure is measured from the nudge, not from the
+        // ruling.** `sessionStateSince` is when Claude Code's sixty-second idle
+        // nudge was recorded - a ruling carries no timestamp of its own in
+        // firstmate's snapshot, so there is nothing else to measure from, and the
+        // figure exists at all only because that nudge fired. It therefore runs
+        // about a minute short of the true wait and must never be read as the
+        // ruling's own age or used to compute one. A number a minute out is worth
+        // far more here than a blank.
         const since =
-          row.attention === 'blocked' || row.attention === 'review'
+          row.attention === 'blocked' ||
+          row.attention === 'review' ||
+          row.attention === 'decision'
             ? row.sessionStateSince
             : row.run && row.run.parked
               ? row.run.parkedSince

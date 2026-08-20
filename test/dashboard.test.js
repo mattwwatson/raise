@@ -3245,3 +3245,40 @@ test('a ruling row that also has a Lavish poll open still offers no dismiss cont
   // The ruling is still on the row, waiting behind the review.
   assert.equal(crew.decisions.length, 1);
 });
+
+test('a crewmate stopped on a ruling keeps its waiting figure rather than falling back to last activity', () => {
+  // The third thing the ranking change moved, and the one nobody enumerated:
+  // the row's time stamp is picked from a list of states, and `decision` was not
+  // in it. So a crewmate that used to read `blocked` and show "Waiting since"
+  // started reading `decision` and showing "Last activity" - on the one state
+  // whose whole premise is that somebody has been waiting too long, and which
+  // the tab title counts and a desktop notification announces.
+  //
+  // The figure is measured from the nudge, not from the ruling: a ruling has no
+  // timestamp of its own in the snapshot, so this runs about a minute short of
+  // the true wait. That is the number's stated meaning rather than a rounding
+  // error in it, and it beats a blank.
+  const rows = buildRows({
+    sessions: [
+      session({
+        sessionId: 'crew',
+        cwd: '/Users/x/trees/1/repo',
+        state: 'blocked',
+        stateSince: 1000,
+        blockAnnouncedAt: 1000,
+        message: 'Claude is waiting for your input',
+        notificationType: 'idle_prompt',
+      }),
+    ],
+    branches: new Map(),
+    runs: [],
+    now: 21000,
+    decisions: [decisionTask()],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+  });
+  const crew = rows.find((r) => r.sessionId === 'crew');
+  assert.equal(crew.attention, 'decision');
+  assert.equal(crew.waitingForMs, 20000);
+  // What the page reads to choose "Waiting since" over "Last activity".
+  assert.equal(crew.sessionStateSince, 1000);
+});
