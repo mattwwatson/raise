@@ -897,7 +897,13 @@ export function matchDecisionTask(session, windowName, tasks) {
  * rather than present and stale. Nothing in this file second-guesses that -
  * the tool that owns the fact is the one stating it.
  *
- * @param {{session: Session|{state: string}|null, run: Run|null,
+ * `session` carries `message` and `notificationType` because the ruling rule
+ * below has to tell Claude Code's idle nudge from a permission prompt, which is
+ * what those two fields settle - the same pair `effectiveSessionState` reads for
+ * the same distinction.
+ *
+ * @param {{session: Session|{state: string, message?: string|null,
+ *            notificationType?: string|null}|null, run: Run|null,
  *          summary?: import('./transcript.js').TranscriptSummary|null,
  *          agent?: Agent|null, pipelineRunning?: boolean,
  *          decisions?: number}} input
@@ -912,7 +918,23 @@ export function attentionFor({
   decisions = 0,
 }) {
   const state = effectiveSessionState(session, summary, pipelineRunning);
-  if (state === 'blocked') return 'blocked';
+  // **An open ruling outranks the idle nudge, and never a permission prompt.**
+  // A crewmate that has asked for a ruling has stopped, and a stopped Claude
+  // Code session is exactly what produces the sixty-second nudge - so the nudge
+  // is the symptom and the ruling is the cause. Letting it win says "Waiting for
+  // you", which is true and useless: the row is holding the specific answer and
+  // refusing to give it, and the reader has to go and ask somebody what the row
+  // meant. That is the failure this whole feature exists to remove, reintroduced
+  // one level up. Observed on the first hand-test of it.
+  //
+  // A permission prompt is different in kind - a gate inside that window which
+  // only that window can clear - so it still wins, and a folded pipeline agent's
+  // block below still wins for the same reason. `isIdleNudge` already draws this
+  // exact line for the running-pipeline case in `effectiveSessionState`; this is
+  // the same rule with a different disprover.
+  const rulingOverNudge =
+    decisions > 0 && isIdleNudge(session?.message, session?.notificationType);
+  if (state === 'blocked' && !rulingOverNudge) return 'blocked';
   if (agent?.state === 'blocked') return 'blocked';
   if (session && summary?.lavishFile) return 'review';
   if (decisions > 0) return 'decision';
@@ -1253,8 +1275,12 @@ export function buildRows({
       // dialog as a permission prompt, so the specific claim is only safe to
       // repeat for the kinds it can actually tell apart. The agent's message
       // has already been through it where it was built.
+      // Suppressed on a ruling row even though the session's own state is still
+      // `blocked`: the nudge's generic wording beside "Waiting on your decision"
+      // is a second, weaker answer to the question the row has already answered,
+      // and the ruling's own words are in the panel. One answer per fact.
       message:
-        (sessionState === 'blocked'
+        (sessionState === 'blocked' && attention !== 'decision'
           ? blockReason(session.message, session.notificationType)
           : null) ||
         (attention === 'blocked' ? agent?.message : null) ||
@@ -1269,7 +1295,13 @@ export function buildRows({
       // A row blocked by its folded pipeline agent reads the same on the page
       // and is not this session's to answer, so the effective state is checked
       // rather than the attention.
-      dismissible: sessionState === 'blocked' && isDismissibleBlock(session),
+      // Never on a ruling row. The nudge underneath it is dismissible, but the
+      // row now says a decision is waiting and a ruling cannot be dismissed from
+      // here - answering one is firstmate's, and Raise does not write to it. A
+      // control that looks like it would quieten this row and cannot is the
+      // affordance rule broken exactly where it matters most.
+      dismissible:
+        sessionState === 'blocked' && attention !== 'decision' && isDismissibleBlock(session),
       // Said out loud on an idle row, because the difference between "nothing is
       // waiting" and "I told it to stop saying so" is exactly the difference
       // this page cannot afford to blur. It is that sentence and nothing else,

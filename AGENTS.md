@@ -370,6 +370,8 @@ stratified on purpose, so read the whole file rather than one section.
 | a failing state re-dispatches on the ceiling whether or not anything is asserted - a stopped crewmate writes no status line | `src/firstmate-decisions.js` (`refresh`) |
 | rulings with no captain row to carry them get a card that says so, rather than being counted nowhere | `src/dashboard.js` (`buildRows`), `public/index.html` |
 | `decision` sits between `review` and `parked`, and the captain carries the count rather than a colour | `src/dashboard.js` (`ATTENTION_ORDER`, `buildRows`) |
+| a ruling outranks the idle nudge and never a permission prompt, because the nudge is what a stopped crewmate produces | `src/dashboard.js` (`attentionFor`) |
+| a ruling row offers no dismiss control and drops the nudge's wording | `src/dashboard.js` (`buildRows`) |
 | a pi session can never be `blocked`, because pi has no approval gate | `src/registry.js` |
 | a Codex row may go red and will never say why - no `Notification` at all | `src/registry.js` |
 | pi's transcript is normalised, never summarised separately | `src/pi-transcript.js` |
@@ -453,6 +455,13 @@ Keep it that way - it has no build step and must open as a file.
 
 - Colour comes from the CSS custom properties in `:root`, with a
   `@media (prefers-color-scheme: dark)` block. **Add a variable to both blocks or neither.**
+- **A firstmate ruling displaces Claude Code's idle nudge, and nothing else.** A crewmate that
+  asks for a ruling stops, and a stopped session is precisely what raises the sixty-second
+  nudge - so `blocked` winning meant the reddest, least useful word sat on the row while its own
+  chevron offered to show the decisions. A permission prompt still wins, because it is a gate
+  inside that window which only that window can clear. The row also drops the `Not for me`
+  control there: the nudge underneath is dismissible, a ruling is not, and Raise cannot answer
+  one at all.
 - Attention colour is semantic and ordered: `blocked` > `review` > `decision` > `parked` >
   `failed` > `idle` > `working`, matching `ATTENTION_ORDER` in `dashboard.js`. Do not introduce
   a colour that competes with `blocked` red - `review` sits under it because it is the same
@@ -563,7 +572,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 949 tests, no network, no dependencies, ~9s
+npm test          # 952 tests, no network, no dependencies, ~9s
 npm run lint      # oxlint over src, bin, hooks, public, test, scripts
 npm run typecheck # tsc --noEmit over src, bin, hooks, public, scripts
 ```
@@ -759,7 +768,7 @@ the [roadmap-workflow skill](.claude/skills/roadmap-workflow/SKILL.md).
 ## Commands
 
 ```sh
-npm test                       # 949 tests, ~9s
+npm test                       # 952 tests, ~9s
 npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above

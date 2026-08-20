@@ -3097,3 +3097,72 @@ test('a crewmate whose decision was overtaken by live work shows nothing', () =>
   assert.equal(rows[0].attention, 'working');
   assert.deepEqual(rows[0].decisions, []);
 });
+
+test('a ruling outranks the idle nudge, because the nudge is what a stopped crewmate produces', () => {
+  // Found by hand-testing the shipped branch. A crewmate that asks for a ruling
+  // stops, and a stopped Claude Code session is exactly what raises the
+  // sixty-second nudge - so the row went red saying "Waiting for you" while its
+  // own chevron offered to show the decisions, and the reader had to go and ask
+  // firstmate what the row meant. That is this feature's own premise inverted.
+  const nudged = {
+    state: 'blocked',
+    message: 'Claude is waiting for your input',
+    notificationType: 'idle_prompt',
+  };
+  assert.equal(attentionFor({ session: nudged, run: null, decisions: 1 }), 'decision');
+  // And with nothing waiting it is still just the nudge.
+  assert.equal(attentionFor({ session: nudged, run: null, decisions: 0 }), 'blocked');
+});
+
+test('a permission prompt still outranks a ruling, even with decisions open', () => {
+  // The line the fix must not cross. A prompt is a gate inside that window which
+  // only that window can clear; a ruling is answered somewhere else entirely.
+  const prompting = {
+    state: 'blocked',
+    message: 'Claude needs your permission to use Bash',
+    notificationType: 'permission_prompt',
+  };
+  assert.equal(attentionFor({ session: prompting, run: null, decisions: 4 }), 'blocked');
+  // A folded pipeline agent's block is a real gate too and is not displaced.
+  assert.equal(
+    attentionFor({
+      session: { state: 'idle' },
+      run: null,
+      agent: { state: 'blocked', activity: null, summary: null, message: 'x', lastActivityAt: null },
+      decisions: 4,
+    }),
+    'blocked',
+  );
+});
+
+test('a ruling row offers no dismiss control and does not repeat the nudge wording', () => {
+  // Two consequences of the row no longer reading `blocked`. The nudge beneath
+  // it is dismissible, but the row now says a decision is waiting and a ruling
+  // cannot be dismissed from Raise at all - answering one is firstmate's, and
+  // this tool does not write to it. A control that looks like it would quieten
+  // the row and cannot is the affordance rule broken where it matters most. And
+  // the nudge's generic wording beside "Waiting on your decision" is a second,
+  // weaker answer to a question the row has already answered.
+  const rows = buildRows({
+    sessions: [
+      session({
+        sessionId: 'crew',
+        cwd: '/Users/x/trees/1/repo',
+        state: 'blocked',
+        stateSince: 1000,
+        blockAnnouncedAt: 1000,
+        message: 'Claude is waiting for your input',
+        notificationType: 'idle_prompt',
+      }),
+    ],
+    branches: new Map(),
+    runs: [],
+    decisions: [decisionTask()],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+  });
+  assert.equal(rows[0].attention, 'decision');
+  assert.equal(rows[0].dismissible, false);
+  assert.equal(rows[0].message, null);
+  // The ruling itself is still on the row, which is the whole point.
+  assert.equal(rows[0].decisions.length, 1);
+});
