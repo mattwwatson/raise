@@ -1574,18 +1574,24 @@
         // off the captain's window is the longest-waiting case this page has, and
         // it would be the only waiting state reduced to "last activity".
         //
-        // **On a ruling row the figure is measured from the nudge, not from the
-        // ruling.** `sessionStateSince` is when Claude Code's sixty-second idle
-        // nudge was recorded - a ruling carries no timestamp of its own in
-        // firstmate's snapshot, so there is nothing else to measure from, and the
-        // figure exists at all only because that nudge fired. It therefore runs
-        // about a minute short of the true wait and must never be read as the
-        // ruling's own age or used to compute one. A number a minute out is worth
-        // far more here than a blank.
+        // **A ruling row is gated on `sessionState`, not on the attention word,
+        // and that is what makes the number true rather than merely available.**
+        // `sessionStateSince` marks a state *transition*, so it is only a wait if
+        // the state that set it is the state the row is still in - read while the
+        // session is `blocked`, nothing has moved it since it entered that block,
+        // and the figure is exactly what it claims. The attention word cannot
+        // carry the same guarantee: `decision` outlives the block that produced
+        // it. The captain's row takes `decision` from a ruling it merely carries
+        // for somebody else while it works away, and a crewmate keeps it through
+        // the held reading after it resumes - both go on transitioning, so the
+        // very thing being measured against is what keeps resetting the mark.
+        // Those rows fall through to "Last activity", which is worth more than a
+        // wait we would be inventing. `review` is deliberately untouched here: its
+        // use of the same field predates this and is a separate question.
         const since =
           row.attention === 'blocked' ||
           row.attention === 'review' ||
-          row.attention === 'decision'
+          (row.attention === 'decision' && row.sessionState === 'blocked')
             ? row.sessionStateSince
             : row.run && row.run.parked
               ? row.run.parkedSince

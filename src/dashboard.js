@@ -271,7 +271,7 @@ export function attentionLabel(attention) {
  * @param {number|null} decisionsPending the crew-wide count, captain's row only
  * @returns {string|null}
  */
-export function decisionsLabel(attention, decisions, decisionsPending) {
+function decisionsLabel(attention, decisions, decisionsPending) {
   if (decisionsPending) return `${decisionsPending} across the crew`;
   if (decisions.length === 0) return null;
   if (decisions.length === 1 && attention === 'decision') return null;
@@ -1353,14 +1353,22 @@ export function buildRows({
         null,
       sessionState,
       sessionStateSince: session.stateSince || null,
-      // The same three states the page times, and kept the same deliberately.
-      // Nothing reads this today, which is exactly why it would rot: it is part
-      // of the Row contract, so the next renderer to pick it up would inherit
-      // whichever omission was left here. On a ruling row it measures from the
-      // idle nudge rather than from the ruling - see the page, which carries the
-      // reason.
+      // The same rows the page times, and kept the same deliberately. Nothing
+      // reads this today, which is exactly why it would rot: it is part of the
+      // Row contract, so the next renderer to pick it up would inherit whichever
+      // omission was left here.
+      //
+      // `stateSince` marks a state *transition*, so it measures a wait only while
+      // the state that set it is still the state the session is in - which is why
+      // a ruling is gated on `sessionState` rather than on the attention word.
+      // `decision` outlives the block underneath it: the captain's row takes it
+      // from a ruling it only carries, and a crewmate keeps it through the held
+      // reading after resuming, and both go on transitioning. Measuring against a
+      // mark the row itself keeps resetting is not a wait.
       waitingForMs:
-        attention === 'blocked' || attention === 'review' || attention === 'decision'
+        attention === 'blocked' ||
+        attention === 'review' ||
+        (attention === 'decision' && sessionState === 'blocked')
           ? now - (session.stateSince || now)
           : null,
       // Offered only while this session's *own* block is what makes the row red.

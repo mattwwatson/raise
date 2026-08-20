@@ -3374,3 +3374,68 @@ test('one ruling on a row that already says so carries no marker', () => {
   });
   assert.equal(many.find((r) => r.sessionId === 'crew').decisionsLabel, '2 open');
 });
+
+test('the captain carrying a ruling for somebody else claims no wait of its own', () => {
+  // The captain is the session running firstmate, so it is working rather than
+  // stopped, and its state goes on transitioning while it holds an unplaced
+  // ruling on somebody else's behalf. `stateSince` moves with every one of those
+  // transitions, so timing the row against it would report a few seconds of wait
+  // for a ruling that may have been open for half an hour. The honest answer is
+  // what the row was doing, not a wait it is not in.
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'captain', cwd: '/Users/x/work/firstmate', stateSince: 20000 }),
+    ],
+    branches: new Map(),
+    runs: [],
+    now: 21000,
+    summaries: new Map([['captain', { lastActivityAt: 9000 }]]),
+    decisions: [
+      decisionTask({
+        id: 'gone',
+        window: 'fm-gone',
+        worktree: '/Users/x/trees/2/gone',
+        decisions: [{ key: 'b', verb: 'needs-decision', summary: 'two' }],
+      }),
+    ],
+    windowNames: new Map(),
+    captainSessionId: 'captain',
+  });
+  const captain = rows.find((r) => r.sessionId === 'captain');
+  assert.equal(captain.attention, 'decision');
+  assert.equal(captain.sessionState, 'working');
+  assert.equal(captain.waitingForMs, null);
+  // What the page falls through to instead, and what its tooltip then names.
+  assert.equal(captain.lastActivityAt, 9000);
+});
+
+test('a crewmate that resumed inside the held reading claims no wait either', () => {
+  // The reading is deliberately held for a while after a crewmate resumes, so
+  // the row keeps its ruling while the session is working again. Its state has
+  // transitioned since the block, which is exactly the moment `stateSince` stops
+  // being a wait - it is now measuring how long the session has been *working*.
+  const rows = buildRows({
+    sessions: [
+      session({
+        sessionId: 'crew',
+        cwd: '/Users/x/trees/1/repo',
+        state: 'working',
+        stateSince: 20000,
+      }),
+    ],
+    branches: new Map(),
+    runs: [],
+    now: 21000,
+    summaries: new Map([['crew', { lastActivityAt: 9000 }]]),
+    decisions: [decisionTask()],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+  });
+  const crew = rows.find((r) => r.sessionId === 'crew');
+  assert.equal(crew.attention, 'decision');
+  assert.equal(crew.sessionState, 'working');
+  assert.equal(crew.waitingForMs, null);
+  assert.equal(crew.lastActivityAt, 9000);
+  // The ruling is still on the row - it is the wait that is not claimed, never
+  // the ruling itself.
+  assert.equal(crew.decisions.length, 1);
+});
