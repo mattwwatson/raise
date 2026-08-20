@@ -505,7 +505,13 @@ Raise puts it on the crewmate's row: **Waiting on your decision**, with the coun
 every open ruling in the expanded panel. Four open on one crewmate is ordinary rather than
 exceptional, so the panel lists all of them and never bounds the list quietly. The captain's own
 row carries the total for the whole crew, because that is the window where a ruling is actually
-given. When there is no captain row to put them on - its window has gone, or firstmate's lock
+given.
+
+**The count rides along wherever the row's own words have not already said it.** A crewmate can
+be holding a ruling and be stopped at a permission prompt, or sitting in a Lavish review, and
+those say **Waiting for you** and **Waiting on your review** instead - so the count appears
+beside them too, and `1 open` next to a red row means exactly what it says. It is dropped only
+where the row already reads **Waiting on your decision**, which has said it. When there is no captain row to put them on - its window has gone, or firstmate's lock
 will not read for a tick or two - the leftovers get a card of their own, **Rulings waiting**, for
 the same reason a pipeline run that cannot be traced to a session does: a ruling shown against
 nobody is still better than a ruling shown against the wrong session, and both beat one quietly

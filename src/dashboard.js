@@ -131,8 +131,14 @@ import { pullRequestKey } from './forge.js';
  *   replaces it with neutral wording
  * @property {import('./registry.js').SessionState|null} sessionState
  * @property {number|null} sessionStateSince
- * @property {number|null} waitingForMs how long it has been waiting on a human,
- *   for the "2m" column - `blocked`, `review` and `decision` alike
+ * @property {number|null} waitingSince the moment this row's wait is measured
+ *   from, or null where it is not waiting - see `waitingSinceFor`. Absolute, so
+ *   a renderer that re-renders on a tick keeps counting between pushes
+ * @property {number|null} waitingForMs the same wait, already elapsed, for a
+ *   renderer that wants the number rather than the mark. Derived from
+ *   `waitingSince` and never decided separately
+ * @property {boolean} wantsYou whether this row's state means a person is the
+ *   one holding it up - see `WANTS_YOU`
  * @property {boolean} dismissible whether this row is announcing a block a human
  *   may say is not owed. Only ever Claude Code's idle nudge - a permission
  *   prompt offers no control at all rather than a control that must not be used
@@ -239,6 +245,56 @@ const ATTENTION_LABELS = {
 /** @param {Attention} attention */
 export function attentionLabel(attention) {
   return ATTENTION_LABELS[attention] || attention;
+}
+
+/**
+ * The levels that mean a person is the one holding a row up.
+ *
+ * The page asks this twice - once per row for the notification, once over the
+ * whole list for the tab title - and it used to answer both by writing the three
+ * words out. This branch then added `decision` to each of them by hand, which is
+ * the drift arriving rather than merely being possible. So the set lives here,
+ * both answers come off it, and the page reads `Row.wantsYou` and
+ * `summary.wantsYou` rather than restating anything.
+ *
+ * `parked` is not in it: a pipeline at a gate is usually answered by the agent
+ * itself, and `failed` is a thing that already happened rather than a thing
+ * waiting.
+ *
+ * @type {Set<string>}
+ */
+const WANTS_YOU = new Set(['blocked', 'review', 'decision']);
+
+/**
+ * The moment a row's wait is measured from, or null where it is not waiting.
+ *
+ * The mark rather than the elapsed figure, because the page re-renders on a tick
+ * and has to keep counting between pushes - `waitingForMs` is derived from this,
+ * so the two cannot answer differently. The page held its own copy of this
+ * condition until it had been edited in step with this one twice, which is the
+ * same reason `decisionsLabel` moved here.
+ *
+ * **A ruling is gated on the session's own state, not on the attention word.**
+ * `stateSince` marks a state *transition*, so it is a wait only while the state
+ * that set it is the state the session is still in: read while `blocked`,
+ * nothing has moved it since the session entered that block. The attention word
+ * carries no such guarantee, because `decision` outlives the block beneath it -
+ * the captain's row takes it from a ruling it merely carries while it works
+ * away, and a crewmate keeps it through the held reading after resuming. Both go
+ * on transitioning, so the mark being measured against is the one the row itself
+ * keeps resetting. Those rows say when they last did something instead, which is
+ * worth more than a wait we would be inventing.
+ *
+ * @param {Attention} attention
+ * @param {import('./registry.js').SessionState|null} sessionState
+ * @param {number|null} stateSince
+ * @param {Run|null} run
+ * @returns {number|null}
+ */
+function waitingSinceFor(attention, sessionState, stateSince, run) {
+  if (attention === 'blocked' || attention === 'review') return stateSince || null;
+  if (attention === 'decision' && sessionState === 'blocked') return stateSince || null;
+  return run?.parked ? run.parkedSince || null : null;
 }
 
 /**
@@ -1290,6 +1346,7 @@ export function buildRows({
       decisions: rowDecisions.length,
     });
     const sessionState = effectiveSessionState(session, summary, pipelineRunning);
+    const rowWaitingSince = waitingSinceFor(attention, sessionState, session.stateSince, run);
     const plan = planFocus(session);
     // The checkout's own branch, and nothing else. A run used to be able to
     // lend its branch to a session sitting in its repo, for a checkout whose
@@ -1353,24 +1410,9 @@ export function buildRows({
         null,
       sessionState,
       sessionStateSince: session.stateSince || null,
-      // The same rows the page times, and kept the same deliberately. Nothing
-      // reads this today, which is exactly why it would rot: it is part of the
-      // Row contract, so the next renderer to pick it up would inherit whichever
-      // omission was left here.
-      //
-      // `stateSince` marks a state *transition*, so it measures a wait only while
-      // the state that set it is still the state the session is in - which is why
-      // a ruling is gated on `sessionState` rather than on the attention word.
-      // `decision` outlives the block underneath it: the captain's row takes it
-      // from a ruling it only carries, and a crewmate keeps it through the held
-      // reading after resuming, and both go on transitioning. Measuring against a
-      // mark the row itself keeps resetting is not a wait.
-      waitingForMs:
-        attention === 'blocked' ||
-        attention === 'review' ||
-        (attention === 'decision' && sessionState === 'blocked')
-          ? now - (session.stateSince || now)
-          : null,
+      waitingSince: rowWaitingSince,
+      waitingForMs: rowWaitingSince === null ? null : now - rowWaitingSince,
+      wantsYou: WANTS_YOU.has(attention),
       // Offered only while this session's *own* block is what makes the row red.
       // A row blocked by its folded pipeline agent reads the same on the page
       // and is not this session's to answer, so the effective state is checked
@@ -1515,6 +1557,7 @@ export function buildRows({
     ).length;
     const agent = agents.get(run.runId) || null;
     const attention = attentionFor({ session: null, run, agent });
+    const runWaitingSince = waitingSinceFor(attention, null, null, run);
     rows.push({
       id: `run:${run.runId}`,
       kind: 'run',
@@ -1530,7 +1573,9 @@ export function buildRows({
       message: attention === 'blocked' ? agent?.message || null : null,
       sessionState: null,
       sessionStateSince: null,
-      waitingForMs: null,
+      waitingSince: runWaitingSince,
+      waitingForMs: runWaitingSince === null ? null : now - runWaitingSince,
+      wantsYou: WANTS_YOU.has(attention),
       // No session behind it, so no announcement anybody could answer.
       dismissible: false,
       dismissed: false,
@@ -1611,7 +1656,9 @@ export function buildRows({
       message: null,
       sessionState: null,
       sessionStateSince: null,
+      waitingSince: null,
       waitingForMs: null,
+      wantsYou: WANTS_YOU.has('untracked'),
       dismissible: false,
       dismissed: false,
       focusable: false,
@@ -1679,7 +1726,9 @@ export function buildRows({
       message: null,
       sessionState: null,
       sessionStateSince: null,
+      waitingSince: null,
       waitingForMs: null,
+      wantsYou: WANTS_YOU.has('decision'),
       // No session announced these, so there is nothing anybody could answer.
       dismissible: false,
       dismissed: false,
@@ -2008,5 +2057,10 @@ export function summarise(rows) {
   const decision = rows.filter((r) => r.attention === 'decision').length;
   const parked = rows.filter((r) => r.attention === 'parked').length;
   const failed = rows.filter((r) => r.attention === 'failed').length;
-  return { blocked, review, decision, parked, failed, total: rows.length };
+  // The tab title's number, off the same set each row's own `wantsYou` comes
+  // from, so the count and the rows behind it cannot say different things about
+  // who is waiting. Asked of the attention rather than of the flag, so a caller
+  // holding only the attention still gets an answer.
+  const wantsYou = rows.filter((r) => WANTS_YOU.has(r.attention)).length;
+  return { blocked, review, decision, parked, failed, wantsYou, total: rows.length };
 }

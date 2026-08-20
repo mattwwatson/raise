@@ -373,7 +373,8 @@ stratified on purpose, so read the whole file rather than one section.
 | a ruling outranks the idle nudge and never a permission prompt, because the nudge is what a stopped crewmate produces | `src/dashboard.js` (`attentionFor`) |
 | a ruling row offers no dismiss control and drops the nudge's wording | `src/dashboard.js` (`buildRows`) |
 | all three ask the condition, never the winning attention word, which is a proxy only while `decision` is the level that wins | `src/dashboard.js` (`blockDefersToRuling`) |
-| `decision` is timed like `blocked` and `review`, from the nudge rather than the ruling - and is left out of `activity` on purpose | `public/index.html` (the card's time stamp), `src/dashboard.js` (`waitingForMs`, `activity`) |
+| a ruling row is timed only while the session's own state is still `blocked`, because `stateSince` marks the transition that set it - and `decision` is left out of `activity` on purpose | `src/dashboard.js` (`waitingSinceFor`, `activity`) |
+| which states mean a person is waiting is one set, and both the row flag and the tab title's count come off it | `src/dashboard.js` (`WANTS_YOU`, `summarise`) |
 | a pi session can never be `blocked`, because pi has no approval gate | `src/registry.js` |
 | a Codex row may go red and will never say why - no `Notification` at all | `src/registry.js` |
 | pi's transcript is normalised, never summarised separately | `src/pi-transcript.js` |
@@ -579,7 +580,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 960 tests, no network, no dependencies, ~9s
+npm test          # 963 tests, no network, no dependencies, ~9s
 npm run lint      # oxlint over src, bin, hooks, public, test, scripts
 npm run typecheck # tsc --noEmit over src, bin, hooks, public, scripts
 ```
@@ -775,7 +776,7 @@ the [roadmap-workflow skill](.claude/skills/roadmap-workflow/SKILL.md).
 ## Commands
 
 ```sh
-npm test                       # 960 tests, ~9s
+npm test                       # 963 tests, ~9s
 npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above

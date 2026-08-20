@@ -1566,36 +1566,14 @@
           a.addEventListener('click', (e) => e.stopPropagation());
           meta.appendChild(a);
         }
-        // Computed from absolute timestamps, not the server's elapsed values, so
-        // the ticking re-render below stays accurate between pushes.
-        // How long it has been waiting on you, which is the number that decides
-        // which row to deal with first. A review waits exactly as visibly as a
-        // permission prompt does, and so does a ruling: a request that scrolled
-        // off the captain's window is the longest-waiting case this page has, and
-        // it would be the only waiting state reduced to "last activity".
-        //
-        // **A ruling row is gated on `sessionState`, not on the attention word,
-        // and that is what makes the number true rather than merely available.**
-        // `sessionStateSince` marks a state *transition*, so it is only a wait if
-        // the state that set it is the state the row is still in - read while the
-        // session is `blocked`, nothing has moved it since it entered that block,
-        // and the figure is exactly what it claims. The attention word cannot
-        // carry the same guarantee: `decision` outlives the block that produced
-        // it. The captain's row takes `decision` from a ruling it merely carries
-        // for somebody else while it works away, and a crewmate keeps it through
-        // the held reading after it resumes - both go on transitioning, so the
-        // very thing being measured against is what keeps resetting the mark.
-        // Those rows fall through to "Last activity", which is worth more than a
-        // wait we would be inventing. `review` is deliberately untouched here: its
-        // use of the same field predates this and is a separate question.
-        const since =
-          row.attention === 'blocked' ||
-          row.attention === 'review' ||
-          (row.attention === 'decision' && row.sessionState === 'blocked')
-            ? row.sessionStateSince
-            : row.run && row.run.parked
-              ? row.run.parkedSince
-              : null;
+        // The absolute mark, never the server's elapsed value, so the ticking
+        // re-render below stays accurate between pushes. Which mark - and which
+        // rows have one at all - is decided once in `dashboard.js`; this page
+        // held its own copy of that condition until the two had been edited in
+        // step twice, so it now only asks whether there is one. See
+        // `waitingSinceFor` for why a ruling row is gated on the session's own
+        // state rather than on its attention word.
+        const since = row.waitingSince;
         // How long it has been waiting is the number that decides what to deal
         // with first, so it keeps the slot on the rows that have one. Every
         // other row shows when it last actually did something instead - which
@@ -1735,12 +1713,11 @@
           p.textContent = text;
           countsEl.appendChild(p);
         }
-        // Every state here means a person is the blocker, so all of them belong
-        // in the count you see from another tab. A firstmate ruling is the one
-        // that was invisible before: the crewmate is stopped, and the request
-        // scrolled off the window it was made in.
-        const wantsYou = (s.blocked || 0) + (s.review || 0) + (s.decision || 0);
-        document.title = wantsYou ? '(' + wantsYou + ') Raise' : 'Raise';
+        // How many rows a person is the blocker on, counted in `dashboard.js`
+        // off the same set each row's own `wantsYou` comes from - so the number
+        // in the tab and the rows behind it cannot disagree. It was two written
+        // -out lists until this branch had to add `decision` to both by hand.
+        document.title = s.wantsYou ? '(' + s.wantsYou + ') Raise' : 'Raise';
         showFavicon();
 
         rowsEl.innerHTML = '';
@@ -1812,19 +1789,11 @@
        * is given in the captain's window, but the crewmate's is where you go to
        * read what it is asking, so it is focused like any other stopped session.
        */
-      function wantsYou(row) {
-        return (
-          row.attention === 'blocked' ||
-          row.attention === 'review' ||
-          row.attention === 'decision'
-        );
-      }
-
       function notifyOnNewlyBlocked(rows) {
-        const waiting = new Set(rows.filter(wantsYou).map((r) => r.id));
+        const waiting = new Set(rows.filter((r) => r.wantsYou).map((r) => r.id));
         if (hasNotifications() && Notification.permission === 'granted') {
           for (const row of rows) {
-            if (!wantsYou(row) || lastBlocked.has(row.id)) continue;
+            if (!row.wantsYou || lastBlocked.has(row.id)) continue;
             const review = row.attention === 'review';
             const decision = row.attention === 'decision';
             const firstDecision = (row.decisions || [])[0];

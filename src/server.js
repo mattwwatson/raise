@@ -105,8 +105,9 @@ export function writeFrame(client, frame, onError) {
  * change comparison means a blocked session or a parked run - precisely the
  * states this tool exists for - pushes a full frame and a full DOM rebuild once
  * a second, forever. The page renders elapsed time from the absolute
- * `sessionStateSince`/`parkedSince` instead, so nothing is lost by ignoring
- * them here. Any future elapsed field belongs in this set.
+ * `waitingSince` instead - which is where the row already decided *whether* it
+ * is waiting, so nothing is lost by ignoring the elapsed pair here. Any future
+ * elapsed field belongs in this set.
  */
 const VOLATILE_FIELDS = new Set(['generatedAt', 'waitingForMs', 'parkedForMs']);
 

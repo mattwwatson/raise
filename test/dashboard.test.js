@@ -924,6 +924,9 @@ test('summarise counts what the tab title and alerts need', () => {
     decision: 1,
     parked: 1,
     failed: 0,
+    // The three above that mean a person is the blocker, off the one set the
+    // rows carry too - this is what the tab title shows.
+    wantsYou: 4,
     total: 6,
   });
 });
@@ -3438,4 +3441,112 @@ test('a crewmate that resumed inside the held reading claims no wait either', ()
   // The ruling is still on the row - it is the wait that is not claimed, never
   // the ruling itself.
   assert.equal(crew.decisions.length, 1);
+});
+
+test('the row carries the mark its wait is measured from, and null where there is none', () => {
+  // One field, because the page and `waitingForMs` used to be two copies of the
+  // same condition and this branch edited both by hand twice. The page needs the
+  // absolute mark rather than the elapsed figure, so the mark is what the row
+  // carries and the elapsed figure is derived from it.
+  const waiting = buildRows({
+    sessions: [
+      session({
+        sessionId: 'crew',
+        cwd: '/Users/x/trees/1/repo',
+        state: 'blocked',
+        stateSince: 1000,
+        blockAnnouncedAt: 1000,
+        message: 'Claude is waiting for your input',
+        notificationType: 'idle_prompt',
+      }),
+    ],
+    branches: new Map(),
+    runs: [],
+    now: 21000,
+    decisions: [decisionTask()],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+  }).find((r) => r.sessionId === 'crew');
+  assert.equal(waiting.attention, 'decision');
+  assert.equal(waiting.waitingSince, 1000);
+  // Derived, so the two can never name different moments.
+  assert.equal(waiting.waitingForMs, 20000);
+
+  // The captain carrying somebody else's ruling while it works away, and a
+  // crewmate that resumed inside the held reading: neither is in a block, so
+  // neither has a mark.
+  const notWaiting = buildRows({
+    sessions: [
+      session({ sessionId: 'captain', cwd: '/Users/x/work/firstmate', stateSince: 20000 }),
+      session({
+        sessionId: 'crew',
+        cwd: '/Users/x/trees/1/repo',
+        state: 'working',
+        stateSince: 20000,
+      }),
+    ],
+    branches: new Map(),
+    runs: [],
+    now: 21000,
+    decisions: [
+      decisionTask(),
+      decisionTask({
+        id: 'gone',
+        window: 'fm-gone',
+        worktree: '/Users/x/trees/2/gone',
+        decisions: [{ key: 'b', verb: 'needs-decision', summary: 'two' }],
+      }),
+    ],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+    captainSessionId: 'captain',
+  });
+  for (const id of ['captain', 'crew']) {
+    const row = notWaiting.find((r) => r.sessionId === id);
+    assert.equal(row.attention, 'decision', `${id} still holds its ruling`);
+    assert.equal(row.waitingSince, null, `${id} claims no wait`);
+    assert.equal(row.waitingForMs, null, `${id} derives no figure either`);
+  }
+});
+
+test('a parked pipeline is timed from the gate, on the same field', () => {
+  // The page has always fallen through to the parked mark for a row with no
+  // block of its own, and folding that in is what makes one field enough. It was
+  // the half of the condition `waitingForMs` never carried, so the two disagreed
+  // about this row until they became one answer.
+  const rows = buildRows({
+    sessions: [],
+    branches: new Map(),
+    runs: [run({ parked: true, parkedSince: 900 })],
+    now: 1900,
+  });
+  assert.equal(rows[0].attention, 'parked');
+  assert.equal(rows[0].waitingSince, 900);
+  assert.equal(rows[0].waitingForMs, 1000);
+});
+
+test('the tab title count and the rows behind it come off one set', () => {
+  // Two written-out lists on the page until this branch added `decision` to both
+  // by hand. Asserted as the same answer rather than as arithmetic: the summary's
+  // number must be the number of rows that say they want you, whatever the set
+  // happens to contain.
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'blocked', cwd: '/Users/x/work/a', state: 'blocked', stateSince: 1 }),
+      session({ sessionId: 'crew', cwd: '/Users/x/trees/1/repo' }),
+      session({ sessionId: 'busy', cwd: '/Users/x/work/c' }),
+    ],
+    branches: new Map(),
+    runs: [],
+    summaries: new Map([['busy', { lavishFile: '/p.html' }]]),
+    decisions: [decisionTask()],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+  });
+  assert.deepEqual(
+    rows.filter((r) => r.wantsYou).map((r) => r.attention).sort(),
+    ['blocked', 'decision', 'review'],
+  );
+  assert.equal(summarise(rows).wantsYou, rows.filter((r) => r.wantsYou).length);
+  // And a row nobody is waiting on says so rather than being left undefined.
+  const quiet = buildRows({ sessions: [session()], branches: new Map(), runs: [] });
+  assert.equal(quiet[0].wantsYou, false);
+  assert.equal(summarise(quiet).wantsYou, 0);
 });
