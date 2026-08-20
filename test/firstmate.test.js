@@ -358,7 +358,22 @@ test('only a read that threw is unreadable - everything a lock contains is an an
   // none of them needs a case of its own. Four rounds of review narrowed a
   // predicate about lock text and each narrowing let a different shape through,
   // so there is no predicate left to walk past.
-  for (const text of ['', '   \n', 'held-by=some-other-tool\n', '  ']) {
+  //
+  // The last case is two NUL bytes and they are written as escapes, never typed
+  // in literally. The runtime value is identical either way, so this is not
+  // about what the test asserts - it is about the file staying searchable, and
+  // the literal form must not come back. Literal NULs make `file(1)` report this
+  // source file as `data` and make a plain `grep -r` skip it *silently*: no
+  // warning, no mention, just absent from the results. This repository is
+  // public and its diffs get swept for content that must not be published;
+  // whoever runs that sweep next will reach for grep, and a file grep quietly
+  // skipped hands them a clean result that is not true. A false clean is worse
+  // than a failed sweep, because a failure gets investigated and a clean one
+  // ends the search. That is how this was found, and it generalises: the sweep
+  // is only worth trusting if it can read every file it claims to have covered,
+  // so a fixture that makes part of the tree unreadable to ordinary tools
+  // undermines the check rather than just being untidy.
+  for (const text of ['', '   \n', 'held-by=some-other-tool\n', '\0\0']) {
     assert.equal(
       new FirstmateWatch({ files: files({ [path]: text }) }).lockUnreadableAt(home),
       false,
