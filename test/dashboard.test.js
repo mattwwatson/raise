@@ -3179,10 +3179,13 @@ test('a crewmate that stopped for a ruling and drew the idle nudge still reads a
   // became correct after he answered the ruling, at the moment it stopped being
   // true.
   //
-  // The two assertions are in one test on purpose. Either one passed before the
-  // fix: the row already carried the decisions, and the decision wording already
-  // existed. What it never had was both at once, so the pair is the regression
-  // and splitting them would let it come back between two green tests.
+  // The two assertions are in one test on purpose, and they do not discriminate
+  // equally. The decisions assertion passed before the fix - the row carried them
+  // all along, which is exactly why the chevron offered them. The label assertion
+  // did not: with `blocked` returning first the row read the generic waiting
+  // wording, so that assertion is the regression and reverting the ranking fails
+  // it. They stay together because the defect was the two disagreeing on one row,
+  // and either alone lets that come back between two green tests.
   const rows = buildRows({
     sessions: [
       session({
@@ -3205,4 +3208,40 @@ test('a crewmate that stopped for a ruling and drew the idle nudge still reads a
   assert.equal(crew.attentionLabel, 'Waiting on your decision');
   // And what the chevron was offering all along, on the same row at the same time.
   assert.deepEqual(crew.decisions, [{ key: 'k1', verb: 'needs-decision', summary: 'which option' }]);
+});
+
+test('a ruling row that also has a Lavish poll open still offers no dismiss control', () => {
+  // The combination the ruling rule made reachable and the winning attention
+  // word did not cover. The block defers to the ruling, so the row falls past
+  // `blocked` - and a live Lavish poll then takes `review` before `decision` is
+  // reached, which was impossible while `blocked` returned first. Gated on the
+  // word rather than the condition, this row kept a `Not for me` button whose
+  // tooltip promises it will drop to Idle, on a row that would stay
+  // "Waiting on your review" after the click because the poll decides the level.
+  const rows = buildRows({
+    sessions: [
+      session({
+        sessionId: 'crew',
+        cwd: '/Users/x/trees/1/repo',
+        state: 'blocked',
+        stateSince: 1000,
+        blockAnnouncedAt: 1000,
+        message: 'Claude is waiting for your input',
+        notificationType: 'idle_prompt',
+      }),
+    ],
+    branches: new Map(),
+    runs: [],
+    summaries: new Map([
+      ['crew', { title: 't', mode: null, activity: null, lavishFile: '/p.html' }],
+    ]),
+    decisions: [decisionTask()],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+  });
+  const crew = rows.find((r) => r.sessionId === 'crew');
+  assert.equal(crew.attention, 'review');
+  assert.equal(crew.dismissible, false);
+  assert.equal(crew.message, null);
+  // The ruling is still on the row, waiting behind the review.
+  assert.equal(crew.decisions.length, 1);
 });

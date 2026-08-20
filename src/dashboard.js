@@ -744,6 +744,39 @@ export function isDismissibleBlock(session) {
 }
 
 /**
+ * Whether this session's recorded block should defer to an open firstmate ruling.
+ *
+ * A crewmate that has asked for a ruling has stopped, and a stopped Claude Code
+ * session is exactly what produces the sixty-second nudge - so the nudge is the
+ * symptom and the ruling is the cause. Where both are present the ruling is the
+ * answer worth giving, and everything the block would otherwise have put on the
+ * row defers to it: the attention level in `attentionFor`, and in `buildRows`
+ * the nudge's own wording and the `Not for me` control.
+ *
+ * **Three callers, one definition, and the condition rather than the winning
+ * attention word.** `attention !== 'decision'` looks like the same test and is
+ * only an exact one while `decision` is the level that happens to win. It was
+ * not: a ruling row also carrying a live Lavish poll falls past `blocked`,
+ * lands on `review`, and the proxy then reads true - so the row kept a control
+ * promising to quieten it and could not, which is the affordance rule broken in
+ * the same place this rule exists to protect. Reordering the levels or adding
+ * one would detach the two row fields from the rule again with nothing failing,
+ * and that is the ordering defect this whole change was made to remove, one
+ * layer up. Ask the condition.
+ *
+ * A permission prompt is never deferred: `isIdleNudge` fails closed, so an
+ * unrecognised notification type stays a hard block, and a gate only that window
+ * can clear is not something a ruling elsewhere may quieten.
+ *
+ * @param {{message?: string|null, notificationType?: string|null}|null} session
+ * @param {number} decisions the open rulings joined to this row
+ * @returns {boolean}
+ */
+export function blockDefersToRuling(session, decisions) {
+  return decisions > 0 && isIdleNudge(session?.message, session?.notificationType);
+}
+
+/**
  * Whether a dismissal is the thing keeping this session quiet.
  *
  * This is the dismissal branch of `effectiveSessionState` on its own, because
@@ -919,22 +952,14 @@ export function attentionFor({
 }) {
   const state = effectiveSessionState(session, summary, pipelineRunning);
   // **An open ruling outranks the idle nudge, and never a permission prompt.**
-  // A crewmate that has asked for a ruling has stopped, and a stopped Claude
-  // Code session is exactly what produces the sixty-second nudge - so the nudge
-  // is the symptom and the ruling is the cause. Letting it win says "Waiting for
-  // you", which is true and useless: the row is holding the specific answer and
-  // refusing to give it, and the reader has to go and ask somebody what the row
-  // meant. That is the failure this whole feature exists to remove, reintroduced
-  // one level up. Observed on the first hand-test of it.
-  //
-  // A permission prompt is different in kind - a gate inside that window which
-  // only that window can clear - so it still wins, and a folded pipeline agent's
-  // block below still wins for the same reason. `isIdleNudge` already draws this
-  // exact line for the running-pipeline case in `effectiveSessionState`; this is
-  // the same rule with a different disprover.
-  const rulingOverNudge =
-    decisions > 0 && isIdleNudge(session?.message, session?.notificationType);
-  if (state === 'blocked' && !rulingOverNudge) return 'blocked';
+  // Letting the nudge win says "Waiting for you", which is true and useless: the
+  // row is holding the specific answer and refusing to give it, and the reader
+  // has to go and ask somebody what the row meant. That is the failure this whole
+  // feature exists to remove, reintroduced one level up. Observed on the first
+  // hand-test of it. The reason it is asked as a condition, and what defers with
+  // it, are at `blockDefersToRuling`; a folded pipeline agent's block below is a
+  // real gate and still wins.
+  if (state === 'blocked' && !blockDefersToRuling(session, decisions)) return 'blocked';
   if (agent?.state === 'blocked') return 'blocked';
   if (session && summary?.lavishFile) return 'review';
   if (decisions > 0) return 'decision';
@@ -1275,12 +1300,13 @@ export function buildRows({
       // dialog as a permission prompt, so the specific claim is only safe to
       // repeat for the kinds it can actually tell apart. The agent's message
       // has already been through it where it was built.
-      // Suppressed on a ruling row even though the session's own state is still
-      // `blocked`: the nudge's generic wording beside "Waiting on your decision"
-      // is a second, weaker answer to the question the row has already answered,
-      // and the ruling's own words are in the panel. One answer per fact.
+      // Suppressed where the block defers to a ruling even though the session's
+      // own state is still `blocked`: the nudge's generic wording beside the
+      // ruling is a second, weaker answer to a question the row has already
+      // answered, and the ruling's own words are in the panel. One answer per
+      // fact.
       message:
-        (sessionState === 'blocked' && attention !== 'decision'
+        (sessionState === 'blocked' && !blockDefersToRuling(session, rowDecisions.length)
           ? blockReason(session.message, session.notificationType)
           : null) ||
         (attention === 'blocked' ? agent?.message : null) ||
@@ -1295,13 +1321,15 @@ export function buildRows({
       // A row blocked by its folded pipeline agent reads the same on the page
       // and is not this session's to answer, so the effective state is checked
       // rather than the attention.
-      // Never on a ruling row. The nudge underneath it is dismissible, but the
-      // row now says a decision is waiting and a ruling cannot be dismissed from
-      // here - answering one is firstmate's, and Raise does not write to it. A
-      // control that looks like it would quieten this row and cannot is the
-      // affordance rule broken exactly where it matters most.
+      // Never where the block defers to a ruling. The nudge underneath it is
+      // dismissible, but a ruling cannot be dismissed from here - answering one
+      // is firstmate's, and Raise does not write to it - so a control that looks
+      // like it would quieten this row and cannot is the affordance rule broken
+      // exactly where it matters most.
       dismissible:
-        sessionState === 'blocked' && attention !== 'decision' && isDismissibleBlock(session),
+        sessionState === 'blocked' &&
+        !blockDefersToRuling(session, rowDecisions.length) &&
+        isDismissibleBlock(session),
       // Said out loud on an idle row, because the difference between "nothing is
       // waiting" and "I told it to stop saying so" is exactly the difference
       // this page cannot afford to blur. It is that sentence and nothing else,
