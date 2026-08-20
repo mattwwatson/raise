@@ -342,7 +342,7 @@ decisions standing for ever. The schema id is checked exactly, and a schema we h
 counts as `null`: `open_decisions` being *reconciled* is a property of this version, and a later
 one could keep the field and move that work elsewhere.
 
-**The cost gate is four rules, not the three the brief above prescribes.** The snapshot was
+**The cost gate is five rules, not the three the brief above prescribes.** The snapshot was
 re-measured at **13.7s** on the day it was built, against the 3.5s recorded above - same machine,
 same command, four times the cost - so the gating matters more than it looked. The three
 prescribed rules are all there: re-run only when a `state/*.status` mtime moves, fire and never
@@ -356,6 +356,16 @@ confident stale alarm this item's own evidence warns about. So a reading that is
 something is re-taken after five minutes even if nothing moved; a reading asserting nothing
 never is, because opening a decision always writes a status line. Cheap where it does not
 matter, honest where it does.
+
+**The fifth is `MAX_CONSECUTIVE_FAILURES`, added in review**, because a ceiling only helps if a
+reading can arrive. A snapshot that always fails - a schema we refuse by design, the script
+renamed by an upgrade, output past `exec.js`'s cap - or a captain lock that is there and will not
+read would otherwise leave the assertion standing for the life of the process while a
+fourteen-second bash ran to keep it looking fresh. So three consecutive non-answers drop the
+reading rather than holding it, every kind of non-answer counts on the same counter, and while
+that counter is above zero the ceiling re-dispatches whether or not anything is asserted - a
+stopped crewmate writes no status line, so recovery may not wait for one. The reasoning is in
+`src/firstmate-decisions.js`'s header, which owns it.
 
 `FM_SNAPSHOT_SECONDMATES=0` was measured as an alternative to a `--decisions-only` mode, since
 it is a supported bound the script validates and defaults itself. It saves 0.9s of 14.6s - the

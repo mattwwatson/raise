@@ -505,7 +505,11 @@ Raise puts it on the crewmate's row: **Waiting on your decision**, with the coun
 every open ruling in the expanded panel. Four open on one crewmate is ordinary rather than
 exceptional, so the panel lists all of them and never bounds the list quietly. The captain's own
 row carries the total for the whole crew, because that is the window where a ruling is actually
-given.
+given. When there is no captain row to put them on - its window has gone, or firstmate's lock
+will not read for a tick or two - the leftovers get a card of their own, **Rulings waiting**, for
+the same reason a pipeline run that cannot be traced to a session does: a ruling shown against
+nobody is still better than a ruling shown against the wrong session, and both beat one quietly
+dropped.
 
 It comes from firstmate's own `fm-fleet-snapshot.sh --json`, and **the transcript is never read
 and no prose is ever matched.** A phrase that turns up in ordinary conversation would put a
@@ -521,8 +525,9 @@ Two things are worth knowing about the cost, because it is the one real constrai
   14s on the same machine - and Raise runs it off to one side, normally only when a crewmate has
   written to its own event log since the last reading. The exceptions are the two states where
   that is not enough to trust what is on the page: while a ruling is being shown, and while
-  readings are failing, it is re-taken every few minutes as well. The page updates on the next
-  tick.
+  readings are failing, it is re-taken every few minutes as well. If those readings keep failing
+  the rulings come off the page rather than sitting there looking current, and they come back the
+  moment a reading arrives. The page updates on the next tick.
 - **`raise status` does wait**, because a one-shot command has no later tick to answer on and
   printing before the answer arrives would mean printing a wrong one. So on a machine where
   firstmate is running, `raise status` takes about as long as the snapshot does, and says so
