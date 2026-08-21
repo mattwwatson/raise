@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import {
   ASSERTION_MAX_AGE_MS,
   CAPTAIN_UNREADABLE,
-  FAILURE_RETRY_MS,
   FirstmateDecisions,
   MAX_CONSECUTIVE_FAILURES,
   REFRESH_MS,
@@ -193,15 +192,14 @@ test('the snapshot is run once and then not again until a status log moves', asy
 
   // Past the floor and short of the ceiling, derived from the two constants
   // rather than written as a multiple of one of them. This used to read
-  // `REFRESH_MS * 5`, which satisfied the comment above it until
-  // ASSERTION_MAX_AGE_MS came down from five minutes to ninety seconds - at
-  // which point the number was past the ceiling, the read this test says must
-  // not happen happened, and only the comment still described the intent. The
-  // relationship belongs in the code, and the guard is on the two instants this
-  // test actually uses rather than on the constants merely being ordered: with
-  // a gap of one or two between them `quiet + 1` lands on the ceiling, the
-  // second read happens because the clock ran out rather than because the mtime
-  // moved, and the assertion below passes for the wrong reason.
+  // `REFRESH_MS * 5`, which sat in the window only by coincidence of the two
+  // values: move either constant and that number can land past the ceiling, at
+  // which point the read this test says must not happen happens and only the
+  // comment still describes the intent. The guard is on the two instants the
+  // test actually uses rather than on the constants merely being ordered - with
+  // a gap of one or two, `quiet + 1` lands on the ceiling and the second read
+  // happens because the clock ran out rather than because the mtime moved,
+  // which passes for the wrong reason.
   const quiet = REFRESH_MS + Math.floor((ASSERTION_MAX_AGE_MS - REFRESH_MS) / 2);
   assert.ok(
     quiet >= REFRESH_MS && quiet + 1 < ASSERTION_MAX_AGE_MS,
@@ -285,12 +283,6 @@ test('while decisions are open the reading is re-taken even if no status log mov
   assert.equal(runs, 1);
   assert.equal(decisions.tasks.some((t) => t.decisions.length > 0), true);
 
-  // The instant short of the ceiling has to be past the floor as well, or it is
-  // the floor refusing the read and this test proves nothing about the ceiling.
-  assert.ok(
-    ASSERTION_MAX_AGE_MS - 1 >= REFRESH_MS,
-    'the instant short of the ceiling is inside the floor - this test cannot mean anything',
-  );
   decisions.refresh(HOME, ASSERTION_MAX_AGE_MS - 1);
   await settle();
   assert.equal(runs, 1);
@@ -354,8 +346,8 @@ test('a failing or empty snapshot leaves the previous reading in place', async (
 test('a snapshot that can never succeed eventually drops the reading it was holding', async () => {
   // The other half of `ASSERTION_MAX_AGE_MS`. The ceiling re-dispatches, and a
   // re-dispatch that always fails replaces nothing - so the assertion would
-  // stand for the life of the process while a fourteen-second bash ran on the
-  // ceiling to keep it looking fresh. An assertion may not outlive its
+  // stand for the life of the process while a fourteen-second bash ran every
+  // thirty seconds to keep it looking fresh. An assertion may not outlive its
   // evidence, and this is the reachable case: a schema bump we refuse by
   // design, the script renamed by an upgrade, or output past `exec.js`'s 1MB
   // cap.
@@ -398,17 +390,15 @@ test('a snapshot that can never succeed eventually drops the reading it was hold
   // will write nothing further, so a gate that waits for a write is a gate that
   // never opens and the crewmate is a quiet card again for good.
   const dropped = runs;
-  at += REFRESH_MS;
+  at += ASSERTION_MAX_AGE_MS;
   decisions.refresh(HOME, at);
   await settle();
   assert.equal(runs, dropped + 1, 'a failing state keeps trying with no status file moving');
   assert.deepEqual(decisions.tasks, [], 'and holds nothing while it does');
 
-  // And a snapshot that starts working again restores the reading on its own -
-  // on the settled interval, the eager attempt a drop is entitled to having
-  // been paid and failed one line above.
+  // And a snapshot that starts working again restores the reading on its own.
   answer = fleetSnapshotJson();
-  at += FAILURE_RETRY_MS;
+  at += ASSERTION_MAX_AGE_MS;
   decisions.refresh(HOME, at);
   await settle();
   assert.equal(decisions.tasks.length, 3, 'the reading comes back when the snapshot does');
@@ -426,99 +416,6 @@ test('a snapshot that can never succeed eventually drops the reading it was hold
   await settle();
   assert.equal(runs, healthy, 'healthy and asserting nothing pays no ceiling');
 });
-
-test('a transient failure gets one eager attempt straight after the drop', async () => {
-  // A drop cannot tell a transient failure from a permanent one, and the two
-  // want opposite treatment. The transient case is the expensive one to get
-  // wrong: a busy machine times three snapshots out, a real ruling leaves the
-  // page, the load then clears with nobody involved, and nothing a stopped
-  // crewmate does will reopen the mtime gate - so the attempt straight after
-  // the drop is the only thing that puts the ruling back, and it waits for
-  // nothing but the floor.
-  assert.ok(
-    REFRESH_MS < FAILURE_RETRY_MS,
-    'the eager attempt is not sooner than the settled one - this test cannot mean anything',
-  );
-  let failing = false;
-  let runs = 0;
-  const decisions = new FirstmateDecisions({
-    execAsync: async () => {
-      runs += 1;
-      if (failing) throw new Error('bash: timed out');
-      return fleetSnapshotJson();
-    },
-    files: files({ mtimes: { 'crew.status': 1 } }),
-  });
-  decisions.refresh(HOME, 0);
-  await settle();
-  assert.equal(decisions.tasks.length, 3);
-
-  failing = true;
-  let at = 0;
-  for (let failure = 1; failure <= MAX_CONSECUTIVE_FAILURES; failure += 1) {
-    at += ASSERTION_MAX_AGE_MS;
-    decisions.refresh(HOME, at);
-    await settle();
-  }
-  assert.deepEqual(decisions.tasks, [], 'the timeouts drop the reading');
-  const dropped = runs;
-
-  failing = false;
-  decisions.refresh(HOME, at + REFRESH_MS);
-  await settle();
-  assert.equal(runs, dropped + 1, 'the attempt after a drop waits only for the floor');
-  assert.equal(decisions.tasks.length, 3, 'so a ruling that is still open is back on the page');
-});
-
-test('an eager attempt that fails as well backs off to the settled interval', async () => {
-  // The other half of the same policy, and the half that pays for it. A
-  // permanent failure fails on the eager attempt too, so repeating that attempt
-  // is a fourteen-second bash for ever on a machine that is already broken and
-  // that nothing warns about. Paying it once and then backing off is what makes
-  // the policy right for a failure whose kind we cannot know.
-  assert.ok(
-    REFRESH_MS <= ASSERTION_MAX_AGE_MS && ASSERTION_MAX_AGE_MS < FAILURE_RETRY_MS,
-    'no window between the eager attempt and the settled one - this test cannot mean anything',
-  );
-  let failing = false;
-  let runs = 0;
-  const decisions = new FirstmateDecisions({
-    execAsync: async () => {
-      runs += 1;
-      if (failing) throw new Error('bash: no such file or directory');
-      return fleetSnapshotJson();
-    },
-    files: files({ mtimes: { 'crew.status': 1 } }),
-  });
-  decisions.refresh(HOME, 0);
-  await settle();
-  assert.equal(decisions.tasks.length, 3);
-
-  failing = true;
-  let at = 0;
-  for (let failure = 1; failure <= MAX_CONSECUTIVE_FAILURES; failure += 1) {
-    at += ASSERTION_MAX_AGE_MS;
-    decisions.refresh(HOME, at);
-    await settle();
-  }
-  assert.deepEqual(decisions.tasks, [], 'the reading has been dropped');
-
-  at += REFRESH_MS;
-  decisions.refresh(HOME, at);
-  await settle();
-  const backedOff = runs;
-
-  // Past the floor, and past the interval an assertion would have been re-read
-  // on, so it is the retry rather than the floor refusing this one.
-  decisions.refresh(HOME, at + ASSERTION_MAX_AGE_MS);
-  await settle();
-  assert.equal(runs, backedOff, 'the eager attempt is paid once and not again');
-
-  decisions.refresh(HOME, at + FAILURE_RETRY_MS);
-  await settle();
-  assert.equal(runs, backedOff + 1, 'and the settled interval is what governs after it');
-});
-
 
 test('a captain lock we could not read is counted like any other missed reading', async () => {
   // The route that used to have no ceiling on it at all: the caller skipped the
@@ -555,9 +452,9 @@ test('a captain lock we could not read is counted like any other missed reading'
   await settle();
   assert.deepEqual(decisions.tasks, [], 'past the ceiling the assertion is let go of');
 
-  // A lock that reads again recovers by the ordinary route, on the eager
-  // attempt a drop is entitled to and with no status file moving.
-  at += REFRESH_MS;
+  // A lock that reads again recovers by the ordinary route, on the ceiling and
+  // with no status file moving.
+  at += ASSERTION_MAX_AGE_MS;
   decisions.refresh(HOME, at);
   await settle();
   assert.equal(decisions.tasks.length, 3);
@@ -586,8 +483,8 @@ test('a tick that dispatched nothing does not swallow the write it saw', async (
   // The signature records the status files a *reading* covers, so a tick that
   // ran no snapshot has covered nothing. Consuming it there loses the one write
   // that would have opened the gate: a crewmate opens a decision during a
-  // two-second lock blip, and the ruling then waits on the ceiling instead of
-  // arriving as soon as the lock reads again.
+  // two-second lock blip, and the ruling then waits on the five-minute ceiling
+  // instead of arriving as soon as the lock reads again.
   let runs = 0;
   const mtimes = { 'crew.status': 1 };
   const decisions = new FirstmateDecisions({
