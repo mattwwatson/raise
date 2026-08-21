@@ -90,7 +90,42 @@
  * path, and a reading dropped that then never retried on another. The failure
  * kinds may differ in what they say; they must not differ in what they decide.
  *
- * **Nothing here goes looking for firstmate.** The home is the captain
+ * **The sixth rule is a crewmate resuming, and it exists because the ceiling
+ * was the wrong lever.** A ruling is answered in the captain's window, and what
+ * clears it here is firstmate noticing the crewmate has moved past it - which
+ * writes no status line, so the mtime gate is blind to it and the ceiling is
+ * all that is left. Shortening the ceiling was tried on issue 25 and reverted
+ * the same day: it is shared with the failure path, so it buys a faster clear
+ * on a quiet fleet by paying a permanent subprocess on every machine where the
+ * snapshot is failing. The event itself is cheap to watch instead. A crewmate
+ * stopped on a ruling writes nothing; one that has resumed writes to its own
+ * transcript, and the poll already stats every transcript it can see. So a
+ * change in that stat re-asks firstmate.
+ *
+ * **It watches only what firstmate itself named, and only a stat.** The
+ * observation is the tmux window a session sits in and an opaque value that
+ * changes when its transcript does - never a byte of what the transcript says,
+ * which would be indirect evidence asserting a human gate all over again. The
+ * window is matched against the `fm-<id>` name firstmate pinned and against
+ * nothing else: `dashboard.js` will also place a ruling by worktree, and that
+ * join is a containment test any session sitting under the path satisfies -
+ * including the person who opened their own agent in there to read what the
+ * crewmate is asking, whose session is busy for as long as they are looking. A
+ * trigger that fires wrongly costs a subprocess every cycle for as long as the
+ * ruling is open; one that fires late costs the behaviour that was already
+ * there. So this takes the narrow join and accepts being late on the wide one.
+ *
+ * **It is switched off while a run of failures is standing, and that is what
+ * keeps it out of the `moved` bypass.** `moved` dispatches without ever
+ * consulting `aged`, so the ceiling and every failure interval are invisible to
+ * it - which is how the backoff attempted on issue 25 came to have no effect on
+ * the path it was written for. A trigger merely OR-ed into the same gate
+ * inherits that. This one asks `#failures` first, so while the snapshot is
+ * failing the ceiling is the only cadence that can dispatch, exactly as it was
+ * before this existed. The bypass on `moved` is older than any of this work and
+ * is deliberately left where it is; the rule here is that nothing new joins it.
+ *
+  * **Nothing here goes looking for firstmate.** The home is the captain
  * session's own `cwd`, and the captain is identified by `src/firstmate.js` from
  * the lock holding that session's agent pid. A machine without firstmate has no
  * lock, so this is never called, no subprocess runs and nothing is said.
@@ -192,8 +227,9 @@ export const CAPTAIN_UNREADABLE = Symbol('firstmate captain unreadable');
  * of a stopped crewmate reappearing the moment it can rather than never.
  *
  * That bypass is pre-existing rather than a consequence of anything here, and
- * it is recorded on issue 28 rather than fixed: a new dispatch trigger that
- * simply ORs into the same gate would inherit it.
+ * issue 28 left it alone rather than fixing it. What issue 28 did add is a
+ * second trigger, and the count above is what bounds it: a resume may only
+ * dispatch while this is zero - see the sixth rule in the header.
  */
 export const MAX_CONSECUTIVE_FAILURES = 3;
 
@@ -238,6 +274,24 @@ const SNAPSHOT_TIMEOUT_MS = 60000;
  * @property {{target?: string}} [endpoint]
  * @property {{worktree?: {path?: string|null}}} [paths]
  * @property {{open_decisions?: unknown[]}} [hints]
+ */
+
+/**
+ * One session as the poll loop can see it, for the resume trigger and nothing
+ * else.
+ *
+ * Two fields because two is all the trigger may know. `window` is the tmux
+ * window name, which is how a session is recognised as a named crewmate -
+ * `endpoint.target` publishes the same name. `stamp` is an opaque value that
+ * changes when the session's transcript does; it is compared with a previous
+ * one and never parsed, so nothing here can come to depend on what a session
+ * wrote.
+ *
+ * @typedef {object} CrewObservation
+ * @property {string|null} window
+ * @property {string|null} stamp null where there was no transcript to stat,
+ *   which is the absence of an observation rather than an observation of no
+ *   change
  */
 
 /**
@@ -360,6 +414,11 @@ export class FirstmateDecisions {
    * because what matters is that a crewmate wrote something, not when.
    */
   #signature = null;
+  /**
+   * What the crewmates named by the standing reading looked like when we last
+   * looked at them, or null when the reading names none - see `#crewSignature`.
+   */
+  #crew = null;
   /** null means never asked, which is not the same as asked long ago. */
   #at = null;
   #reading = false;
@@ -424,11 +483,19 @@ export class FirstmateDecisions {
    * does, on the same cadence a dispatch would have used. That is what stops it
    * being the one path with no ceiling on it.
    *
+   * **`crew` is the sixth rule arriving from the caller**, because only the poll
+   * loop knows which sessions exist and what their transcripts look like. It is
+   * a list of observations rather than a question: which windows matter is
+   * decided here, against the standing reading, so a caller cannot widen what
+   * the trigger watches by handing over more of them.
+   *
    * @param {string|null|typeof CAPTAIN_UNREADABLE} home `$FM_HOME`, null when
    *   there is no captain, or `CAPTAIN_UNREADABLE` when we could not tell
    * @param {number} [now]
+   * @param {CrewObservation[]} [crew] every session the caller can see, so the
+   *   ones this reading names as stopped can be watched for a resume
    */
-  refresh(home, now = Date.now()) {
+  refresh(home, now = Date.now(), crew = []) {
     if (!this.#execAsync) return;
     const unreadable = home === CAPTAIN_UNREADABLE;
     // One value for "no captain", so an `undefined` from a caller reading an
@@ -443,6 +510,10 @@ export class FirstmateDecisions {
       // `#read` refuses to do once the home has moved under it.
       this.#home = captainHome;
       this.#signature = null;
+      // Derived from the reading being discarded, so it goes with it. Kept, it
+      // would be compared against the next fleet's crewmates and read as a
+      // resume that nobody performed.
+      this.#crew = null;
       this.#at = null;
       this.#tasks = [];
       // A run of failures is a fact about one fleet's snapshot, so it goes with
@@ -473,7 +544,15 @@ export class FirstmateDecisions {
     const asserting = this.#tasks.some((task) => task.decisions.length > 0);
     const aged =
       (asserting || this.#failures > 0) && !first && now - this.#at >= ASSERTION_MAX_AGE_MS;
-    if (!first && !moved && !aged) return;
+    // A crewmate this reading calls stopped has written something since we last
+    // looked at it, so the premise of the assertion is no longer true and
+    // firstmate is worth asking again. Computed after the floor and never
+    // before it, so the baseline moves at most once a cycle: a crewmate that
+    // wrote during the quiet part of one is still a change when the next tick
+    // is allowed to look, because the stamp carries the size and the mtime
+    // rather than a count of writes.
+    const resumed = this.#crewResumed(crew);
+    if (!first && !moved && !aged && !resumed) return;
     // Stamped on every attempt, because it is what the floor and the ceiling
     // are measured from and an attempt is what they bound. The signature is
     // not, and the two part company here on purpose: it records the status
@@ -497,6 +576,83 @@ export class FirstmateDecisions {
   }
 
   /**
+   * Whether a crewmate the standing reading calls stopped has written since we
+   * last looked, and whether we are in any position to act on it.
+   *
+   * **`#failures` is asked first, and that is the whole of how this stays out
+   * of the `moved` bypass.** While a run of failures is standing the reading in
+   * hand is one nothing has been able to replace, and the only cadence that may
+   * dispatch is the ceiling in `aged` - which is the interval written to bound
+   * exactly that state. A trigger that fired here anyway would dispatch on the
+   * floor instead, for as long as a crewmate kept writing, and no interval
+   * would be able to reach it. That is the failure this shape exists to avoid,
+   * so the guard is the first thing rather than one condition among several.
+   *
+   * The baseline moves whether or not this dispatches, because it records what
+   * the crew looked like when we last *looked* - and a reading that arrives
+   * later is newer than anything written before this call, so there is nothing
+   * left to re-ask about. That is the opposite of the rule the status signature
+   * follows, and deliberately: that one records the files a reading covers, and
+   * a reading is exactly what this one does not wait for.
+   *
+   * @param {CrewObservation[]} crew
+   * @returns {boolean}
+   */
+  #crewResumed(crew) {
+    if (this.#failures > 0) {
+      // Still recorded, so that recovering from a run of failures does not also
+      // deliver every write that happened during it as one late resume.
+      this.#crew = this.#crewSignature(crew);
+      return false;
+    }
+    const previous = this.#crew;
+    const current = this.#crewSignature(crew);
+    this.#crew = current;
+    // A signature either side that we do not have is not evidence that anything
+    // changed - the same rule the status signature is held to. The first one
+    // taken after a reading starts asserting is a baseline and never a resume.
+    return previous !== null && current !== null && current !== previous;
+  }
+
+  /**
+   * A value that changes when a crewmate the reading names as stopped writes,
+   * or null when the reading names none.
+   *
+   * **Only the window firstmate pinned counts.** `endpoint.target` publishes
+   * that name and `firstmate.js` reads the same one off the pane table, so a
+   * match is firstmate's own declaration that this session is that crewmate. A
+   * session merely sitting inside the crewmate's worktree is not asked about
+   * here, however plausible the join looks: that is a containment test, the
+   * person reading what the crewmate is asking satisfies it, and their session
+   * writes for as long as they are looking - which would dispatch a snapshot
+   * every cycle for the whole life of a ruling that nothing had happened to.
+   *
+   * Two panes under one pinned name are both the crewmate's window and both
+   * count, which is the same answer `dashboard.js` gives a split crewmate
+   * window.
+   *
+   * @param {CrewObservation[]} crew
+   * @returns {string|null}
+   */
+  #crewSignature(crew) {
+    /** @type {Set<string>} */
+    const stopped = new Set();
+    for (const task of this.#tasks) {
+      if (task.decisions.length > 0 && task.window) stopped.add(task.window);
+    }
+    if (stopped.size === 0) return null;
+    const parts = [];
+    for (const seen of crew || []) {
+      if (!seen?.window || !seen.stamp) continue;
+      if (!stopped.has(seen.window)) continue;
+      parts.push(`${seen.window}:${seen.stamp}`);
+    }
+    // Sorted, because the caller's order is the order sessions happen to have
+    // been registered in and a reordering is not a write.
+    return parts.length > 0 ? parts.sort().join('\n') : null;
+  }
+
+  /**
    * Take one snapshot and wait for it.
    *
    * Only for one-shot commands, where there is no loop to protect and printing
@@ -510,6 +666,10 @@ export class FirstmateDecisions {
     if (!this.#execAsync || !home) return;
     this.#home = home;
     this.#signature = this.#statusSignature(home);
+    // Nothing here watches for a resume - a one-shot command prints once and
+    // exits - so the baseline is cleared rather than taken, alongside every
+    // other piece of state a reading is measured against.
+    this.#crew = null;
     this.#at = Date.now();
     this.#failures = 0;
     await this.#read(home);

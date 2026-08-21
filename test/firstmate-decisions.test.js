@@ -31,6 +31,31 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
 const HOME = '/Users/x/work/firstmate';
 const SCRIPT = join(HOME, 'bin', 'fm-fleet-snapshot.sh');
 
+/** The pinned window firstmate publishes for the crewmate holding the rulings. */
+const CREW_WINDOW = `fm-${APX_412}`;
+
+/**
+ * The same reading with that crewmate's rulings reconciled away.
+ *
+ * What firstmate returns once the crewmate has resumed past them, and the thing
+ * the mtime gate can never see: closing them this way writes no status line.
+ */
+function fleetSnapshotCleared() {
+  const doc = JSON.parse(fleetSnapshotJson());
+  for (const task of doc.tasks) {
+    if (task.id === APX_412) task.hints.open_decisions = [];
+  }
+  return JSON.stringify(doc);
+}
+
+/** How many rulings the standing reading is asserting, across the fleet. */
+function openRulings(decisions) {
+  return decisions.tasks.reduce((total, task) => total + task.decisions.length, 0);
+}
+
+/** One tick's worth of what the poll loop sees, for the crewmate's own window. */
+const crewAt = (stamp) => [{ window: CREW_WINDOW, stamp }];
+
 /**
  * A status directory that answers, with a signature the test can move.
  *
@@ -700,4 +725,217 @@ test('a snapshot still walking the fleet cannot put back a reading the captain c
   release();
   await settle();
   assert.deepEqual(decisions.tasks, []);
+});
+
+// ------------------------------------------------- a crewmate that has resumed
+
+test('a crewmate that resumes is asked about again on the floor, not on the ceiling', async () => {
+  // The observed failure on 21/08/2026: firstmate had already cleared one of
+  // two rulings and the board still showed both. Nothing wrote a status line to
+  // say so - a ruling closes when firstmate reconciles its fold against live
+  // crew state - so the mtime gate could not see it and the ceiling was all
+  // that was left.
+  let runs = 0;
+  const decisions = new FirstmateDecisions({
+    execAsync: async () => {
+      runs += 1;
+      // The crewmate has resumed by the second reading, which is what closes
+      // its rulings upstream.
+      return runs === 1 ? fleetSnapshotJson() : fleetSnapshotCleared();
+    },
+    // Never moves. The whole case is a ruling clearing with no status log
+    // written, so a test whose mtimes moved would prove the old gate instead.
+    files: files({ mtimes: { 'crew.status': 1 } }),
+  });
+
+  // Every instant below has to sit short of the ceiling, or the second reading
+  // happens because the clock ran out and this test passes for the wrong
+  // reason. Asserted on the instants rather than on the constants being
+  // ordered, so moving either one fails here rather than quietly changing what
+  // is being measured.
+  assert.ok(
+    REFRESH_MS * 2 < ASSERTION_MAX_AGE_MS,
+    'no room between the floor and the ceiling - this test cannot mean anything',
+  );
+
+  decisions.refresh(HOME, 0, crewAt('10:100'));
+  await settle();
+  assert.equal(runs, 1);
+  assert.equal(openRulings(decisions), 4, 'four rulings waiting on the board');
+
+  // The first look at a crewmate this reading calls stopped is a baseline. It
+  // is not a resume: nothing has been compared with anything yet.
+  decisions.refresh(HOME, REFRESH_MS, crewAt('10:100'));
+  await settle();
+  assert.equal(runs, 1);
+  assert.equal(openRulings(decisions), 4);
+
+  // The crewmate writes to its own transcript, which is what resuming looks
+  // like from outside. Nothing here reads a byte of it.
+  decisions.refresh(HOME, REFRESH_MS * 2, crewAt('11:220'));
+  await settle();
+  assert.equal(runs, 2, 'the crewmate moved, so firstmate was asked again');
+  assert.equal(openRulings(decisions), 0, 'and the answered ruling has left the board');
+});
+
+test('a resume cannot dispatch while a run of failures is standing', async () => {
+  // `moved` dispatches without ever consulting `aged`, so no interval reaches
+  // it - which is how the backoff attempted on issue 25 came to have no effect
+  // on the path it was written for. A trigger merely OR-ed into the same gate
+  // inherits that, so this one asks the failure count first: while the snapshot
+  // is failing the ceiling is the only cadence that may dispatch, exactly as it
+  // was before the trigger existed.
+  let runs = 0;
+  let broken = false;
+  const decisions = new FirstmateDecisions({
+    execAsync: async () => {
+      runs += 1;
+      if (broken) throw new Error('fm-fleet-snapshot.sh: no such file');
+      return fleetSnapshotJson();
+    },
+    files: files({ mtimes: { 'crew.status': 1 } }),
+  });
+
+  assert.ok(
+    REFRESH_MS < ASSERTION_MAX_AGE_MS,
+    'no room between the floor and the ceiling - this test cannot mean anything',
+  );
+
+  decisions.refresh(HOME, 0, crewAt('10:100'));
+  await settle();
+  assert.equal(runs, 1);
+  decisions.refresh(HOME, REFRESH_MS, crewAt('10:100'));
+  await settle();
+  assert.equal(runs, 1, 'the baseline, not a resume');
+
+  // One resume, which is answered by a snapshot that fails from here on.
+  broken = true;
+  decisions.refresh(HOME, REFRESH_MS * 2, crewAt('11:220'));
+  await settle();
+  assert.equal(runs, 2);
+  assert.equal(openRulings(decisions), 4, 'a reading we did not get replaces nothing');
+
+  // The crewmate goes on writing. Past the floor, short of the ceiling, and no
+  // status log has moved - so the only thing that could dispatch here is the
+  // resume trigger, and while a failure is standing it may not.
+  decisions.refresh(HOME, REFRESH_MS * 3, crewAt('12:340'));
+  await settle();
+  assert.equal(runs, 2, 'the interval bounding a failing snapshot is not bypassed');
+
+  // And the ceiling still recovers, measured from the attempt that failed.
+  decisions.refresh(HOME, REFRESH_MS * 2 + ASSERTION_MAX_AGE_MS, crewAt('13:460'));
+  await settle();
+  assert.equal(runs, 3);
+});
+
+test('only the window firstmate pinned counts as the crewmate writing', async () => {
+  // `dashboard.js` will also place a ruling by worktree, and that join is a
+  // containment test - the person who opened their own agent in there to read
+  // what the crewmate is asking satisfies it, and their session writes for as
+  // long as they are looking. Taken as a resume it would dispatch a snapshot
+  // every cycle for the whole life of a ruling nothing had happened to.
+  let runs = 0;
+  const decisions = new FirstmateDecisions({
+    execAsync: async () => {
+      runs += 1;
+      return fleetSnapshotJson();
+    },
+    files: files({ mtimes: { 'crew.status': 1 } }),
+  });
+  const onlooker = (stamp) => [
+    { window: CREW_WINDOW, stamp: '10:100' },
+    { window: 'reading-what-it-asked', stamp },
+    { window: null, stamp },
+  ];
+
+  decisions.refresh(HOME, 0, onlooker('1:1'));
+  await settle();
+  assert.equal(runs, 1);
+  decisions.refresh(HOME, REFRESH_MS, onlooker('2:2'));
+  await settle();
+  assert.equal(runs, 1);
+  decisions.refresh(HOME, REFRESH_MS * 2, onlooker('3:3'));
+  await settle();
+  assert.equal(runs, 1, 'a session in the same checkout is not the crewmate');
+});
+
+test('a crewmate with nothing open is not watched for a resume', async () => {
+  // The trigger exists to disprove an assertion, so with nothing asserted there
+  // is nothing for it to be about. `zed-207` is the reconciled-away case in the
+  // reading: firstmate returns it with no open decisions at all.
+  let runs = 0;
+  const decisions = new FirstmateDecisions({
+    execAsync: async () => {
+      runs += 1;
+      return fleetSnapshotJson();
+    },
+    files: files({ mtimes: { 'crew.status': 1 } }),
+  });
+  const busy = (stamp) => [{ window: `fm-${ZED_207}`, stamp }];
+
+  decisions.refresh(HOME, 0, busy('1:1'));
+  await settle();
+  assert.equal(runs, 1);
+  decisions.refresh(HOME, REFRESH_MS, busy('2:2'));
+  await settle();
+  decisions.refresh(HOME, REFRESH_MS * 2, busy('3:3'));
+  await settle();
+  assert.equal(runs, 1, 'a working crewmate writes constantly and asserts nothing');
+});
+
+test('a transcript we could not stat is not a crewmate writing', async () => {
+  // The same rule the status signature is held to: a reading we did not get is
+  // not evidence. A transcript that is missing on one tick must not read as a
+  // change on the tick it comes back, either.
+  let runs = 0;
+  const decisions = new FirstmateDecisions({
+    execAsync: async () => {
+      runs += 1;
+      return fleetSnapshotJson();
+    },
+    files: files({ mtimes: { 'crew.status': 1 } }),
+  });
+
+  decisions.refresh(HOME, 0, crewAt('10:100'));
+  await settle();
+  assert.equal(runs, 1);
+  decisions.refresh(HOME, REFRESH_MS, crewAt('10:100'));
+  await settle();
+  assert.equal(runs, 1);
+
+  decisions.refresh(HOME, REFRESH_MS * 2, crewAt(null));
+  await settle();
+  assert.equal(runs, 1, 'no stamp is the absence of an observation');
+
+  decisions.refresh(HOME, REFRESH_MS * 3, crewAt('10:100'));
+  await settle();
+  assert.equal(runs, 1, 'and the stamp coming back is a fresh baseline, not a write');
+});
+
+test('a resume watched under one captain is not carried to the next', async () => {
+  // The baseline is derived from a reading, so it goes when the reading does.
+  // Kept, it would be compared against the next fleet's crewmates and read as a
+  // resume nobody performed.
+  let runs = 0;
+  const decisions = new FirstmateDecisions({
+    execAsync: async () => {
+      runs += 1;
+      return fleetSnapshotJson();
+    },
+    files: files({ mtimes: { 'crew.status': 1 } }),
+  });
+  decisions.refresh(HOME, 0, crewAt('10:100'));
+  await settle();
+  decisions.refresh(HOME, REFRESH_MS, crewAt('10:100'));
+  await settle();
+  assert.equal(runs, 1);
+
+  // A different firstmate, which clears everything the old reading implied.
+  decisions.refresh('/somewhere/else', REFRESH_MS * 2, crewAt('10:100'));
+  await settle();
+  assert.equal(runs, 2, 'a new home is read afresh');
+
+  decisions.refresh('/somewhere/else', REFRESH_MS * 3, crewAt('11:220'));
+  await settle();
+  assert.equal(runs, 2, 'the first look at the new fleet is a baseline again');
 });
