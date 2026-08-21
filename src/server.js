@@ -296,8 +296,9 @@ export function createMonitorServer({
     // list for a failed read, and quitting every agent at the end of the day
     // with `raise serve` still running leaves a *Rulings waiting* card carrying
     // four rulings, a tab title claiming somebody is waiting, and a desktop
-    // notification for a firstmate that has exited - for a quarter of an hour,
-    // until the ceiling counts it out. Take a failed read for an empty list, and
+    // notification for a firstmate that has exited - for
+    // `MAX_CONSECUTIVE_FAILURES` turns of the assertion ceiling, until the
+    // ceiling counts it out. Take a failed read for an empty list, and
     // a momentary filesystem error clears rulings that are still open.
     //
     // **A lock we could not read is the other non-answer**, and it is asked

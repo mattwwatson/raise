@@ -357,6 +357,7 @@ stratified on purpose, so read the whole file rather than one section.
 | the snapshot's own reconciliation is the half that matters, so the schema is checked exactly | `src/firstmate-decisions.js` |
 | an unreadable snapshot keeps the last answer; a snapshot with no tasks replaces it | `src/firstmate-decisions.js` (`parseSnapshot`) |
 | gated on a status-file mtime, never more often than `REFRESH_MS`, and re-taken on a ceiling while asserting or while failing | `src/firstmate-decisions.js` |
+| two ceilings, because an unchecked claim and a broken snapshot are two different things to bound | `src/firstmate-decisions.js` (`ASSERTION_MAX_AGE_MS`, `FAILURE_RETRY_MS`) |
 | the mtime signature is consumed only by a read that went out, so a tick that dispatched nothing cannot swallow a write | `src/firstmate-decisions.js` (`refresh`) |
 | a decision joins by the pinned window name or the worktree, and an ambiguous join places nothing | `src/dashboard.js` (`matchDecisionTask`) |
 | ambiguity is guarded in both directions, and the second one is only visible once every session has been asked | `src/dashboard.js` (`buildRows`) |
@@ -367,7 +368,7 @@ stratified on purpose, so read the whole file rather than one section.
 | only the lock at the home a reading came from may hold it open - one session's lock cannot speak for the machine | `src/firstmate.js` (`lockUnreadableAt`), `src/server.js` |
 | a reading is dropped after enough consecutive failed refreshes, because a re-dispatch that always fails is not evidence | `src/firstmate-decisions.js` (`MAX_CONSECUTIVE_FAILURES`) |
 | one counter for every way of not getting a reading, the lock included; no branch asks which kind it was | `src/firstmate-decisions.js` (`CAPTAIN_UNREADABLE`, `refresh`), `src/server.js` |
-| a failing state re-dispatches on the ceiling whether or not anything is asserted - a stopped crewmate writes no status line | `src/firstmate-decisions.js` (`refresh`) |
+| a failing state re-dispatches whether or not anything is asserted - a stopped crewmate writes no status line - but on the slower of the two cadences once the reading has been dropped | `src/firstmate-decisions.js` (`refresh`) |
 | rulings with no captain row to carry them get a card that says so, rather than being counted nowhere | `src/dashboard.js` (`buildRows`), `public/index.html` |
 | `decision` sits between `review` and `parked`, and the captain carries the count rather than a colour | `src/dashboard.js` (`ATTENTION_ORDER`, `buildRows`) |
 | a ruling outranks the idle nudge and never a permission prompt, because the nudge is what a stopped crewmate produces | `src/dashboard.js` (`attentionFor`) |

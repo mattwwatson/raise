@@ -67,21 +67,25 @@
  * ceiling.** Re-taking a reading only helps if a reading can arrive: a snapshot
  * that always fails re-dispatches forever and replaces nothing, so the
  * assertion stands for the life of the process while a fourteen-second bash
- * runs every thirty seconds to keep it looking fresh. An assertion may not
+ * runs on the ceiling to keep it looking fresh. An assertion may not
  * outlive its evidence, and a re-dispatch that always fails is not evidence, so
  * past a small number of consecutive non-answers the reading is dropped rather
  * than held.
  *
- * **One counter, one ceiling, one decision - and that is a rule about the shape
- * of this file, not just about its numbers.** Every way of failing to get a
+ * **One counter, one decision - and that is a rule about the shape of this
+ * file, not just about its numbers.** Every way of failing to get a
  * reading increments the same `#failures`: a snapshot that rejected, a snapshot
  * that returned something we cannot read, and a captain lock the caller could
  * not read are one fact between them, which is that we did not get a reading.
  * Any successful reading resets the count. While the count is above zero the
- * ceiling keeps re-dispatching whether or not anything is currently asserted,
- * because recovery may never depend on a crewmate writing a status line - the
+ * reading is re-taken whether or not anything is currently asserted, because
+ * recovery may never depend on a crewmate writing a status line - the
  * crewmate this feature exists for is *stopped* and will write nothing further,
- * so a gate that waits for one is a gate that never opens again.
+ * so a gate that waits for one is a gate that never opens again. It is re-taken
+ * on `FAILURE_RETRY_MS` rather than on the assertion ceiling once the reading
+ * has been dropped, which is a difference in *when* the attempt goes out and
+ * never in what it decides: with nothing in hand there is no claim ageing, and
+ * the two numbers answer two questions - see `FAILURE_RETRY_MS`.
  *
  * **Do not add a branch that asks which kind of failure it was.** Earlier
  * versions of this had four independent gates plus a suppression path in the
@@ -135,9 +139,15 @@ export const REFRESH_MS = 30000;
 /**
  * The ceiling on how stale an *assertion* may get - see the header.
  *
- * Reached while decisions are open, and while a run of failures is standing.
- * A healthy fleet with nothing open pays neither, so an idle machine still
- * costs nothing at all.
+ * **It is the maximum age of an unchecked claim, which is why it governs
+ * exactly where a claim is standing and nowhere else.** A re-read is the only
+ * thing that can falsify one, so the number is worth paying for while this page
+ * is telling somebody a ruling is waiting, and is worth nothing at all while it
+ * is telling them nothing - extend it to the case where no decision is in hand
+ * and the reason above stops being true at the same moment. A run of failures
+ * with the reading already let go of is that case, and it retries on its own
+ * slower cadence: see `FAILURE_RETRY_MS`. A healthy fleet with nothing open
+ * pays neither, so an idle machine still costs nothing at all.
  *
  * **Ninety seconds, and the number was measured rather than chosen.** It was
  * five minutes until 21/08/2026, when the case this ceiling exists for was
@@ -161,6 +171,28 @@ export const REFRESH_MS = 30000;
  * not what a smaller number fixes.
  */
 export const ASSERTION_MAX_AGE_MS = 90000;
+
+/**
+ * How long a standing run of failures waits before trying again.
+ *
+ * **Nothing is being claimed on this path, so this number bounds no staleness -
+ * it bounds how often something that keeps failing is retried.** Past
+ * `MAX_CONSECUTIVE_FAILURES` the reading has been let go of and the page says
+ * nothing about any ruling, so there is no unchecked assertion for a re-read to
+ * falsify and the argument behind `ASSERTION_MAX_AGE_MS` does not reach here.
+ * Tune this one against what the retry is for and never against that one: the
+ * moment the staleness argument applies again, a reading has arrived, and it is
+ * the other constant that governs.
+ *
+ * Five minutes, which is the cadence the retry ran at before the assertion
+ * ceiling came down to ninety seconds - roughly 4.6% of one core for a 13.7s
+ * bash, against roughly 15% at ninety. That cost is paid for as long as the
+ * failure stands, which on a firstmate broken by an upgrade is the life of the
+ * process, and nothing warns about it: `doctor` reports firstmate without
+ * probing it. Nobody is waiting on the difference either, because what arrives
+ * when the retry finally succeeds is a machine somebody has mended.
+ */
+export const FAILURE_RETRY_MS = 300000;
 
 /**
  * What the caller passes when it could not tell whether the captain is still
@@ -198,15 +230,17 @@ export const CAPTAIN_UNREADABLE = Symbol('firstmate captain unreadable');
  *
  * Three, because one or two failures must never clear anything - a timeout
  * while the machine is busy is ordinary. Three is at soonest three `REFRESH_MS`
- * apart, so a minute and a half, and at latest three `ASSERTION_MAX_AGE_MS`
- * apart on a fleet writing no status lines, so a quarter of an hour. Any
- * successful read resets it.
+ * apart, and at latest three `ASSERTION_MAX_AGE_MS` apart on a fleet writing no
+ * status lines - counted in intervals rather than multiplied out, because a
+ * wall-clock figure written here is one that a later move of either constant
+ * falsifies while leaving the sentence looking right. Any successful read
+ * resets it.
  *
  * Dropping the reading does not stop the retry. The count stays where it is, so
- * the ceiling goes on re-dispatching at its own cadence until a reading arrives
- * - a fourteen-second bash every five minutes on a firstmate that is broken for
- * good, which is the price of a stopped crewmate reappearing the moment it can
- * rather than never.
+ * the attempt is re-taken every `FAILURE_RETRY_MS` until a reading arrives - a
+ * fourteen-second bash on that interval on a firstmate that is broken for good,
+ * which is the price of a stopped crewmate reappearing the moment it can rather
+ * than never.
  */
 export const MAX_CONSECUTIVE_FAILURES = 3;
 
@@ -475,17 +509,22 @@ export class FirstmateDecisions {
     // *can* take differs from it, so the cost is one extra snapshot rather than
     // a gate that stopped opening.
     const moved = signature !== null && signature !== this.#signature;
-    // Two states re-take a reading on the ceiling rather than waiting for the
-    // mtime gate, and they are one condition because they are one worry: what
-    // we have in hand may no longer be true and the gate cannot see it. While
-    // asserting, because a decision clears when the crew resumes past it and
-    // resuming writes no status line. While failing, because the reading in
-    // hand is old and the only thing that could refresh it is another attempt -
-    // waiting for a crewmate to write is waiting for the one thing a stopped
-    // crewmate will never do.
+    // Two states re-take a reading on a ceiling rather than waiting for the
+    // mtime gate, and they get two intervals because they are two different
+    // worries. While asserting, what we have in hand may no longer be true and
+    // the gate cannot see it - a decision clears when the crew resumes past it
+    // and resuming writes no status line - so the bound is on the age of the
+    // claim. While failing with nothing asserted, there is no claim left to
+    // age: the reading has been let go of, and this is only how often a broken
+    // snapshot is attempted again. It still may not wait for the mtime gate,
+    // because the crewmate this feature exists for is stopped and will write
+    // nothing further.
     const asserting = this.#tasks.some((task) => task.decisions.length > 0);
-    const aged =
-      (asserting || this.#failures > 0) && !first && now - this.#at >= ASSERTION_MAX_AGE_MS;
+    /** @type {number|null} */
+    let ceiling = null;
+    if (asserting) ceiling = ASSERTION_MAX_AGE_MS;
+    else if (this.#failures > 0) ceiling = FAILURE_RETRY_MS;
+    const aged = ceiling !== null && !first && now - this.#at >= ceiling;
     if (!first && !moved && !aged) return;
     // Stamped on every attempt, because it is what the floor and the ceiling
     // are measured from and an attempt is what they bound. The signature is
@@ -493,8 +532,8 @@ export class FirstmateDecisions {
     // files a *reading* covers, so a tick that dispatched nothing has covered
     // nothing and must not consume the evidence. Consuming it swallowed the
     // write that would have opened the gate - a crewmate opening a decision
-    // during a two-second lock blip then waited on the five-minute ceiling
-    // instead of arriving as soon as the lock read again.
+    // during a two-second lock blip then waited on the ceiling instead of
+    // arriving as soon as the lock read again.
     this.#at = now;
     // The whole of the difference an unreadable captain makes, and it is in
     // what happens rather than in what is decided: there is nothing to run a
