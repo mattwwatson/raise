@@ -125,7 +125,7 @@
  * before this existed. The bypass on `moved` is older than any of this work and
  * is deliberately left where it is; the rule here is that nothing new joins it.
  *
-  * **Nothing here goes looking for firstmate.** The home is the captain
+ * **Nothing here goes looking for firstmate.** The home is the captain
  * session's own `cwd`, and the captain is identified by `src/firstmate.js` from
  * the lock holding that session's agent pid. A machine without firstmate has no
  * lock, so this is never called, no subprocess runs and nothing is said.

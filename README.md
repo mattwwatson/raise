@@ -530,8 +530,12 @@ Two things are worth knowing about the cost, because it is the one real constrai
 
 - **The monitor never waits for it.** The snapshot takes seconds - measured at 3.5s and again at
   14s on the same machine - and Raise runs it off to one side, normally only when a crewmate has
-  written to its own event log since the last reading. The exceptions are the two states where
-  that is not enough to trust what is on the page: while a ruling is being shown, and while
+  written to its own event log since the last reading, or when a crewmate shown as waiting starts
+  writing to its own transcript again. That second one is what resuming looks like - a crewmate
+  stopped on a ruling writes nothing - so a ruling that has been answered leaves the board on the
+  next cycle rather than sitting there until a timer runs out. Raise looks only at whether that
+  transcript changed, never at what is in it. The exceptions are the two states where neither
+  event is enough to trust what is on the page: while a ruling is being shown, and while
   readings are failing, it is re-taken every few minutes as well. If those readings keep failing
   the rulings come off the page rather than sitting there looking current, and they come back the
   moment a reading arrives. The page updates on the next tick.
