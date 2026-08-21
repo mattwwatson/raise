@@ -156,6 +156,20 @@ export function createMonitorServer({
   // driving the stamp from a test is a test that edits the product's own page
   // on the developer's disk to make the served build change.
   buildStamp = new BuildStamp({ dir: publicDir }),
+  // Gated three times over: nothing runs unless a captain session is on the
+  // page, and then only when a crewmate has written to its own event log since
+  // the last reading, or one that reading calls stopped has written to its
+  // transcript. So a machine with no firstmate never spawns it, and a machine
+  // with an idle fleet spawns it once.
+  //
+  // Injected whole for the same reason `untrackedScan` is, and for one this
+  // object has of its own: its minimum interval between reads is tens of
+  // seconds of real time and it reads the clock itself, so no test can drive
+  // this loop as far as a second dispatch. The suite injects a stand-in to see
+  // what the poll hands it, which is the only thing that can hold the crew
+  // observations below to being built at all - the module's own tests use an
+  // injected clock and are blind to whether anyone ever calls it.
+  firstmateDecisions = new FirstmateDecisions({ execAsync }),
 } = {}) {
   const registry = new SessionRegistry({ dir: sessionsPath });
   const nmState = new NoMistakesState({ dbPath, exec, execAsync });
@@ -170,11 +184,6 @@ export function createMonitorServer({
   // Reads a tmux pane name once per pane and a pid file once per lock change,
   // so it costs a `list-panes` only when a window we have never seen turns up.
   const firstmate = new FirstmateWatch({ execAsync, files: gitFiles });
-  // Gated twice over: nothing runs unless a captain session is on the page, and
-  // then only when a crewmate has written to its own event log since the last
-  // reading. So a machine with no firstmate never spawns it, and a machine with
-  // an idle fleet spawns it once.
-  const firstmateDecisions = new FirstmateDecisions({ execAsync });
   // Outlives a poll on purpose: `axi run` returns at every gate, so the process
   // that proves ownership is absent for exactly as long as the run is parked.
   const runOwners = new RunOwners();
@@ -246,6 +255,20 @@ export function createMonitorServer({
      * costs a map lookup and no query of its own.
      */
     const windowNames = new Map();
+    /**
+     * Every session as a window name and a value that changes when its
+     * transcript does, which is what tells the fleet snapshot that a crewmate
+     * it called stopped has resumed.
+     *
+     * Gathered for all of them and narrowed there, against the reading that
+     * knows which windows are stopped - so this side cannot widen what the
+     * trigger watches, and nothing here reads a transcript's contents. Both
+     * halves are already in hand on this tick: the window off the pane table
+     * `spawnedBy` keeps warm, the stamp off the stat `read` just took.
+     *
+     * @type {import('./firstmate-decisions.js').CrewObservation[]}
+     */
+    const crew = [];
     /** Sessions with a no-mistakes run still going underneath them. */
     const pipelines = new Set();
     for (const session of sessions) {
@@ -257,7 +280,11 @@ export function createMonitorServer({
       // Cached per pane and per lock, so this is a map lookup on all but the
       // first tick a session is seen.
       spawnedBy.set(session.sessionId, firstmate.spawnedBy(session));
-      windowNames.set(session.sessionId, firstmate.windowName(session));
+      const windowName = firstmate.windowName(session);
+      windowNames.set(session.sessionId, windowName);
+      if (windowName) {
+        crew.push({ window: windowName, stamp: transcripts.stamp(session.transcriptPath) });
+      }
       // The process table is the authority on whether a poll is still running.
       // A transcript can say the poll returned when only the tool call did -
       // Claude Code backgrounds anything past its own timeout, and a review
@@ -319,6 +346,8 @@ export function createMonitorServer({
         : !sessionsReadable || firstmate.lockUnreadableAt(firstmateDecisions.home)
           ? CAPTAIN_UNREADABLE
           : null,
+      Date.now(),
+      crew,
     );
 
     // Sessions nothing has ever reported, so the first page a stranger sees is

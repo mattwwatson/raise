@@ -2103,3 +2103,99 @@ test('every file the server hands out is part of the build it states', async () 
     cleanup();
   }
 });
+
+test('the poll hands the fleet snapshot what its crewmates transcripts look like', async () => {
+  // The trigger that clears an answered ruling lives in `firstmate-decisions.js`
+  // and is tested there against an injected clock. What no test over there can
+  // see is whether anything ever calls it: its floor is tens of seconds of real
+  // time, so a test cannot drive the poll loop as far as a second dispatch. So
+  // this asserts the one thing that is this file's to assert - that the poll
+  // builds the observations at all, names the window firstmate pinned, and that
+  // the value it sends moves when the crewmate writes.
+  const { dir, cleanup } = scratch();
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = dir;
+  let monitor;
+  try {
+    const fmHome = join(dir, 'firstmate');
+    mkdirSync(join(fmHome, 'state'), { recursive: true });
+    writeFileSync(join(fmHome, 'state', '.lock'), `${process.pid}\n`);
+    const transcript = join(dir, 'crew.jsonl');
+    writeFileSync(transcript, `${JSON.stringify({ type: 'user', message: 'go' })}\n`);
+
+    const panes = ['%0\tFirst Mate', `%1\tfm-${APX_412}`].join('\n');
+    /** Every set of observations the poll handed over, newest last. */
+    const handed = [];
+    const decisions = {
+      tasks: [],
+      home: null,
+      refresh(_home, _now, crew) {
+        handed.push(crew);
+      },
+    };
+
+    const port = await freePort();
+    monitor = createMonitorServer({
+      port,
+      token: 'test-token',
+      dbPath: join(dir, 'no-such.sqlite'),
+      sessionsPath: join(dir, 'sessions'),
+      exec: () => assert.fail('no blocking commands from the server'),
+      fetch: () => assert.fail('no outbound requests from the server'),
+      execAsync: async (command) => (command === 'tmux' ? panes : ''),
+      firstmateDecisions: decisions,
+    });
+    await monitor.start();
+
+    for (const [sessionId, pane, transcriptPath] of [
+      ['captain', '%0', null],
+      ['crew', '%1', transcript],
+    ]) {
+      const registered = await fetch(`http://127.0.0.1:${port}/event`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-raise-token': 'test-token' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          hook_event_name: 'SessionStart',
+          cwd: sessionId === 'captain' ? fmHome : join(dir, 'example-webapp'),
+          transcript_path: transcriptPath,
+          host: { tmux: '', tmux_pane: pane, pid: process.pid },
+        }),
+      });
+      assert.equal(registered.status, 204);
+    }
+
+    // Asking for a pane's name is what schedules the read that answers the next
+    // caller, so the first reading predates the table being warm.
+    const poll = async () => {
+      await (await fetch(`http://127.0.0.1:${port}/state?t=test-token`)).json();
+      for (let i = 0; i < 10; i += 1) await nextTick();
+    };
+    for (let i = 0; i < 3; i += 1) await poll();
+
+    const seen = () => handed.at(-1).find((o) => o.window === `fm-${APX_412}`);
+    assert.ok(seen(), 'the crewmate is named by the window firstmate pinned');
+    const before = seen().stamp;
+    assert.ok(before, 'and carries a value taken from the stat the poll already did');
+    // The captain has no transcript, so it is offered without one rather than
+    // silently left out - a stamp we do not have is the absence of an
+    // observation, and that is the reader's rule to apply, not ours.
+    assert.deepEqual(
+      handed.at(-1).find((o) => o.window === 'First Mate'),
+      { window: 'First Mate', stamp: null },
+    );
+
+    // The crewmate resumes, which from out here is one more line in its own
+    // transcript. Nothing reads it.
+    writeFileSync(transcript, `${JSON.stringify({ type: 'assistant', message: 'on it' })}\n`, {
+      flag: 'a',
+    });
+    await poll();
+    assert.notEqual(seen().stamp, before, 'and the value moves when the crewmate writes');
+  } finally {
+    await monitor?.stop();
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
+    cleanup();
+  }
+});

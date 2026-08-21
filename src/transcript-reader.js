@@ -139,6 +139,30 @@ export class TranscriptReader {
   }
 
   /**
+   * A value that changes when a transcript does, or null when there is no
+   * reading to speak from.
+   *
+   * The stat behind it is the one `read` already took on this tick, so asking
+   * costs a map lookup and never a syscall - which is what makes it affordable
+   * for something the poll loop asks about every session. It is a change
+   * detector and nothing more: it says a session wrote, never what it wrote,
+   * which is the whole of what `firstmate-decisions.js` is allowed to know
+   * about a crewmate that has resumed.
+   *
+   * Null where the file is missing or was never read, because `#entry` drops
+   * the entry when the stat throws. A stamp we do not have is not evidence that
+   * nothing was written, so the caller compares only two stamps it actually
+   * holds.
+   *
+   * @param {string|null} path
+   * @returns {string|null}
+   */
+  stamp(path) {
+    const cached = path ? this.#cache.get(path) : null;
+    return cached ? `${cached.size}:${cached.mtimeMs}` : null;
+  }
+
+  /**
    * The cache entry for a path, refreshed if the file or the branch has moved.
    *
    * @param {string|null} path
