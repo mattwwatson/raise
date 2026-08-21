@@ -190,14 +190,27 @@ test('the snapshot is run once and then not again until a status log moves', asy
   await settle();
   assert.equal(runs, 1);
 
-  // Well past the floor, short of the ceiling, and nothing has moved.
-  decisions.refresh(HOME, REFRESH_MS * 5);
+  // Past the floor and short of the ceiling, derived from the two constants
+  // rather than written as a multiple of one of them. This used to read
+  // `REFRESH_MS * 5`, which satisfied the comment above it until
+  // ASSERTION_MAX_AGE_MS came down from five minutes to ninety seconds - at
+  // which point the number was past the ceiling, the read this test says must
+  // not happen happened, and only the comment still described the intent. The
+  // relationship belongs in the code; the guard below fails loudly rather than
+  // passing vacuously if the two constants ever leave no window between them.
+  assert.ok(
+    ASSERTION_MAX_AGE_MS > REFRESH_MS,
+    'no window between the floor and the ceiling - this test cannot mean anything',
+  );
+  const quiet = REFRESH_MS + Math.floor((ASSERTION_MAX_AGE_MS - REFRESH_MS) / 2);
+  decisions.refresh(HOME, quiet);
   await settle();
   assert.equal(runs, 1, 'a steady state costs nothing at all');
 
-  // A crewmate writes to its own event log.
+  // A crewmate writes to its own event log. Still short of the ceiling, so a
+  // re-read here proves the mtime caused it rather than the clock running out.
   mtimes['crew.status'] = 2;
-  decisions.refresh(HOME, REFRESH_MS * 6);
+  decisions.refresh(HOME, quiet + 1);
   await settle();
   assert.equal(runs, 2);
 });

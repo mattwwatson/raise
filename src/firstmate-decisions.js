@@ -138,8 +138,29 @@ export const REFRESH_MS = 30000;
  * Reached while decisions are open, and while a run of failures is standing.
  * A healthy fleet with nothing open pays neither, so an idle machine still
  * costs nothing at all.
+ *
+ * **Ninety seconds, and the number was measured rather than chosen.** It was
+ * five minutes until 21/08/2026, when the case this ceiling exists for was
+ * watched happening: firstmate's own reading had cleared a ruling - the crew
+ * had resumed, so a live run-step superseded the log line - while this page went
+ * on asserting it. Nothing re-read it, because clearing a ruling that way writes
+ * no status line for the mtime gate to see, so the ceiling was the only thing
+ * left and it took about three minutes. A wrong answer sat on the one row the
+ * page exists to be trusted on for that whole time.
+ *
+ * The trade is staleness against a 13.7s bash, and it is only paid while a
+ * ruling is actually open: at five minutes that is roughly 4.6% of one core, at
+ * ninety seconds roughly 15%. Fifteen per cent of a core to stop the product's
+ * central claim being wrong for three minutes is the right way round.
+ *
+ * **It is still a clock rather than a signal, and that is the real limit.** The
+ * event worth reacting to is the crewmate resuming, which this cannot see - so
+ * every clearing is late by up to this interval, by construction. Making it
+ * react to the resume instead is tracked separately; do not shorten this
+ * further to approximate that, because the cost is linear and the lateness is
+ * not what a smaller number fixes.
  */
-export const ASSERTION_MAX_AGE_MS = 300000;
+export const ASSERTION_MAX_AGE_MS = 90000;
 
 /**
  * What the caller passes when it could not tell whether the captain is still
