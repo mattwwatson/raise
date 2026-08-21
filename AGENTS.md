@@ -111,12 +111,14 @@ reporting, and the page stays up looking healthy. Do not offer `npx` as a shortc
 
 ## Architecture
 
-Four sources of truth, joined into one list. **They are listed in the order they matter**, which
-is an editorial claim and meant as one: the hooks and the transcript need nothing but the agent
-itself, so they lead - the hooks first because they answer the one question the product exists
-for, is a human needed, and the transcript because it is what qualifies that answer. The process
-table and the database both speak about somebody else's tool, and the database is the optional
-one, so it comes last. Do not reorder them back.
+These are the sources of truth, joined into one list. A row earns its place by reporting
+*state* on a cadence of its own, which `dashboard.js` joins into the ranked rows. **They are
+listed in the order they matter**, which is an editorial claim and meant as one: a source
+that needs nothing but the agent itself leads, one that speaks about somebody else's tool
+follows, and one you can run Raise without comes last. That is the ordering principle, and it
+decides where anything added later goes. Within the first group the hooks come before the
+transcript, because they answer the one question the product exists for - is a human needed -
+and the transcript is what qualifies that answer. Do not reorder them back.
 
 | Source | Module | Answers |
 | --- | --- | --- |
@@ -124,12 +126,13 @@ one, so it comes last. Do not reorder them back.
 | the session's own transcript (tail, on change) | `src/transcript.js` | what is it working on, what is it doing right now, and did it open a pull request? |
 | the process table (one `ps`, every 3s) | `src/poll-watch.js` | is a review still open, is a pipeline still running, and whose is it? |
 | no-mistakes SQLite DB (polled, 1s) | `src/nm-state.js` | is a pipeline run parked, working, failed? |
+| firstmate's fleet snapshot (on a status-file mtime, never more often than `REFRESH_MS`) | `src/firstmate-decisions.js` | which crewmates are stopped waiting for a ruling from you? |
 
-A fifth exists and is deliberately not in that table, because it answers a different kind of
-question: **`src/untracked.js` walks the three agents' session directories for transcripts no
-hook has ever accounted for.** It is not a source of *state* - it cannot be, which is the whole
-of its design - it is what stops the first page a stranger sees being blank. See the header of
-`src/untracked.js`.
+Something that reads like another source is deliberately not in that table, because it answers
+a different kind of question: **`src/untracked.js` walks the three agents' session directories
+for transcripts no hook has ever accounted for.** It is not a source of *state* - it cannot be,
+which is the whole of its design - it is what stops the first page a stranger sees being blank.
+See the header of `src/untracked.js`.
 
 | Path | What |
 | --- | --- |
