@@ -60,8 +60,9 @@
  * line. So while we are asserting something the reading is re-taken on a
  * ceiling as well as on the gate. While healthy and asserting nothing the gate
  * is enough, because opening a decision always writes a status line - and the
- * fifth rule below extends the ceiling to cover the other state where the gate
- * is not enough. Cheap where it does not matter and honest where it does.
+ * fifth rule below covers the other state where the gate is not enough, on
+ * intervals of its own. Cheap where it does not matter and honest where it
+ * does.
  *
  * **`MAX_CONSECUTIVE_FAILURES` is the fifth, and it is the other half of that
  * ceiling.** Re-taking a reading only helps if a reading can arrive: a snapshot
@@ -81,11 +82,11 @@
  * reading is re-taken whether or not anything is currently asserted, because
  * recovery may never depend on a crewmate writing a status line - the
  * crewmate this feature exists for is *stopped* and will write nothing further,
- * so a gate that waits for one is a gate that never opens again. It is re-taken
- * on `FAILURE_RETRY_MS` rather than on the assertion ceiling once the reading
- * has been dropped, which is a difference in *when* the attempt goes out and
- * never in what it decides: with nothing in hand there is no claim ageing, and
- * the two numbers answer two questions - see `FAILURE_RETRY_MS`.
+ * so a gate that waits for one is a gate that never opens again. Which interval
+ * it is re-taken on backs off across the drop - see `FAILURE_RETRY_MS` - and
+ * that is a difference in *when* an attempt goes out, never in what it decides:
+ * with nothing in hand there is no claim ageing, so the numbers answer
+ * different questions from the one `ASSERTION_MAX_AGE_MS` answers.
  *
  * **Do not add a branch that asks which kind of failure it was.** Earlier
  * versions of this had four independent gates plus a suppression path in the
@@ -133,6 +134,11 @@ const STATUS_SUFFIX = '.status';
  * would mean a failing or slow snapshot being retried while the last one is
  * still running. The mtime gate is what keeps a steady state free; this is what
  * bounds the un-steady one.
+ *
+ * It is also what the one eager attempt after a drop waits for, and that is the
+ * floor doing its own job rather than a second number to tune: the policy there
+ * is *as soon as we are allowed to try at all*, so anything longer would be a
+ * delay nobody chose - see `FAILURE_RETRY_MS`.
  */
 export const REFRESH_MS = 30000;
 
@@ -173,24 +179,40 @@ export const REFRESH_MS = 30000;
 export const ASSERTION_MAX_AGE_MS = 90000;
 
 /**
- * How long a standing run of failures waits before trying again.
+ * How long a run of failures waits between attempts, once the one eager attempt
+ * a drop is entitled to has been paid and has failed as well.
  *
- * **Nothing is being claimed on this path, so this number bounds no staleness -
- * it bounds how often something that keeps failing is retried.** Past
- * `MAX_CONSECUTIVE_FAILURES` the reading has been let go of and the page says
- * nothing about any ruling, so there is no unchecked assertion for a re-read to
- * falsify and the argument behind `ASSERTION_MAX_AGE_MS` does not reach here.
- * Tune this one against what the retry is for and never against that one: the
- * moment the staleness argument applies again, a reading has arrived, and it is
- * the other constant that governs.
+ * **At the moment of a drop a transient failure and a permanent one cannot be
+ * told apart, and they want opposite treatment - so the retry pays a fast
+ * attempt once and then stops paying it, which is the only policy that is right
+ * for both without knowing which is in hand.** A transient failure - three
+ * snapshots timing out while the machine is busy, or a captain lock that would
+ * not read for a few ticks - succeeds on the very next attempt, and that
+ * attempt costs one snapshot and puts a genuinely waiting ruling back on the
+ * page. A permanent failure - firstmate bumping `schema`, the script renamed by
+ * an upgrade - fails on every attempt, so the same fast attempt repeated is a
+ * fourteen-second bash for ever on a machine nothing warns about, `doctor`
+ * reporting firstmate without probing it. Collapse the two into a single
+ * interval and that reasoning stops being served in the same stroke: whichever
+ * interval is picked is the wrong one for one of the two cases.
+ *
+ * **Nothing is being claimed on this path either, so this number bounds no
+ * staleness - it bounds how often something that keeps failing is retried.**
+ * Past `MAX_CONSECUTIVE_FAILURES` the reading has been let go of and the page
+ * says nothing about any ruling, so there is no unchecked assertion for a
+ * re-read to falsify and the argument behind `ASSERTION_MAX_AGE_MS` does not
+ * reach here. Tune this one against what the retry is for and never against
+ * that one: the moment the staleness argument applies again, a reading has
+ * arrived, and it is the other constant that governs.
  *
  * Five minutes, which is the cadence the retry ran at before the assertion
  * ceiling came down to ninety seconds - roughly 4.6% of one core for a 13.7s
  * bash, against roughly 15% at ninety. That cost is paid for as long as the
  * failure stands, which on a firstmate broken by an upgrade is the life of the
- * process, and nothing warns about it: `doctor` reports firstmate without
- * probing it. Nobody is waiting on the difference either, because what arrives
- * when the retry finally succeeds is a machine somebody has mended.
+ * process. Nobody is left waiting on it, and the reason is the eager attempt
+ * above rather than the number itself: the case where a person was waiting has
+ * already been answered by then, so what a success at this interval brings back
+ * is a machine somebody has mended.
  */
 export const FAILURE_RETRY_MS = 300000;
 
@@ -236,11 +258,13 @@ export const CAPTAIN_UNREADABLE = Symbol('firstmate captain unreadable');
  * falsifies while leaving the sentence looking right. Any successful read
  * resets it.
  *
- * Dropping the reading does not stop the retry. The count stays where it is, so
- * the attempt is re-taken every `FAILURE_RETRY_MS` until a reading arrives - a
- * fourteen-second bash on that interval on a firstmate that is broken for good,
- * which is the price of a stopped crewmate reappearing the moment it can rather
- * than never.
+ * Dropping the reading does not stop the retry. The count goes on past the drop
+ * rather than stopping at it, so the attempt straight after a drop is taken as
+ * soon as the floor allows and the ones after that are taken every
+ * `FAILURE_RETRY_MS` until a reading arrives - which is the price of a stopped
+ * crewmate reappearing the moment it can rather than never, without a firstmate
+ * broken for good paying that price on every interval. See `FAILURE_RETRY_MS`
+ * for why the two differ.
  */
 export const MAX_CONSECUTIVE_FAILURES = 3;
 
@@ -509,21 +533,23 @@ export class FirstmateDecisions {
     // *can* take differs from it, so the cost is one extra snapshot rather than
     // a gate that stopped opening.
     const moved = signature !== null && signature !== this.#signature;
-    // Two states re-take a reading on a ceiling rather than waiting for the
-    // mtime gate, and they get two intervals because they are two different
-    // worries. While asserting, what we have in hand may no longer be true and
-    // the gate cannot see it - a decision clears when the crew resumes past it
-    // and resuming writes no status line - so the bound is on the age of the
-    // claim. While failing with nothing asserted, there is no claim left to
-    // age: the reading has been let go of, and this is only how often a broken
-    // snapshot is attempted again. It still may not wait for the mtime gate,
-    // because the crewmate this feature exists for is stopped and will write
-    // nothing further.
+    // Three states re-take a reading rather than waiting for the mtime gate,
+    // and they get three intervals because they are answering three different
+    // questions. While asserting, what we have in hand may no longer be true
+    // and the gate cannot see it - a decision clears when the crew resumes past
+    // it and resuming writes no status line - so the bound is on the age of the
+    // claim. While failing with nothing claimed, the attempt is what recovery
+    // depends on and the mtime gate cannot deliver it, because the crewmate
+    // this feature exists for is stopped and will write nothing further, so it
+    // goes out as soon as the floor allows. Once that eager attempt has been
+    // paid and failed, the run of failures is the one thing we know something
+    // about, and `FAILURE_RETRY_MS` bounds how often it is repeated.
     const asserting = this.#tasks.some((task) => task.decisions.length > 0);
     /** @type {number|null} */
     let ceiling = null;
-    if (asserting) ceiling = ASSERTION_MAX_AGE_MS;
-    else if (this.#failures > 0) ceiling = FAILURE_RETRY_MS;
+    if (this.#failures > MAX_CONSECUTIVE_FAILURES) ceiling = FAILURE_RETRY_MS;
+    else if (asserting) ceiling = ASSERTION_MAX_AGE_MS;
+    else if (this.#failures > 0) ceiling = REFRESH_MS;
     const aged = ceiling !== null && !first && now - this.#at >= ceiling;
     if (!first && !moved && !aged) return;
     // Stamped on every attempt, because it is what the floor and the ceiling
@@ -641,13 +667,15 @@ export class FirstmateDecisions {
    * the appearance of freshness, which is worse than saying nothing at all.
    * See `MAX_CONSECUTIVE_FAILURES` for the number and the routes here.
    *
-   * Clamped at the ceiling rather than counting on, which is what makes it safe
-   * to call for ever: the reading is dropped exactly once, and the count stays
-   * above zero so `refresh` keeps re-taking on the ceiling until one arrives.
+   * Counted one past the drop and clamped there, which is what makes it safe to
+   * call for ever and is also the whole of what `refresh` needs to tell the
+   * eager attempt a drop is entitled to from the retries that follow it. The
+   * reading is still let go of exactly once, at the drop itself, and the count
+   * stays above zero so the retry goes on until a reading arrives.
    */
   #recordFailure() {
-    if (this.#failures >= MAX_CONSECUTIVE_FAILURES) return;
+    if (this.#failures > MAX_CONSECUTIVE_FAILURES) return;
     this.#failures += 1;
-    if (this.#failures >= MAX_CONSECUTIVE_FAILURES) this.#tasks = [];
+    if (this.#failures === MAX_CONSECUTIVE_FAILURES) this.#tasks = [];
   }
 }
