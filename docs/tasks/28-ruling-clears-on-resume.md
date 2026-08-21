@@ -217,11 +217,13 @@ Nothing on a fleet with no ruling open: `#crewSignature` returns null when the r
 stopped crewmate with a pinned window, so there is nothing to compare and nothing to dispatch.
 
 While a ruling *is* open, one extra snapshot per `REFRESH_MS` at most, and only while the
-crewmate holding it is writing. A crewmate that is genuinely stopped writes nothing, so the
-steady state costs nothing; the signature moves exactly when the premise of the assertion has
-stopped being true, which is the event worth a subprocess. On a live fleet `moved` is already
-dispatching at that cadence off the status lines the crew is appending, so on the machines where
-this could fire repeatedly it is not adding a cycle that was not already there.
+crewmate holding it is writing - plus one per change to the set of windows the reading calls
+stopped, since the parts are chosen by that set and a shorter value is a different one. A
+crewmate that is genuinely stopped writes nothing, so the steady state costs nothing; and the
+set changing is the reconciliation this item exists to notice, which the asynchronous case above
+is a reason to look at again rather than an argument for suppressing. On a live fleet `moved` is
+already dispatching at that cadence off the status lines the crew is appending, so on the
+machines where this could fire repeatedly it is not adding a cycle that was not already there.
 
 ## Acceptance
 

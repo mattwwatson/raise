@@ -615,8 +615,18 @@ export class FirstmateDecisions {
   }
 
   /**
-   * A value that changes when a crewmate the reading names as stopped writes,
-   * or null when the reading names none.
+   * The stamp of every crewmate the standing reading names as stopped, or null
+   * when it names none. A write by one of them moves it, which is the signal
+   * the caller is after.
+   *
+   * **It moves on one thing more than that, and the extra is accepted rather
+   * than overlooked.** The parts are chosen by the set of windows *the reading*
+   * calls stopped, so a snapshot that clears one of two rulings shortens the
+   * value with nothing having been written, and the next tick past `REFRESH_MS`
+   * dispatches one more look. The cost is one snapshot per change to that set,
+   * and it points the same way the trigger does: firstmate reconciles
+   * asynchronously, so an answer that comes back still asserting is precisely
+   * the case worth asking about again.
    *
    * **Only the window firstmate pinned counts.** `endpoint.target` publishes
    * that name and `firstmate.js` reads the same one off the pane table, so a
