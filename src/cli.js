@@ -53,6 +53,7 @@ import {
 } from './update-check.js';
 import { PollWatch } from './poll-watch.js';
 import { FirstmateWatch } from './firstmate.js';
+import { FirstmateDecisions } from './firstmate-decisions.js';
 import { UntrackedScan } from './untracked.js';
 import { focusSession } from './focus/index.js';
 import { ALL_TERMINALS } from './focus/terminals.js';
@@ -89,6 +90,10 @@ const dim = (s) => `[2m${s}[0m`;
 const green = (s) => `[32m${s}[0m`;
 const red = (s) => `[31m${s}[0m`;
 const yellow = (s) => `[33m${s}[0m`;
+// Only for the `decision` state, so the terminal tells the same story the page
+// does: a firstmate ruling is a human gate, and it is not the red that belongs
+// to a session stopped in front of you.
+const magenta = (s) => `[35m${s}[0m`;
 
 /**
  * What `serve` says it is reading pipeline state from.
@@ -113,6 +118,29 @@ const SOURCE_LABELS = {
  */
 const UNTRACKED_REASON =
   'Found on disk, never reported - restart the session and Raise will follow it';
+
+/**
+ * How much of a decision's summary a line shows.
+ *
+ * A crewmate writes these at whatever length it needs, and they run to
+ * paragraphs. The page has an expanded panel to put them in and this does not,
+ * so it clips - **visibly**, with an ellipsis, because the one thing neither
+ * renderer may do is drop part of what is waiting without saying so. The *set*
+ * is never bounded: every open decision gets its line.
+ */
+const DECISION_SUMMARY_CHARS = 100;
+
+/**
+ * Shorten text to `limit` characters, saying so.
+ *
+ * @param {string} text
+ * @param {number} limit
+ * @returns {string}
+ */
+function clip(text, limit) {
+  const value = String(text || '').replace(/\s+/g, ' ').trim();
+  return value.length > limit ? `${value.slice(0, limit - 1).trimEnd()}…` : value;
+}
 
 /**
  * How each `doctor` check state is marked. Padded to a common width so the
@@ -439,6 +467,21 @@ async function cmdStatus() {
   const firstmate = new FirstmateWatch({ execAsync });
   await firstmate.load(sessions);
   const spawnedBy = new Map(sessions.map((s) => [s.sessionId, firstmate.spawnedBy(s)]));
+  const windowNames = new Map(sessions.map((s) => [s.sessionId, firstmate.windowName(s)]));
+  // One shot, so the snapshot is waited for rather than answered from a cache
+  // that is empty on the only tick there is - the same trade `PollWatch.load`
+  // and `LavishState.load` make. It costs seconds and runs only when a captain
+  // is on the machine, so a machine without firstmate prints just as fast as it
+  // ever did.
+  const captain = firstmate.captainSession(sessions);
+  const firstmateDecisions = new FirstmateDecisions({ execAsync });
+  // Said before the wait rather than after it, and only when there is one. The
+  // snapshot measured 3.5s and 14s, and its timeout is a minute, so silence
+  // here reads as a hung command - naming what is being waited for is the
+  // difference between the two. On stderr, so the rows stay the whole of what
+  // this command writes to stdout.
+  if (captain) console.error(dim('Waiting for the firstmate fleet snapshot...'));
+  await firstmateDecisions.load(captain?.cwd || null);
   const summaries = new Map(
     sessions.map((s) => {
       const read = transcripts.read(s.transcriptPath, branches.get(s.sessionId), s.agent);
@@ -502,6 +545,9 @@ async function cmdStatus() {
     runOwners: runOwners.owners,
     untracked,
     spawnedBy,
+    decisions: firstmateDecisions.tasks,
+    windowNames,
+    captainSessionId: captain?.sessionId || null,
   };
   let rows = buildRows(projection);
 
@@ -531,9 +577,11 @@ async function cmdStatus() {
     const colour =
       row.attention === 'blocked' || row.attention === 'review'
         ? red
-        : row.attention === 'parked'
-          ? yellow
-          : dim;
+        : row.attention === 'decision'
+          ? magenta
+          : row.attention === 'parked'
+            ? yellow
+            : dim;
     // Same place as on the page - between the repo and the branch - so the two
     // tell one story about which session is which. The separator is the one
     // thing the page does without: there the name is prose beside a monospace
@@ -555,9 +603,22 @@ async function cmdStatus() {
     // and a signal suppressed without a word is the quiet staleness this tool is
     // built against.
     const dismissed = row.dismissed ? ` ${dim('dismissed')}` : '';
-    console.log(
-      `${colour(row.attentionLabel.padEnd(26))} ${bold(row.title)}${named}${spawner}${dismissed}${unplaceable}`,
-    );
+    // How many firstmate rulings this row is holding up, said in the same
+    // position and the same words as on the page - the two renderers are one
+    // protocol, and a row counted on one and bare on the other is them
+    // disagreeing about the same session.
+    const rulings = row.decisionsLabel;
+    const decisions = rulings ? ` ${dim(rulings)}` : '';
+    const head = `${bold(row.title)}${named}${spawner}${decisions}${dismissed}${unplaceable}`;
+    console.log(`${colour(row.attentionLabel.padEnd(26))} ${head}`);
+    // Every open decision, never a bounded subset: four rulings on one crewmate
+    // is the ordinary case, and a renderer that showed one of them would be this
+    // feature's own failure reintroduced by its fix. Only each summary is
+    // clipped, and it says so.
+    for (const decision of row.decisions) {
+      const summary = clip(decision.summary, DECISION_SUMMARY_CHARS);
+      console.log(`  ${dim(`${decision.verb} ${decision.key}`)} ${dim(summary)}`);
+    }
     if (row.message) console.log(`  ${dim(row.message)}`);
     // Always, pipeline or no pipeline. This used to be dropped whenever a step
     // existed, so the moment no-mistakes started, what you had been talking to
@@ -981,6 +1042,39 @@ async function cmdDoctor() {
     off('lavish-axi', 'not installed - review gates will not be detected');
   }
 
+  // Listed once and shared, by the firstmate check here and the Sessions check
+  // below. `list()` is not a pure read - it probes each session for liveness and
+  // writes a tombstone for every dead one - so asking twice runs all of that
+  // twice in one command.
+  const sessions = new SessionRegistry({ dir: sessionsDir() }).list();
+
+  // Optional again, and reported without running anything, which is the point.
+  // firstmate is not a command on the PATH as far as Raise is concerned - it is
+  // recognised by the lock in a live session's own directory holding that
+  // session's pid, and that session's directory is where the fleet snapshot is
+  // read from. No captain, no read: this line is the whole of what a machine
+  // without firstmate is ever told, and it costs one `stat` per session.
+  const firstmateCaptain = new FirstmateWatch().captainSession(sessions);
+  if (firstmateCaptain) {
+    // Says what the lock established and stops there. It used to promise that
+    // crew decisions *would* show, which nothing here checks: only `serve` ever
+    // runs the snapshot, and all three ways it can fail for good - a schema we
+    // refuse by design, the script renamed by an upgrade, output past
+    // `exec.js`'s cap - end in no rows and no warning once
+    // `MAX_CONSECUTIVE_FAILURES` drops the reading. The one command somebody
+    // runs when something is already wrong must not be the third thing telling
+    // them it is fine. Taking a reading here is not the answer either: the
+    // snapshot measured 13.7s, and this file already reports the update check
+    // without performing it for the same reason.
+    ok(
+      'firstmate',
+      `running in ${firstmateCaptain.cwd} - its lock names a live session, and that is ` +
+        'where the fleet snapshot is read from',
+    );
+  } else {
+    off('firstmate', 'not running - no crew decisions; everything else works');
+  }
+
   // One of the two outbound requests Raise makes - the update check below is the
   // other - so its default is off and its default is silent: `off` rather than
   // `warn`, exactly like no-mistakes and Lavish. A `problem` is different: it is
@@ -1114,7 +1208,6 @@ async function cmdDoctor() {
     }
   }
 
-  const sessions = new SessionRegistry({ dir: sessionsDir() }).list();
   if (sessions.length > 0) {
     const focusable = sessions.filter((s) => s.host?.tmux_pane || s.host?.iterm_session_id || s.host?.tty);
     ok('Sessions', `${sessions.length} registered, ${focusable.length} focusable`);

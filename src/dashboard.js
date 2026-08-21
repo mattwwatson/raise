@@ -61,6 +61,8 @@ import { pullRequestKey } from './forge.js';
 /** @typedef {import('./nm-state.js').Run} Run */
 /** @typedef {import('./nm-state.js').PullRequest} PullRequest */
 /** @typedef {import('./forge.js').ForgeReading} ForgeReading */
+/** @typedef {import('./firstmate-decisions.js').Decision} Decision */
+/** @typedef {import('./firstmate-decisions.js').DecisionTask} DecisionTask */
 
 /**
  * How much a row wants a human, most urgent first.
@@ -69,6 +71,17 @@ import { pullRequestKey } from './forge.js';
  * disguise: the agent has stopped and is waiting on a person. It only looks
  * like work because the waiting happens inside a subprocess, so the hooks see a
  * busy session rather than a blocked one.
+ *
+ * `decision` is a firstmate crewmate stopped waiting for a ruling from you, and
+ * it sits between `review` and `parked` deliberately. **Not `blocked`**: that is
+ * red and belongs to a gate on the session in front of you, and nothing on this
+ * page may compete with it. **Not folded into `review`**: that word means a live
+ * `lavish-axi poll` and is settled by a live process, so two different facts
+ * under one word would be exactly the second opinion the source ranking exists
+ * to prevent. **Above `parked`**: firstmate's own crew state maps a pending
+ * decision to `parked`, so it is the same category of thing - work stopped at a
+ * gate - but it is stopped on *you*, where a parked no-mistakes run usually
+ * answers itself within seconds.
  *
  * There is deliberately no `done`: a run that ended quietly leaves the page
  * altogether rather than settling into a state of its own - see
@@ -84,7 +97,7 @@ import { pullRequestKey } from './forge.js';
  * is why the absence has to be spelled rather than left null. It sorts last,
  * renders faint, and is excluded from the coloured groups on the page.
  *
- * @typedef {'blocked'|'review'|'parked'|'failed'|'idle'|'working'|'untracked'} Attention
+ * @typedef {'blocked'|'review'|'decision'|'parked'|'failed'|'idle'|'working'|'untracked'} Attention
  */
 
 /**
@@ -94,9 +107,11 @@ import { pullRequestKey } from './forge.js';
  *
  * @typedef {object} Row
  * @property {string} id stable across polls, so the page can diff on it
- * @property {'session'|'run'|'untracked'} kind `untracked` is a session found on
- *   disk that no hook has ever reported - it carries where it is and what it was
- *   about, and deliberately nothing about what it is doing
+ * @property {'session'|'run'|'decision'|'untracked'} kind `untracked` is a
+ *   session found on disk that no hook has ever reported - it carries where it
+ *   is and what it was about, and deliberately nothing about what it is doing.
+ *   `decision` is firstmate rulings with no row to sit on, which exists for the
+ *   same reason the unattributable run card does
  * @property {string|null} sessionId null for a run with no session attached, and
  *   for an untracked session, which is not in the registry that `/focus`,
  *   `/dismiss` and `/recent` all read
@@ -116,7 +131,14 @@ import { pullRequestKey } from './forge.js';
  *   replaces it with neutral wording
  * @property {import('./registry.js').SessionState|null} sessionState
  * @property {number|null} sessionStateSince
- * @property {number|null} waitingForMs how long blocked, for the "2m" column
+ * @property {number|null} waitingSince the moment this row's wait is measured
+ *   from, or null where it is not waiting - see `waitingSinceFor`. Absolute, so
+ *   a renderer that re-renders on a tick keeps counting between pushes
+ * @property {number|null} waitingForMs the same wait, already elapsed, for a
+ *   renderer that wants the number rather than the mark. Derived from
+ *   `waitingSince` and never decided separately
+ * @property {boolean} wantsYou whether this row's state means a person is the
+ *   one holding it up - see `WANTS_YOU`
  * @property {boolean} dismissible whether this row is announcing a block a human
  *   may say is not owed. Only ever Claude Code's idle nudge - a permission
  *   prompt offers no control at all rather than a control that must not be used
@@ -133,6 +155,17 @@ import { pullRequestKey } from './forge.js';
  * @property {import('./firstmate.js').SpawnedBy|null} spawnedBy which tool
  *   started this session's window, when that tool declared itself. Null for a
  *   session nobody in particular started, which is most of them
+ * @property {Decision[]} decisions the firstmate rulings open on this row, in
+ *   the order the fold returns them - most recently opened last. A set rather
+ *   than one decision because four on a single crewmate is the ordinary case,
+ *   and an empty array and the absence of the field mean the same thing: both
+ *   renderers must treat them alike
+ * @property {number|null} decisionsPending how many decisions are open across
+ *   the whole crew, on the captain's row and no other. A count of decisions
+ *   rather than of tasks, and it belongs there because the captain window is
+ *   where a ruling is actually given
+ * @property {string|null} decisionsLabel the marker beside the state word, or
+ *   null where the state word has already said it - see `decisionsLabel`
  * @property {Run|null} run
  * @property {number|null} updatedAt
  * @property {string|null} summary what the session is working on, in Claude's
@@ -140,12 +173,14 @@ import { pullRequestKey } from './forge.js';
  *   `pipeline` below rather than taking this
  * @property {Pipeline|null} pipeline what no-mistakes is doing for this row,
  *   which is a different question from what the session is doing
- * @property {boolean} attributable whether this row is a session, or a run we
- *   could not tie to one. False is the whole content of the unattributable
- *   card, which exists to say so rather than to be quietly wrong
+ * @property {boolean} attributable whether this row is a session, or something
+ *   we could not tie to one - a run, or a set of rulings. False is the whole
+ *   content of the unattributable card, which exists to say so rather than to
+ *   be quietly wrong
  * @property {number|null} candidateSessions how many live sessions share this
  *   run's repository; only set when `attributable` is false, to say how far the
- *   uncertainty reaches
+ *   uncertainty reaches. Null on a rulings card, which has no repository and so
+ *   nothing to narrow it to
  * @property {string|null} activity the tool it is running right now
  * @property {string|null} mode 'plan' and the like; null for an ordinary turn
  * @property {string|null} reviewUrl the Lavish page this row is waiting on
@@ -187,6 +222,7 @@ import { pullRequestKey } from './forge.js';
 export const ATTENTION_ORDER = [
   'blocked',
   'review',
+  'decision',
   'parked',
   'failed',
   'idle',
@@ -197,6 +233,7 @@ export const ATTENTION_ORDER = [
 const ATTENTION_LABELS = {
   blocked: 'Waiting for you',
   review: 'Waiting on your review',
+  decision: 'Waiting on your decision',
   parked: 'Pipeline parked at a gate',
   failed: 'Failed',
   idle: 'Idle',
@@ -208,6 +245,93 @@ const ATTENTION_LABELS = {
 /** @param {Attention} attention */
 export function attentionLabel(attention) {
   return ATTENTION_LABELS[attention] || attention;
+}
+
+/**
+ * The levels that mean a person is the one holding a row up.
+ *
+ * The page asks this twice - once per row for the notification, once over the
+ * whole list for the tab title - and it used to answer both by writing the three
+ * words out. This branch then added `decision` to each of them by hand, which is
+ * the drift arriving rather than merely being possible. So the set lives here,
+ * both answers come off it, and the page reads `Row.wantsYou` and
+ * `summary.wantsYou` rather than restating anything.
+ *
+ * `parked` is not in it: a pipeline at a gate is usually answered by the agent
+ * itself, and `failed` is a thing that already happened rather than a thing
+ * waiting.
+ *
+ * @type {Set<string>}
+ */
+const WANTS_YOU = new Set(['blocked', 'review', 'decision']);
+
+/**
+ * The moment a row's wait is measured from, or null where it is not waiting.
+ *
+ * The mark rather than the elapsed figure, because the page re-renders on a tick
+ * and has to keep counting between pushes - `waitingForMs` is derived from this,
+ * so the two cannot answer differently. The page held its own copy of this
+ * condition until it had been edited in step with this one twice, which is the
+ * same reason `decisionsLabel` moved here.
+ *
+ * **A ruling is gated on the session's own state, not on the attention word.**
+ * `stateSince` marks a state *transition*, so it is a wait only while the state
+ * that set it is the state the session is still in: read while `blocked`,
+ * nothing has moved it since the session entered that block. The attention word
+ * carries no such guarantee, because `decision` outlives the block beneath it -
+ * the captain's row takes it from a ruling it merely carries while it works
+ * away, and a crewmate keeps it through the held reading after resuming. Both go
+ * on transitioning, so the mark being measured against is the one the row itself
+ * keeps resetting. Those rows say when they last did something instead, which is
+ * worth more than a wait we would be inventing.
+ *
+ * @param {Attention} attention
+ * @param {import('./registry.js').SessionState|null} sessionState
+ * @param {number|null} stateSince
+ * @param {Run|null} run
+ * @returns {number|null}
+ */
+function waitingSinceFor(attention, sessionState, stateSince, run) {
+  if (attention === 'blocked' || attention === 'review') return stateSince || null;
+  if (attention === 'decision' && sessionState === 'blocked') return stateSince || null;
+  return run?.parked ? run.parkedSince || null : null;
+}
+
+/**
+ * The firstmate marker beside a row's state word, in the position and for the
+ * reason the `dismissed` marker sits there - the marker and the state word are
+ * one sentence.
+ *
+ * **It asks whether the state word has already said a ruling is waiting, never
+ * how many there are.** The count was the wrong question, and asking it hid the
+ * one thing this feature exists to show: the marker used to be suppressed at
+ * exactly one ruling on the reasoning that "Waiting on your decision" says it
+ * already - true only while that *is* the row's word. A crewmate with one ruling
+ * and a live Lavish poll reads `review`, and one stopped at a permission prompt
+ * reads `blocked`; on both the card then said nothing about the ruling at all,
+ * leaving a chevron identical to every other row's as the only sign, while
+ * `raise status` printed the ruling on that same row. That is the defect this
+ * whole change was made to remove, one attention level over, and the page was
+ * the surface telling the lie.
+ *
+ * One marker per row, never two. The captain's counts the whole crew and its own
+ * list is a subset of that, so both would be one number explaining another.
+ *
+ * Computed here rather than in either renderer because there is no third place
+ * for it: the page is served as static files and imports only
+ * `public/connection.js`, so a shared helper cannot reach it. It lived as two
+ * copies for that reason and they are exactly what drifted.
+ *
+ * @param {Attention} attention
+ * @param {Decision[]} decisions the rulings this row itself holds
+ * @param {number|null} decisionsPending the crew-wide count, captain's row only
+ * @returns {string|null}
+ */
+function decisionsLabel(attention, decisions, decisionsPending) {
+  if (decisionsPending) return `${decisionsPending} across the crew`;
+  if (decisions.length === 0) return null;
+  if (decisions.length === 1 && attention === 'decision') return null;
+  return `${decisions.length} open`;
 }
 
 /**
@@ -716,6 +840,39 @@ export function isDismissibleBlock(session) {
 }
 
 /**
+ * Whether this session's recorded block should defer to an open firstmate ruling.
+ *
+ * A crewmate that has asked for a ruling has stopped, and a stopped Claude Code
+ * session is exactly what produces the sixty-second nudge - so the nudge is the
+ * symptom and the ruling is the cause. Where both are present the ruling is the
+ * answer worth giving, and everything the block would otherwise have put on the
+ * row defers to it: the attention level in `attentionFor`, and in `buildRows`
+ * the nudge's own wording and the `Not for me` control.
+ *
+ * **Three callers, one definition, and the condition rather than the winning
+ * attention word.** `attention !== 'decision'` looks like the same test and is
+ * only an exact one while `decision` is the level that happens to win. It was
+ * not: a ruling row also carrying a live Lavish poll falls past `blocked`,
+ * lands on `review`, and the proxy then reads true - so the row kept a control
+ * promising to quieten it and could not, which is the affordance rule broken in
+ * the same place this rule exists to protect. Reordering the levels or adding
+ * one would detach the two row fields from the rule again with nothing failing,
+ * and that is the ordering defect this whole change was made to remove, one
+ * layer up. Ask the condition.
+ *
+ * A permission prompt is never deferred: `isIdleNudge` fails closed, so an
+ * unrecognised notification type stays a hard block, and a gate only that window
+ * can clear is not something a ruling elsewhere may quieten.
+ *
+ * @param {{message?: string|null, notificationType?: string|null}|null} session
+ * @param {number} decisions the open rulings joined to this row
+ * @returns {boolean}
+ */
+function blockDefersToRuling(session, decisions) {
+  return decisions > 0 && isIdleNudge(session?.message, session?.notificationType);
+}
+
+/**
  * Whether a dismissal is the thing keeping this session quiet.
  *
  * This is the dismissal branch of `effectiveSessionState` on its own, because
@@ -792,6 +949,54 @@ function effectiveSessionState(session, summary, pipelineRunning = false) {
 const FINISHED_QUIETLY = new Set(['completed', 'cancelled']);
 
 /**
+ * The firstmate task a session is, or null.
+ *
+ * Two independent joins, tried in that order, and both are firstmate's own
+ * declaration rather than an inference of ours. The **window name** comes off
+ * `endpoint.target` and is the same pinned `fm-<id>` this codebase already keys
+ * crewmates on, so it is the more direct of the two. The **worktree** is the
+ * checkout firstmate spawned the crewmate into, matched against the session's
+ * own `cwd`.
+ *
+ * Either join finding more than one task means we cannot say which, and the
+ * existing invariant applies without amendment: **an attribute we cannot place
+ * belongs to nobody.** It is not sprayed across the candidates - shown on every
+ * task that might own it, it is false on all but one with no way to tell which,
+ * and a line you learn to distrust on one card is one you distrust everywhere.
+ * The decision stays with the captain instead, which is the one row that is
+ * certainly right about it.
+ *
+ * **This is one half of that invariant and cannot be the other.** It is handed
+ * a single session, so it can only see a session matching several tasks; the
+ * mirror case - several sessions matching one task - is only visible once every
+ * session has been asked, and is guarded in `buildRows` where that is true.
+ *
+ * **Which join answered is returned with the answer, because the ranking has to
+ * survive that second guard.** The window name is an exact match against a name
+ * firstmate pinned; the worktree is a containment test that any session sitting
+ * under the path satisfies, the person who opened their own agent in there to
+ * see what the crewmate is asking included. Told only *that* two sessions
+ * matched, `buildRows` would have to treat those as equal evidence and place
+ * nothing - which loses the one row firstmate itself named, in exactly the
+ * situation where somebody is looking into a stopped crewmate.
+ *
+ * @param {Session} session
+ * @param {string|null} windowName the tmux window this session's pane sits in
+ * @param {DecisionTask[]} tasks
+ * @returns {{task: DecisionTask, by: 'window'|'worktree'}|null}
+ */
+export function matchDecisionTask(session, windowName, tasks) {
+  if (!tasks || tasks.length === 0) return null;
+  if (windowName) {
+    const named = tasks.filter((task) => task.window && task.window === windowName);
+    if (named.length === 1) return { task: named[0], by: 'window' };
+    if (named.length > 1) return null;
+  }
+  const inside = tasks.filter((task) => isInside(session?.cwd || null, task.worktree));
+  return inside.length === 1 ? { task: inside[0], by: 'worktree' } : null;
+}
+
+/**
  * Decide the single attention level for a row.
  *
  * A session polling a Lavish artifact outranks everything except an outright
@@ -815,9 +1020,22 @@ const FINISHED_QUIETLY = new Set(['completed', 'cancelled']);
  * believed. It reads as `working`: shown, uncommitted, and ranked below every
  * session that actually wants a human.
  *
- * @param {{session: Session|{state: string}|null, run: Run|null,
+ * An open firstmate decision is checked here rather than being disproved
+ * anywhere: firstmate has already reconciled its own fold against live crew
+ * state, so a decision the crew has moved past is absent from the reading
+ * rather than present and stale. Nothing in this file second-guesses that -
+ * the tool that owns the fact is the one stating it.
+ *
+ * `session` carries `message` and `notificationType` because the ruling rule
+ * below has to tell Claude Code's idle nudge from a permission prompt, which is
+ * what those two fields settle - the same pair `effectiveSessionState` reads for
+ * the same distinction.
+ *
+ * @param {{session: Session|{state: string, message?: string|null,
+ *            notificationType?: string|null}|null, run: Run|null,
  *          summary?: import('./transcript.js').TranscriptSummary|null,
- *          agent?: Agent|null, pipelineRunning?: boolean}} input
+ *          agent?: Agent|null, pipelineRunning?: boolean,
+ *          decisions?: number}} input
  * @returns {Attention}
  */
 export function attentionFor({
@@ -826,11 +1044,21 @@ export function attentionFor({
   summary = null,
   agent = null,
   pipelineRunning = false,
+  decisions = 0,
 }) {
   const state = effectiveSessionState(session, summary, pipelineRunning);
-  if (state === 'blocked') return 'blocked';
+  // **An open ruling outranks the idle nudge, and never a permission prompt.**
+  // Letting the nudge win says "Waiting for you", which is true and useless: the
+  // row is holding the specific answer and refusing to give it, and the reader
+  // has to go and ask somebody what the row meant. That is the failure this whole
+  // feature exists to remove, reintroduced one level up. Observed on the first
+  // hand-test of it. The reason it is asked as a condition, and what defers with
+  // it, are at `blockDefersToRuling`; a folded pipeline agent's block below is a
+  // real gate and still wins.
+  if (state === 'blocked' && !blockDefersToRuling(session, decisions)) return 'blocked';
   if (agent?.state === 'blocked') return 'blocked';
   if (session && summary?.lavishFile) return 'review';
+  if (decisions > 0) return 'decision';
   if (run?.parked) return 'parked';
   if (run && !run.active && run.status === 'failed') return 'failed';
   if (run?.active) return 'working';
@@ -864,6 +1092,13 @@ export function attentionFor({
  * `.git` read as `branches`, which is not only a saving: through the link the
  * branch is what picks which of that checkout's runs belongs to this worktree.
  *
+ * `decisions`, `windowNames` and `captainSessionId` are that arrangement once
+ * more. Reading firstmate's fleet snapshot is a subprocess taking tens of
+ * seconds, and the window a pane sits in is a tmux query - neither belongs in a
+ * pure file, and the captain is identified by a pid file this cannot open
+ * either. All three are empty on a machine with no firstmate, where this
+ * behaves exactly as it did before any of it existed.
+ *
  * `untracked` arrives the same way again: finding a transcript nothing has
  * reported means walking three directory trees, which is filesystem work. Its
  * entries are keyed into `summaries`, `branches` and `mainCheckouts` by their
@@ -882,7 +1117,10 @@ export function attentionFor({
  *          runOwners?: Map<string, string>,
  *          forgeStates?: Map<string, ForgeReading>,
  *          untracked?: import('./untracked.js').UntrackedSession[],
- *          spawnedBy?: Map<string, import('./firstmate.js').SpawnedBy|null>}} input
+ *          spawnedBy?: Map<string, import('./firstmate.js').SpawnedBy|null>,
+ *          decisions?: DecisionTask[],
+ *          windowNames?: Map<string, string|null>,
+ *          captainSessionId?: string|null}} input
  * @returns {Row[]}
  */
 export function buildRows({
@@ -899,6 +1137,9 @@ export function buildRows({
   forgeStates = new Map(),
   untracked = [],
   spawnedBy = new Map(),
+  decisions = [],
+  windowNames = new Map(),
+  captainSessionId = null,
 }) {
   /** @type {Row[]} */
   const rows = [];
@@ -968,6 +1209,75 @@ export function buildRows({
       lastActivityAt: summary?.lastActivityAt ?? null,
     });
   }
+  // Which crewmate each open firstmate decision belongs to, resolved once so
+  // that the captain's row can be given whatever is left over. A decision we
+  // could not place is not dropped and not sprayed across candidates: it goes
+  // to the captain, who is where a ruling is given whoever it is about, and is
+  // therefore the one row that cannot be wrong about it.
+  //
+  // **The ambiguity has two directions and both are guarded.**
+  // `matchDecisionTask` answers the first - one session matching several tasks
+  // cannot say which task it is - and it can only ever see one session, so the
+  // second is resolved here: several sessions matching the same task cannot say
+  // which session owns it. That happens without anything going wrong, because
+  // `isInside` is a containment test: a person opening their own agent in a
+  // crewmate's worktree, a session in a subdirectory of it, or a crewmate that
+  // has restarted before its old registry entry was pruned all sit under the
+  // one task path, and a split crewmate window puts two panes under the one
+  // pinned name. Placing it on each of them would be the same false attribute
+  // on all but one, with no way to tell which.
+  //
+  // **The two joins are ranked, and the ranking is what decides "cannot say".**
+  // Ambiguity is only ambiguity between claims of equal weight. An exact match
+  // on the name firstmate pinned and an incidental match on a path the claimant
+  // merely sits under are not equal, so a lone window claimant takes the task
+  // over any number of worktree ones - otherwise a person opening their own
+  // agent inside a crewmate's checkout, which is what you do when you want to
+  // see what it is asking, would silently quieten the crewmate's own row. Two
+  // claims of the *same* kind stay unplaceable, and the better evidence being
+  // ambiguous does not promote the weaker: two window claimants leave the task
+  // with the captain even if one session also matched by worktree.
+  /** @type {Map<string, {task: DecisionTask, window: string[], worktree: string[]}>} */
+  const taskClaims = new Map();
+  for (const session of human) {
+    const claim = matchDecisionTask(
+      session,
+      windowNames.get(session.sessionId) || null,
+      decisions,
+    );
+    if (!claim) continue;
+    // Claimed on the *match*, not on there being something to show. It makes no
+    // visible difference today, a task with nothing open contributing nothing to
+    // the captain either way - it is written this way because "this task belongs
+    // to that row" is the fact being recorded, and reading it off what the task
+    // happens to hold would go wrong the first time a task carried anything else.
+    let entry = taskClaims.get(claim.task.id);
+    if (!entry) {
+      entry = { task: claim.task, window: [], worktree: [] };
+      taskClaims.set(claim.task.id, entry);
+    }
+    entry[claim.by].push(session.sessionId);
+  }
+  /** @type {Map<string, Decision[]>} */
+  const sessionDecisions = new Map();
+  /** @type {Set<string>} */
+  const placedTasks = new Set();
+  for (const { task, window, worktree } of taskClaims.values()) {
+    const claimants = window.length > 0 ? window : worktree;
+    // A task two claimants of one kind could own is placed on neither, and falls
+    // to the captain by the same route a task nothing claimed does - counted
+    // once, dropped never.
+    if (claimants.length !== 1) continue;
+    placedTasks.add(task.id);
+    if (task.decisions.length > 0) sessionDecisions.set(claimants[0], task.decisions);
+  }
+  const unplacedDecisions = decisions
+    .filter((task) => !placedTasks.has(task.id))
+    .flatMap((task) => task.decisions);
+  // Decisions, not tasks. Four rulings on one crewmate is the ordinary case, and
+  // a count of tasks would say "1" over four things waiting.
+  const decisionsPending = decisions.reduce((total, task) => total + task.decisions.length, 0);
+
   for (const session of human) {
     // A matched run answers two different questions, and they are resolved
     // separately because narrowing one of them must never narrow the other.
@@ -1019,8 +1329,24 @@ export function buildRows({
     const summary = summaries.get(session.sessionId) || null;
     const agent = (run && agents.get(run.runId)) || null;
     const pipelineRunning = pipelines.has(session.sessionId);
-    const attention = attentionFor({ session, run, summary, agent, pipelineRunning });
+    // The captain carries what nobody else could be given, so that a ruling
+    // request whose crewmate window has gone is still readable somewhere rather
+    // than being a number with nothing behind it.
+    const isCaptain = session.sessionId === captainSessionId;
+    const rowDecisions = [
+      ...(sessionDecisions.get(session.sessionId) || []),
+      ...(isCaptain ? unplacedDecisions : []),
+    ];
+    const attention = attentionFor({
+      session,
+      run,
+      summary,
+      agent,
+      pipelineRunning,
+      decisions: rowDecisions.length,
+    });
     const sessionState = effectiveSessionState(session, summary, pipelineRunning);
+    const rowWaitingSince = waitingSinceFor(attention, sessionState, session.stateSince, run);
     const plan = planFocus(session);
     // The checkout's own branch, and nothing else. A run used to be able to
     // lend its branch to a session sitting in its repo, for a checkout whose
@@ -1071,23 +1397,35 @@ export function buildRows({
       // dialog as a permission prompt, so the specific claim is only safe to
       // repeat for the kinds it can actually tell apart. The agent's message
       // has already been through it where it was built.
+      // Suppressed where the block defers to a ruling even though the session's
+      // own state is still `blocked`: the nudge's generic wording beside the
+      // ruling is a second, weaker answer to a question the row has already
+      // answered, and the ruling's own words are in the panel. One answer per
+      // fact.
       message:
-        (sessionState === 'blocked'
+        (sessionState === 'blocked' && !blockDefersToRuling(session, rowDecisions.length)
           ? blockReason(session.message, session.notificationType)
           : null) ||
         (attention === 'blocked' ? agent?.message : null) ||
         null,
       sessionState,
       sessionStateSince: session.stateSince || null,
-      waitingForMs:
-        attention === 'blocked' || attention === 'review'
-          ? now - (session.stateSince || now)
-          : null,
+      waitingSince: rowWaitingSince,
+      waitingForMs: rowWaitingSince === null ? null : now - rowWaitingSince,
+      wantsYou: WANTS_YOU.has(attention),
       // Offered only while this session's *own* block is what makes the row red.
       // A row blocked by its folded pipeline agent reads the same on the page
       // and is not this session's to answer, so the effective state is checked
       // rather than the attention.
-      dismissible: sessionState === 'blocked' && isDismissibleBlock(session),
+      // Never where the block defers to a ruling. The nudge underneath it is
+      // dismissible, but a ruling cannot be dismissed from here - answering one
+      // is firstmate's, and Raise does not write to it - so a control that looks
+      // like it would quieten this row and cannot is the affordance rule broken
+      // exactly where it matters most.
+      dismissible:
+        sessionState === 'blocked' &&
+        !blockDefersToRuling(session, rowDecisions.length) &&
+        isDismissibleBlock(session),
       // Said out loud on an idle row, because the difference between "nothing is
       // waiting" and "I told it to stop saying so" is exactly the difference
       // this page cannot afford to blur. It is that sentence and nothing else,
@@ -1106,6 +1444,16 @@ export function buildRows({
       // nobody in particular started, which is the ordinary case and gets no
       // claim made about it either way.
       spawnedBy: spawnedBy.get(session.sessionId) || null,
+      // First-party declaration, so it is shown as given: firstmate reconciles
+      // its own fold against live crew state, and nothing here second-guesses
+      // the result in either direction.
+      decisions: rowDecisions,
+      // The whole crew's total, and only here. It is beside the state word
+      // rather than colouring the row, for the same reason the `dismissed`
+      // marker is: it explains what is waiting, it does not claim this window
+      // is the one that stopped.
+      decisionsPending: isCaptain ? decisionsPending : null,
+      decisionsLabel: decisionsLabel(attention, rowDecisions, isCaptain ? decisionsPending : null),
       run: run || null,
       updatedAt: session.updatedAt || null,
       // What the *session* is about, always - never the pipeline step. The step
@@ -1123,6 +1471,13 @@ export function buildRows({
       // On a review row the running tool *is* the waiting - "Running lavish-axi"
       // next to "Waiting on your review" reads as work in progress, which is
       // the one impression this state exists to correct.
+      //
+      // **`decision` is missing here on purpose, and is not the same omission as
+      // the two the ruling change had to fix.** That reasoning does not carry: a
+      // crewmate stopped on a ruling is in the position a `blocked` session is
+      // in, and a `blocked` row shows its activity - a stopped crewmate usually
+      // has no tool in flight to show anyway, so adding it here would only ever
+      // remove a line. Do not complete the set.
       activity: attention === 'review' ? null : summary?.activity || null,
       // 'normal' is the absence of a mode, and saying so on every card would be
       // noise on the one thing this page has to keep scannable.
@@ -1202,6 +1557,7 @@ export function buildRows({
     ).length;
     const agent = agents.get(run.runId) || null;
     const attention = attentionFor({ session: null, run, agent });
+    const runWaitingSince = waitingSinceFor(attention, null, null, run);
     rows.push({
       id: `run:${run.runId}`,
       kind: 'run',
@@ -1217,7 +1573,9 @@ export function buildRows({
       message: attention === 'blocked' ? agent?.message || null : null,
       sessionState: null,
       sessionStateSince: null,
-      waitingForMs: null,
+      waitingSince: runWaitingSince,
+      waitingForMs: runWaitingSince === null ? null : now - runWaitingSince,
+      wantsYou: WANTS_YOU.has(attention),
       // No session behind it, so no announcement anybody could answer.
       dismissible: false,
       dismissed: false,
@@ -1226,6 +1584,11 @@ export function buildRows({
       agentKind: null,
       // No session, so no window for anybody to have spawned.
       spawnedBy: null,
+      // A firstmate decision belongs to a crewmate's session or to the captain's
+      // - never to a pipeline run, which is a different tool's business.
+      decisions: [],
+      decisionsPending: null,
+      decisionsLabel: null,
       run,
       updatedAt: run.updatedAt || null,
       // No session, so nothing to say about one. What the pipeline is doing goes
@@ -1293,7 +1656,9 @@ export function buildRows({
       message: null,
       sessionState: null,
       sessionStateSince: null,
+      waitingSince: null,
       waitingForMs: null,
+      wantsYou: WANTS_YOU.has('untracked'),
       dismissible: false,
       dismissed: false,
       focusable: false,
@@ -1304,6 +1669,11 @@ export function buildRows({
       hostKind: null,
       agentKind: session.agent,
       spawnedBy: null,
+      // Placing a decision here would be attributing one, which is the whole of
+      // what an untracked row refuses to do.
+      decisions: [],
+      decisionsPending: null,
+      decisionsLabel: null,
       run: null,
       updatedAt: session.lastSeenAt,
       // Past tense and safe. Null for pi and Codex, neither of which writes a
@@ -1324,6 +1694,69 @@ export function buildRows({
       // be read as a tracked one, which is the opposite of what it is for.
       pr: null,
       lastActivityAt: summary?.lastActivityAt ?? session.lastSeenAt,
+    });
+  }
+
+  // Rulings that had nowhere to go, on a card that says so.
+  //
+  // The captain's row carries the remainder whenever there is one, because the
+  // captain is where a ruling is given whoever it is about. There is not always
+  // one: the reading is held for a bounded run of ticks in which firstmate's own
+  // lock will not read, and in those the captain cannot be identified even
+  // though its session is very likely still on the page. Until this existed the
+  // remainder went to no row and was counted nowhere - the set silently bounded,
+  // which is the one thing this feature may never do to a decision.
+  //
+  // So it follows the unattributable run, which exists for exactly this: an
+  // attribute we cannot place belongs to nobody *and says so*. It carries every
+  // ruling rather than a count of them, because a count with nothing behind it
+  // is the same omission wearing a number.
+  if (unplacedDecisions.length > 0 && !human.some((s) => s.sessionId === captainSessionId)) {
+    rows.push({
+      id: 'decisions:unplaced',
+      kind: 'decision',
+      sessionId: null,
+      cwd: null,
+      title: 'Rulings waiting',
+      titlePath: null,
+      sessionName: null,
+      branch: null,
+      attention: 'decision',
+      attentionLabel: attentionLabel('decision'),
+      message: null,
+      sessionState: null,
+      sessionStateSince: null,
+      waitingSince: null,
+      waitingForMs: null,
+      wantsYou: WANTS_YOU.has('decision'),
+      // No session announced these, so there is nothing anybody could answer.
+      dismissible: false,
+      dismissed: false,
+      focusable: false,
+      hostKind: null,
+      agentKind: null,
+      spawnedBy: null,
+      decisions: unplacedDecisions,
+      // The crew-wide count belongs to the captain's row and to no other, and
+      // this is not it. Its own list is what it holds, and that is what it says.
+      decisionsPending: null,
+      decisionsLabel: decisionsLabel('decision', unplacedDecisions, null),
+      run: null,
+      updatedAt: null,
+      summary: null,
+      pipeline: null,
+      // The whole point of this card, and the same boolean the run card uses:
+      // it is here *because* we could not place it.
+      attributable: false,
+      // No repository, so there is no set of sessions to narrow it to. The run
+      // card can say "probably one of your three on this repo"; this cannot, and
+      // guessing would be the confident wrong claim the card exists to avoid.
+      candidateSessions: null,
+      activity: null,
+      mode: null,
+      reviewUrl: null,
+      pr: null,
+      lastActivityAt: null,
     });
   }
 
@@ -1587,8 +2020,13 @@ export function disambiguateTitles(rows) {
  * An untracked session sorts below even that. The unplaceable run may still have
  * a gate somebody has to answer; an untracked row is, by construction, waiting
  * on nothing we can name.
+ *
+ * Rulings we could not place sit between the two, above the run for the one
+ * reason that separates them: a ruling is by definition a person's to give,
+ * where a run we cannot place may be working away perfectly well. Both are still
+ * below every session, because neither can take you anywhere.
  */
-const KIND_ORDER = { session: 0, run: 1, untracked: 2 };
+const KIND_ORDER = { session: 0, decision: 1, run: 2, untracked: 3 };
 
 /**
  * @param {Row[]} rows
@@ -1613,7 +2051,16 @@ export function sortRows(rows) {
 export function summarise(rows) {
   const blocked = rows.filter((r) => r.attention === 'blocked').length;
   const review = rows.filter((r) => r.attention === 'review').length;
+  // Rows, like every other count here, and not the number of decisions on them:
+  // this is what the tab title and the pills are built from, and those answer
+  // "how many things want me", which is a question about sessions.
+  const decision = rows.filter((r) => r.attention === 'decision').length;
   const parked = rows.filter((r) => r.attention === 'parked').length;
   const failed = rows.filter((r) => r.attention === 'failed').length;
-  return { blocked, review, parked, failed, total: rows.length };
+  // The tab title's number, off the same set each row's own `wantsYou` comes
+  // from, so the count and the rows behind it cannot say different things about
+  // who is waiting. Asked of the attention rather than of the flag, so a caller
+  // holding only the attention still gets an answer.
+  const wantsYou = rows.filter((r) => WANTS_YOU.has(r.attention)).length;
+  return { blocked, review, decision, parked, failed, wantsYou, total: rows.length };
 }

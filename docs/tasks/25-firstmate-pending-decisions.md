@@ -1,8 +1,10 @@
 ---
 issue: 25
-status: backlog
+status: shipped
 size: M
 depends: -
+branch: 25-firstmate-pending-decisions
+shipped: 2026-08-19
 ---
 # 25 - A firstmate ruling scrolls off the captain window and nobody notices
 
@@ -318,3 +320,101 @@ on one and bare on the other is the two disagreeing about the same session.
 - A failing or empty snapshot leaves the previous reading in place.
 - The poll loop never awaits the snapshot; `server.test.js`'s synchronous-exec guard still holds.
 - `npm test`, `npm run lint` and `npm run typecheck` green.
+
+---
+
+## Implementation notes
+
+Built 19/08/2026. Three pieces: one new module that reads firstmate's own answer, one join in
+`dashboard.js`, and one attention level rendered by both renderers.
+
+**`src/firstmate-decisions.js`** runs `bash $FM_HOME/bin/fm-fleet-snapshot.sh --json` and
+reduces `tasks[]` to `{id, window, worktree, decisions[]}`. `$FM_HOME` is the captain session's
+own `cwd`, so nothing is hardcoded and nothing goes looking; `FirstmateWatch` grew
+`captainSession(sessions)` for it, because identification is that module's job and asking a
+second module to re-derive it would be two answers to one question.
+
+`parseSnapshot` returns `null` for a reading we did not get and `[]` for a reading of nothing,
+and the caller treats them differently: `null` keeps the previous answer, `[]` replaces it. That
+distinction matters in both directions - a failed command must not take every ruling off
+the page at once, and a fleet that genuinely drained to nothing must not leave its last
+decisions standing for ever. The schema id is checked exactly, and a schema we have not read
+counts as `null`: `open_decisions` being *reconciled* is a property of this version, and a later
+one could keep the field and move that work elsewhere.
+
+**The cost gate is five rules, not the three the brief above prescribes.** The snapshot was
+re-measured at **13.7s** on the day it was built, against the 3.5s recorded above - same machine,
+same command, four times the cost - so the gating matters more than it looked. The three
+prescribed rules are all there: re-run only when a `state/*.status` mtime moves, fire and never
+await, and hold a minimum `REFRESH_MS` (30s) between reads, stamped when one goes out.
+
+The fourth is `ASSERTION_MAX_AGE_MS`, and it exists because **the mtime gate cannot see the
+reconciliation**. A decision clears when the crew resumes past it, and the crew resuming is a
+live run-step or a busy pane - neither of which touches a status file. A gate on file mtimes
+alone could therefore hold a ruling request that had already been answered, which is the
+confident stale alarm this item's own evidence warns about. So a reading that is *asserting*
+something is re-taken after five minutes even if nothing moved; a reading asserting nothing
+never is, because opening a decision always writes a status line. Cheap where it does not
+matter, honest where it does.
+
+**The fifth is `MAX_CONSECUTIVE_FAILURES`, added in review**, because a ceiling only helps if a
+reading can arrive. A snapshot that always fails - a schema we refuse by design, the script
+renamed by an upgrade, output past `exec.js`'s cap - or a captain lock that is there and will not
+read would otherwise leave the assertion standing for the life of the process while a
+fourteen-second bash ran to keep it looking fresh. So three consecutive non-answers drop the
+reading rather than holding it, every kind of non-answer counts on the same counter, and while
+that counter is above zero the ceiling re-dispatches whether or not anything is asserted - a
+stopped crewmate writes no status line, so recovery may not wait for one. The reasoning is in
+`src/firstmate-decisions.js`'s header, which owns it.
+
+`FM_SNAPSHOT_SECONDMATES=0` was measured as an alternative to a `--decisions-only` mode, since
+it is a supported bound the script validates and defaults itself. It saves 0.9s of 14.6s - the
+secondmate home walk is not where the time goes - so it was not adopted, and no firstmate change
+was made or asked for.
+
+**`raise status` waits, and that is a visible cost.** `load()` blocks, per the `LavishState.load`
+rule: a one-shot command has no later tick and printing before the answer arrives would mean
+printing a wrong one. So on a machine running firstmate the command takes about as long as the
+snapshot does, which the README now says out loud. The alternative - a CLI that quietly shows
+less than the page - breaks the rule that the two are one protocol, which is a worse trade.
+
+**`dashboard.js`** gained `matchDecisionTask` and three inputs (`decisions`, `windowNames`,
+`captainSessionId`). Both joins in the brief are implemented, window name first: it is
+firstmate's own published endpoint and an exact match, where the worktree is a path containment
+test. Either join finding more than one task places nothing, and the decision stays with the
+captain. `Row.decisions` carries what a row holds; `Row.decisionsPending` is the crew total and
+is set on the captain's row alone.
+
+**The captain gets `decision` attention when it is holding unplaceable rulings**, which the
+brief did not spell out. One rule drives both rows - `decisions.length > 0` - and the reason is
+the item's own premise: a ruling request whose crewmate window has gone would otherwise be a
+number on a quiet card, which is the signal scrolling off the window again by another route. The
+count itself never colours anything.
+
+**`ATTENTION_ORDER` gained `decision` between `review` and `parked`**, and `summarise` gained a
+count, so the tab title, the header pill and the desktop notification all treat a ruling as
+something waiting on a person. Leaving those out would have meant a state that is only visible
+once you are already looking at the page, on a page built to be glanced at.
+
+**The colour is a distinct value in the same family as `review`** - `#9333ea` light, `#d8b4fe`
+dark, against review's `#7839ee` and `#b692f6` - checked side by side in a browser in both
+schemes. Same family because both are a human gate; not the same value because they are two
+different facts and a reader who cannot tell them apart has one word doing the work of two.
+
+**One real defect was found only by looking at the page**, and it is worth the sentence: the
+panel's list item was first called `.decision`, which every attention level also is as
+`.card.decision`, `.bar.decision`, `.state.decision` and `.pill.decision`. Equal specificity,
+later in the sheet, so it silently won every property those four rules do not restate - the
+header pill lost its padding and the decision card lost half its height, with nothing in the
+markup or the tests to show for it. It is `.decision-item` now, and AGENTS.md carries the rule.
+
+**Fixtures.** `test/fixtures/fm-fleet-snapshot.js` keeps the shape of a real reading from
+`~/work/firstmate` and none of its content. The shape is what the tests are evidence for - one
+task carrying four open decisions, three `needs-decision` and one `blocked` in the order the fold
+returns them, and a second task whose decisions the reconciliation had already cleared - and that
+is what was taken. The task ids, the decision keys and the four summaries are invented: the words
+were written about somebody else's engagement and this repository is public. The file's own header
+records that, and records the sweep that found them. The four decisions were reproduced by running
+upstream's fold against the real status file rather than assumed. Nothing local was patched: this
+checkout's `_fm_decision_key` still collapses a task's decisions onto `default`, which
+under-reports and is correct as far as it goes.

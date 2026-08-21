@@ -58,6 +58,7 @@ import { ForgeState } from './forge.js';
 import { watchForgeConfig } from './forge-config.js';
 import { PollWatch } from './poll-watch.js';
 import { FirstmateWatch } from './firstmate.js';
+import { CAPTAIN_UNREADABLE, FirstmateDecisions } from './firstmate-decisions.js';
 import { UntrackedScan } from './untracked.js';
 import { buildRows, isDismissibleBlock, summarise } from './dashboard.js';
 import { BuildStamp, PUBLIC_DIR } from './build-stamp.js';
@@ -104,8 +105,9 @@ export function writeFrame(client, frame, onError) {
  * change comparison means a blocked session or a parked run - precisely the
  * states this tool exists for - pushes a full frame and a full DOM rebuild once
  * a second, forever. The page renders elapsed time from the absolute
- * `sessionStateSince`/`parkedSince` instead, so nothing is lost by ignoring
- * them here. Any future elapsed field belongs in this set.
+ * `waitingSince` instead - which is where the row already decided *whether* it
+ * is waiting, so nothing is lost by ignoring the elapsed pair here. Any future
+ * elapsed field belongs in this set.
  */
 const VOLATILE_FIELDS = new Set(['generatedAt', 'waitingForMs', 'parkedForMs']);
 
@@ -168,6 +170,11 @@ export function createMonitorServer({
   // Reads a tmux pane name once per pane and a pid file once per lock change,
   // so it costs a `list-panes` only when a window we have never seen turns up.
   const firstmate = new FirstmateWatch({ execAsync, files: gitFiles });
+  // Gated twice over: nothing runs unless a captain session is on the page, and
+  // then only when a crewmate has written to its own event log since the last
+  // reading. So a machine with no firstmate never spawns it, and a machine with
+  // an idle fleet spawns it once.
+  const firstmateDecisions = new FirstmateDecisions({ execAsync });
   // Outlives a poll on purpose: `axi run` returns at every gate, so the process
   // that proves ownership is absent for exactly as long as the run is parked.
   const runOwners = new RunOwners();
@@ -181,7 +188,10 @@ export function createMonitorServer({
   let writtenInfoPath = null;
 
   function snapshot() {
-    const sessions = registry.list();
+    // `read` rather than `list` because one caller below acts on the *absence*
+    // of a session and an empty array alone cannot say whether that absence was
+    // read or merely returned - see `SessionRegistry.read`.
+    const { sessions, readable: sessionsReadable } = registry.read();
     const candidateDirs = [...new Set(sessions.map((s) => s.cwd).filter(Boolean))];
     const { runs, pullRequests, source, warning } = nmState.read({ candidateDirs });
 
@@ -229,6 +239,13 @@ export function createMonitorServer({
     const reviewUrls = new Map();
     /** Which tool started each session's window, when the tool said so. */
     const spawnedBy = new Map();
+    /**
+     * The tmux window each session's pane sits in, which is how a firstmate
+     * decision finds its crewmate: `endpoint.target` names the same pinned
+     * `fm-<id>` window. Off the table `spawnedBy` already keeps warm, so this
+     * costs a map lookup and no query of its own.
+     */
+    const windowNames = new Map();
     /** Sessions with a no-mistakes run still going underneath them. */
     const pipelines = new Set();
     for (const session of sessions) {
@@ -240,6 +257,7 @@ export function createMonitorServer({
       // Cached per pane and per lock, so this is a map lookup on all but the
       // first tick a session is seen.
       spawnedBy.set(session.sessionId, firstmate.spawnedBy(session));
+      windowNames.set(session.sessionId, firstmate.windowName(session));
       // The process table is the authority on whether a poll is still running.
       // A transcript can say the poll returned when only the tool call did -
       // Claude Code backgrounds anything past its own timeout, and a review
@@ -257,6 +275,51 @@ export function createMonitorServer({
         reviewUrls.set(session.sessionId, lavish.urlFor(summary.lavishFile));
       }
     }
+
+    // The captain runs firstmate, and its own working directory is `$FM_HOME` -
+    // so finding it is also what schedules the fleet snapshot. A machine
+    // without firstmate has no lock holding a live session's pid, so there is
+    // no captain, nothing is scheduled and no subprocess runs. Never awaited:
+    // the command is bash walking a fleet and takes tens of seconds, where this
+    // loop has one.
+    //
+    // No captain among sessions we did read is positive evidence that firstmate
+    // has gone, and clears every ruling off the page. What decides the answer
+    // here is only ever whether a reading was *obtained*, never what went wrong
+    // when one was not.
+    //
+    // **An empty session list is an answer, and only a directory we could not
+    // read is not.** `list` returns the same empty array for both, which is why
+    // this reads through `registry.read` instead - the two are separable there
+    // and nowhere after it. Getting the split wrong is costly in both
+    // directions, which is what stops them being collapsed again. Take an empty
+    // list for a failed read, and quitting every agent at the end of the day
+    // with `raise serve` still running leaves a *Rulings waiting* card carrying
+    // four rulings, a tab title claiming somebody is waiting, and a desktop
+    // notification for a firstmate that has exited - for a quarter of an hour,
+    // until the ceiling counts it out. Take a failed read for an empty list, and
+    // a momentary filesystem error clears rulings that are still open.
+    //
+    // **A lock we could not read is the other non-answer**, and it is asked
+    // about *one directory at a time*. The question is only "has the captain
+    // gone", and the sole lock that can answer it is the one at the home the
+    // standing reading came from - no other session was ever the captain, so no
+    // other session's lock speaks to it. Asked across every session instead, a
+    // single stray `state/.lock` in an unrelated checkout would suppress this
+    // refresh for the whole machine. With no reading in hand there is no
+    // assertion to protect, so the answer is a plain no.
+    //
+    // Three answers, one call, and the call is always made. All this decides is
+    // *which* answer; what a non-answer costs is decided in one place, on one
+    // counter, over there - which is what bounds how long a hold can last.
+    const captain = firstmate.captainSession(sessions);
+    firstmateDecisions.refresh(
+      captain
+        ? captain.cwd
+        : !sessionsReadable || firstmate.lockUnreadableAt(firstmateDecisions.home)
+          ? CAPTAIN_UNREADABLE
+          : null,
+    );
 
     // Sessions nothing has ever reported, so the first page a stranger sees is
     // not blank. Deduped against the registry on every tick rather than at scan
@@ -311,6 +374,9 @@ export function createMonitorServer({
       forgeStates: forge.readings,
       untracked,
       spawnedBy,
+      decisions: firstmateDecisions.tasks,
+      windowNames,
+      captainSessionId: captain?.sessionId || null,
     });
     // Asking is what schedules the next answer, the same arrangement `lavish.js`
     // uses: the rows are what say which pull requests are worth a request, so

@@ -18,6 +18,8 @@
         --blocked-bg: #fef3f2;
         --review: #7839ee;
         --review-bg: #f9f5ff;
+        --decision: #9333ea;
+        --decision-bg: #faf5ff;
         --parked: #b54708;
         --parked-bg: #fffaeb;
         --failed: #7a271a;
@@ -38,6 +40,8 @@
           --blocked-bg: #2a1614;
           --review: #b692f6;
           --review-bg: #1e1830;
+          --decision: #d8b4fe;
+          --decision-bg: #241a33;
           --parked: #fdb022;
           --parked-bg: #2a2114;
           --failed: #ff8a7a;
@@ -107,6 +111,11 @@
         color: var(--review);
         border-color: color-mix(in srgb, var(--review) 35%, transparent);
         background: var(--review-bg);
+      }
+      .pill.decision {
+        color: var(--decision);
+        border-color: color-mix(in srgb, var(--decision) 35%, transparent);
+        background: var(--decision-bg);
       }
       .spacer {
         flex: 1;
@@ -318,6 +327,102 @@
         padding: 0 4px;
       }
       /*
+       * How many firstmate rulings this row is holding up. Beside the state word
+       * and shaped like the `dismissed` marker, because it is the same kind of
+       * thing: a word the state cannot say on its own, and one sentence with it.
+       * Coloured, unlike that one, because here the number is the news - four
+       * rulings and one are different situations, and the card has room for the
+       * digit but not for the four paragraphs behind it.
+       */
+      .decisions-open {
+        font-size: 11px;
+        font-weight: 600;
+        white-space: nowrap;
+        flex: none;
+        color: var(--decision);
+        border: 1px solid color-mix(in srgb, var(--decision) 35%, transparent);
+        border-radius: 4px;
+        padding: 0 4px;
+      }
+      /*
+       * The rulings themselves, in the expanded panel - which is where the card
+       * sends anything longer than a word. A card carries the session's line and
+       * the pipeline's line and may not grow a third stacked block, and four
+       * summaries written at whatever length a crewmate needed is exactly the
+       * shape that block would take.
+       *
+       * `decision-item` rather than `decision`, and the name matters. Every
+       * attention level is a class on the card, the bar, the state word and the
+       * header pill - `.card.decision`, `.pill.decision` and so on - so a bare
+       * `.decision` rule matches all four at the same specificity and, sitting
+       * later in the sheet, silently wins on every property those rules do not
+       * restate. It did: the pill lost its padding and the card lost half its
+       * height. No other attention word is used bare here, and none may be.
+       */
+      .decision-item {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        padding: 4px 0;
+        font-size: 12px;
+        min-width: 0;
+      }
+      .decision-item + .decision-item {
+        border-top: 1px solid var(--border);
+      }
+      /*
+       * A column rather than a label, so the summaries line up down the panel.
+       * `blocked` and `needs-decision` are different lengths and are the two
+       * verbs that open a decision, so without this every `blocked` item starts
+       * its text somewhere else and four rulings read as four unrelated blocks.
+       * A longer verb simply pushes its own row, which is where this started.
+       */
+      .decision-verb {
+        flex: none;
+        min-width: 96px;
+        font-size: 10px;
+        font-weight: 650;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--decision);
+      }
+      .decision-body {
+        flex: 1;
+        min-width: 0;
+      }
+      /*
+       * The slug the crewmate wrote, which is the only thing telling four
+       * otherwise similar rulings apart - and the token a `resolved` line closes
+       * one by, so it is what the captain answers.
+       */
+      .decision-key {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .decision-summary {
+        margin-top: 2px;
+        color: var(--text);
+        overflow-wrap: anywhere;
+      }
+      /*
+       * Separates the rulings from the transcript lines under them. They are two
+       * different things - what is waiting, and what it was doing - and the
+       * panel must not read as one list.
+       */
+      .panel-heading {
+        font-size: 10px;
+        font-weight: 650;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--faint);
+        padding: 2px 0;
+      }
+      .panel-heading + .panel-heading,
+      .decision-item + .panel-heading {
+        margin-top: 8px;
+      }
+      /*
        * The expander. Only rendered for a row with a session behind it, since a
        * pipeline run with no Claude session has no transcript to show.
        */
@@ -442,6 +547,15 @@
         border-color: color-mix(in srgb, var(--review) 45%, transparent);
         background: var(--review-bg);
       }
+      /*
+       * The same colour family as `review` and not the same colour: both are a
+       * human gate, and they are two different facts. A reader who cannot tell
+       * them apart at a glance has one word doing the work of two.
+       */
+      .card.decision {
+        border-color: color-mix(in srgb, var(--decision) 45%, transparent);
+        background: var(--decision-bg);
+      }
       .card.parked {
         border-color: color-mix(in srgb, var(--parked) 40%, transparent);
       }
@@ -457,6 +571,9 @@
       }
       .bar.review {
         background: var(--review);
+      }
+      .bar.decision {
+        background: var(--decision);
       }
       .bar.parked {
         background: var(--parked);
@@ -576,6 +693,9 @@
       }
       .state.review {
         color: var(--review);
+      }
+      .state.decision {
+        color: var(--decision);
       }
       .state.parked {
         color: var(--parked);
@@ -850,6 +970,7 @@
       const GROUPS = [
         ['blocked', 'Waiting for you'],
         ['review', 'Waiting on your review'],
+        ['decision', 'Waiting on your decision'],
         ['parked', 'Pipeline parked'],
         ['failed', 'Failed'],
         ['working', 'Working'],
@@ -925,6 +1046,7 @@
       const FAVICON_COLOURS = {
         blocked: '#d92d20',
         review: '#7839ee',
+        decision: '#9333ea',
         parked: '#b54708',
         failed: '#7a271a',
         working: '#175cd3',
@@ -1090,7 +1212,9 @@
           expanded.delete(row.id);
         } else {
           expanded.add(row.id);
-          loadRecent(row.sessionId);
+          // Only a session has a transcript to read. A card of rulings expands
+          // to the rulings and to nothing else.
+          if (row.sessionId) loadRecent(row.sessionId);
         }
         if (latest) render(latest);
       }
@@ -1112,6 +1236,61 @@
       function panelFor(row) {
         const panel = document.createElement('div');
         panel.className = 'panel';
+
+        // The rulings first, because they are why you opened this row. Every one
+        // of them, never a bounded subset - four open on one crewmate is the
+        // ordinary case, and a panel that showed a quarter of what was waiting
+        // would be this feature's own failure reintroduced by its fix. Should a
+        // bound ever be needed here, it says how many it did not show.
+        const decisions = row.decisions || [];
+        if (decisions.length > 0) {
+          const heading = document.createElement('div');
+          heading.className = 'panel-heading';
+          heading.textContent =
+            decisions.length === 1
+              ? 'Waiting on your decision'
+              : decisions.length + ' decisions waiting on you';
+          panel.appendChild(heading);
+          for (const decision of decisions) {
+            const item = document.createElement('div');
+            item.className = 'decision-item';
+
+            const verb = document.createElement('span');
+            verb.className = 'decision-verb';
+            verb.textContent = decision.verb;
+            item.appendChild(verb);
+
+            const bodyEl = document.createElement('div');
+            bodyEl.className = 'decision-body';
+            const key = document.createElement('div');
+            key.className = 'decision-key';
+            key.textContent = decision.key;
+            bodyEl.appendChild(key);
+            // In full, at whatever length the crewmate wrote it. This is a panel
+            // somebody deliberately opened in order to rule on what is in it,
+            // and the density rule that keeps the card to one line is exactly
+            // why the words belong here instead.
+            if (decision.summary) {
+              const summary = document.createElement('div');
+              summary.className = 'decision-summary';
+              summary.textContent = decision.summary;
+              bodyEl.appendChild(summary);
+            }
+            item.appendChild(bodyEl);
+            panel.appendChild(item);
+          }
+          // Only where there is activity to head. A card of rulings has no
+          // session behind it, so the heading would introduce a section that
+          // never arrives.
+          if (row.sessionId) {
+            const activity = document.createElement('div');
+            activity.className = 'panel-heading';
+            activity.textContent = 'Recent activity';
+            panel.appendChild(activity);
+          }
+        }
+        if (!row.sessionId) return panel;
+
         const events = recent.get(row.sessionId);
         if (!events) {
           const loading = document.createElement('div');
@@ -1224,6 +1403,21 @@
         state.className = 'state ' + row.attention;
         state.textContent = row.attentionLabel;
         line2.appendChild(state);
+
+        // How many firstmate rulings are waiting, beside the state word. The
+        // words are computed once in `dashboard.js` and rendered here and by
+        // `raise status` alike - the two are one protocol, and the marker
+        // disagreeing between them was a page that hid a ruling the CLI printed.
+        const rulings = row.decisionsLabel;
+        if (rulings) {
+          const count = document.createElement('span');
+          count.className = 'decisions-open';
+          count.textContent = rulings;
+          count.title = row.decisionsPending
+            ? 'Open decisions across the whole crew. Rulings are given in this window.'
+            : 'Open decisions on this crewmate. Expand the row to read them.';
+          line2.appendChild(count);
+        }
 
         // Why this row says Idle rather than Waiting for you. It sits directly
         // beside the state it qualifies, because the two are one sentence: the
@@ -1372,17 +1566,14 @@
           a.addEventListener('click', (e) => e.stopPropagation());
           meta.appendChild(a);
         }
-        // Computed from absolute timestamps, not the server's elapsed values, so
-        // the ticking re-render below stays accurate between pushes.
-        // How long it has been waiting on you, which is the number that decides
-        // which row to deal with first. A review waits exactly as visibly as a
-        // permission prompt does.
-        const since =
-          row.attention === 'blocked' || row.attention === 'review'
-            ? row.sessionStateSince
-            : row.run && row.run.parked
-              ? row.run.parkedSince
-              : null;
+        // The absolute mark, never the server's elapsed value, so the ticking
+        // re-render below stays accurate between pushes. Which mark - and which
+        // rows have one at all - is decided once in `dashboard.js`; this page
+        // held its own copy of that condition until the two had been edited in
+        // step twice, so it now only asks whether there is one. See
+        // `waitingSinceFor` for why a ruling row is gated on the session's own
+        // state rather than on its attention word.
+        const since = row.waitingSince;
         // How long it has been waiting is the number that decides what to deal
         // with first, so it keeps the slot on the rows that have one. Every
         // other row shows when it last actually did something instead - which
@@ -1459,14 +1650,24 @@
           });
           meta.appendChild(hint);
         }
-        // A run with no session behind it has no transcript to expand.
-        if (row.sessionId) {
+        // A run with no session behind it has no transcript to expand - but a
+        // card holding rulings does have something, and it is the only place the
+        // words of them appear. Gating this on the session alone would have put
+        // every ruling on the unplaceable card behind a control that was not
+        // rendered, which is the set silently bounded by a missing button.
+        if (row.sessionId || (row.decisions || []).length > 0) {
           const toggle = document.createElement('button');
           const open = expanded.has(row.id);
+          // Named for what is actually behind it. On a row holding rulings the
+          // panel leads with them, and a control offering "recent activity" over
+          // the thing you are being asked to decide hides the one reason to open
+          // it.
+          const holds = (row.decisions || []).length > 0 ? 'the decisions' : 'recent activity';
           toggle.className = 'expand' + (open ? ' open' : '');
-          toggle.title = open ? 'Hide recent activity' : 'Show recent activity';
+          toggle.title = (open ? 'Hide ' : 'Show ') + holds;
           toggle.setAttribute('aria-expanded', String(open));
-          toggle.setAttribute('aria-label', 'Recent activity for ' + row.title);
+          const label = holds === 'the decisions' ? 'Decisions waiting on ' : 'Recent activity for ';
+          toggle.setAttribute('aria-label', label + row.title);
           toggle.addEventListener('click', (e) => {
             e.stopPropagation();
             toggleExpanded(row);
@@ -1503,6 +1704,7 @@
         const pills = [];
         if (s.blocked) pills.push([s.blocked + ' waiting for you', 'alert']);
         if (s.review) pills.push([s.review + ' awaiting review', 'review']);
+        if (s.decision) pills.push([s.decision + ' awaiting a decision', 'decision']);
         if (s.parked) pills.push([s.parked + ' parked', '']);
         if (s.failed) pills.push([s.failed + ' failed', '']);
         for (const [text, tone] of pills) {
@@ -1511,10 +1713,11 @@
           p.textContent = text;
           countsEl.appendChild(p);
         }
-        // Both states mean a person is the blocker, so both belong in the count
-        // you see from another tab.
-        const wantsYou = (s.blocked || 0) + (s.review || 0);
-        document.title = wantsYou ? '(' + wantsYou + ') Raise' : 'Raise';
+        // How many rows a person is the blocker on, counted in `dashboard.js`
+        // off the same set each row's own `wantsYou` comes from - so the number
+        // in the tab and the rows behind it cannot disagree. It was two written
+        // -out lists until this branch had to add `decision` to both by hand.
+        document.title = s.wantsYou ? '(' + s.wantsYou + ') Raise' : 'Raise';
         showFavicon();
 
         rowsEl.innerHTML = '';
@@ -1558,7 +1761,11 @@
         if (unattributed.length > 0) {
           const title = document.createElement('div');
           title.className = 'group-title';
-          title.textContent = 'Pipelines we cannot place';
+          // Named for the one thing every card under it has in common, rather
+          // than for the pipeline that was the only one when it was written: a
+          // set of rulings with no crewmate row to sit on lands here too, and a
+          // heading calling it a pipeline would be wrong about it.
+          title.textContent = 'We could not place these';
           rowsEl.appendChild(title);
           for (const row of unattributed) rowsEl.appendChild(card(row));
         }
@@ -1575,32 +1782,46 @@
       }
 
       /*
-       * Both states mean the agent has stopped and only a person can restart
-       * it, so both are worth a notification. They differ in where they send
+       * Each of these means the agent has stopped and only a person can restart
+       * it, so each is worth a notification. They differ in where they send
        * you: a blocked session wants its terminal, a review wants the browser
-       * page it is waiting on.
+       * page it is waiting on, and a firstmate crewmate wants a ruling - which
+       * is given in the captain's window, but the crewmate's is where you go to
+       * read what it is asking, so it is focused like any other stopped session.
        */
-      function wantsYou(row) {
-        return row.attention === 'blocked' || row.attention === 'review';
-      }
-
       function notifyOnNewlyBlocked(rows) {
-        const waiting = new Set(rows.filter(wantsYou).map((r) => r.id));
+        const waiting = new Set(rows.filter((r) => r.wantsYou).map((r) => r.id));
         if (hasNotifications() && Notification.permission === 'granted') {
           for (const row of rows) {
-            if (!wantsYou(row) || lastBlocked.has(row.id)) continue;
+            if (!row.wantsYou || lastBlocked.has(row.id)) continue;
             const review = row.attention === 'review';
+            const decision = row.attention === 'decision';
+            const firstDecision = (row.decisions || [])[0];
+            // A notification is a pointer rather than the list, so it carries
+            // one summary - but it may not imply there is one when there are
+            // four. The count goes in front of it, in the words the card and
+            // `raise status` already use, and carries nothing for a single
+            // ruling because "wants a decision" has said that already.
+            const rulings = row.decisionsLabel;
             const n = new Notification(
               // In the title rather than the body, because the body already
               // carries the reason and two identically titled notifications for
               // one repo are indistinguishable before you read either.
               row.title +
                 (row.sessionName ? ' - ' + row.sessionName : '') +
-                (review ? ' wants your review' : ' needs you'),
+                (review ? ' wants your review' : decision ? ' wants a decision' : ' needs you'),
               {
                 body: review
                   ? row.summary || 'A review page is waiting for you'
-                  : row.message || 'Claude is waiting for input',
+                  : decision
+                    ? [
+                        rulings,
+                        (firstDecision && firstDecision.summary) ||
+                          'A firstmate crewmate is waiting on a ruling',
+                      ]
+                        .filter(Boolean)
+                        .join(' - ')
+                    : row.message || 'Claude is waiting for input',
                 tag: row.id,
               },
             );

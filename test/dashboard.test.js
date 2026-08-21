@@ -16,6 +16,14 @@ import {
   blockReason,
 } from '../src/dashboard.js';
 import { pullRequestFromRecords } from '../src/transcript.js';
+import { parseSnapshot } from '../src/firstmate-decisions.js';
+import {
+  APX_412,
+  APX_412_WORKTREE,
+  ZED_207,
+  ZED_207_WORKTREE,
+  fleetSnapshotJson,
+} from './fixtures/fm-fleet-snapshot.js';
 
 /** The wording a block Claude Code cannot describe honestly falls back to. */
 const NEEDS_RESPONSE = 'Claude needs your response';
@@ -903,10 +911,24 @@ test('summarise counts what the tab title and alerts need', () => {
     { attention: 'blocked' },
     { attention: 'blocked' },
     { attention: 'review' },
+    { attention: 'decision' },
     { attention: 'parked' },
     { attention: 'idle' },
   ];
-  assert.deepEqual(summarise(rows), { blocked: 2, review: 1, parked: 1, failed: 0, total: 5 });
+  assert.deepEqual(summarise(rows), {
+    blocked: 2,
+    review: 1,
+    // Rows, not decisions: this feeds the tab title and the pills, which answer
+    // "how many things want me" - a question about sessions. The number of
+    // rulings open on one of them is on that row.
+    decision: 1,
+    parked: 1,
+    failed: 0,
+    // The three above that mean a person is the blocker, off the one set the
+    // rows carry too - this is what the tab title shows.
+    wantsYou: 4,
+    total: 6,
+  });
 });
 
 test('a lone repo keeps its bare name', () => {
@@ -2630,4 +2652,901 @@ test('an untracked row is disambiguated against a tracked one on the same name',
     untracked: [untracked({ cwd: '/Users/x/trees/1/repo' })],
   });
   assert.deepEqual(rows.map((r) => r.title).sort(), ['1/repo', 'work/repo']);
+});
+
+// ------------------------------------------ firstmate decisions on the rows
+
+/**
+ * The reading firstmate publishes, reduced to the two fields a join uses.
+ *
+ * The real one is in `test/fixtures/fm-fleet-snapshot.js` and is used where the
+ * point is what firstmate actually emits; this is for the cases that are about
+ * the join and the row, where four paragraphs of a crewmate's prose would be
+ * noise.
+ */
+const decisionTask = (over = {}) => ({
+  id: 'crew-1',
+  window: 'fm-crew-1',
+  worktree: '/Users/x/trees/1/repo',
+  decisions: [{ key: 'k1', verb: 'needs-decision', summary: 'which option' }],
+  ...over,
+});
+
+test('a crewmate with an open decision says so, and sorts above a parked pipeline', () => {
+  // The whole item: a crewmate that has stopped for a ruling used to look like a
+  // quiet card, which is to say it looked fine.
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'crew', cwd: '/Users/x/trees/1/repo' }),
+      session({ sessionId: 'other', cwd: '/Users/x/work/repo' }),
+    ],
+    branches: new Map([
+      ['crew', 'main'],
+      ['other', 'main'],
+    ]),
+    runs: [run({ parked: true, parkedSince: 900 })],
+    decisions: [decisionTask()],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+  });
+  const crew = rows.find((r) => r.sessionId === 'crew');
+  assert.equal(crew.attention, 'decision');
+  assert.equal(crew.attentionLabel, 'Waiting on your decision');
+  assert.deepEqual(crew.decisions, [{ key: 'k1', verb: 'needs-decision', summary: 'which option' }]);
+  // Above the parked run, and below nothing that outranks it here.
+  assert.deepEqual(rows.map((r) => r.sessionId), ['crew', 'other']);
+});
+
+test('a permission prompt still outranks a decision, and a live review does too', () => {
+  // `blocked` is a gate on the session in front of you and nothing may compete
+  // with it; `review` is a person already sitting in a browser tab.
+  assert.equal(
+    attentionFor({ session: { state: 'blocked' }, run: null, decisions: 4 }),
+    'blocked',
+  );
+  assert.equal(
+    attentionFor({
+      session: { state: 'working' },
+      run: null,
+      summary: { lavishFile: '/x/plan.html' },
+      decisions: 4,
+    }),
+    'review',
+  );
+  // And a parked pipeline does not: firstmate's gate is on you, where a parked
+  // no-mistakes run usually answers itself.
+  assert.equal(
+    attentionFor({ session: { state: 'working' }, run: run({ parked: true }), decisions: 1 }),
+    'decision',
+  );
+  assert.equal(
+    attentionFor({ session: { state: 'working' }, run: run({ parked: true }), decisions: 0 }),
+    'parked',
+  );
+});
+
+test('a crewmate is joined by its worktree when no window name has been read yet', () => {
+  // The pane table is read a tick after a session is first seen, so the window
+  // name is missing on exactly the tick a new crewmate appears. The worktree is
+  // the second join and it needs no tmux at all.
+  const rows = buildRows({
+    sessions: [session({ sessionId: 'crew', cwd: '/Users/x/trees/1/repo/src' })],
+    branches: new Map([['crew', 'main']]),
+    runs: [],
+    decisions: [decisionTask({ window: null })],
+  });
+  assert.equal(rows[0].attention, 'decision');
+  assert.equal(rows[0].decisions.length, 1);
+});
+
+test('a decision that could belong to two sessions belongs to neither', () => {
+  // An attribute we cannot place belongs to nobody. Shown on both it is false on
+  // one of them with no way to tell which, and a line you learn to distrust on
+  // one card is one you distrust everywhere.
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'captain', cwd: '/Users/x/work/firstmate' }),
+      session({ sessionId: 'a', cwd: '/Users/x/trees/1/repo' }),
+      session({ sessionId: 'b', cwd: '/Users/x/trees/1/repo' }),
+    ],
+    branches: new Map(),
+    runs: [],
+    // Two tasks whose worktrees both contain both sessions, so neither join can
+    // say which is which.
+    decisions: [
+      decisionTask({ id: 'one', window: null, worktree: '/Users/x/trees/1/repo' }),
+      decisionTask({ id: 'two', window: null, worktree: '/Users/x/trees/1' }),
+    ],
+    captainSessionId: 'captain',
+  });
+  const byId = new Map(rows.map((r) => [r.sessionId, r]));
+  assert.deepEqual(byId.get('a').decisions, []);
+  assert.deepEqual(byId.get('b').decisions, []);
+  assert.equal(byId.get('a').attention !== 'decision', true);
+  // It stays with the captain, which is the one row that is certainly right
+  // about it - a ruling is given there whoever it is about.
+  assert.equal(byId.get('captain').decisions.length, 2);
+  assert.equal(byId.get('captain').decisionsPending, 2);
+});
+
+test('a decision two sessions could own belongs to neither of them either', () => {
+  // The same invariant in the direction one session at a time cannot see. Both
+  // of these sit under the crewmate's worktree - the second is somebody opening
+  // their own agent in it, or the crewmate's own entry before a restart pruned
+  // it - so both match the one task, and shown on both the ruling is false on
+  // one of them.
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'captain', cwd: '/Users/x/work/firstmate' }),
+      session({ sessionId: 'crew', cwd: '/Users/x/trees/1/repo' }),
+      session({ sessionId: 'visitor', cwd: '/Users/x/trees/1/repo/src' }),
+    ],
+    branches: new Map(),
+    runs: [],
+    decisions: [decisionTask({ id: 'one', window: null, worktree: '/Users/x/trees/1/repo' })],
+    captainSessionId: 'captain',
+  });
+  const byId = new Map(rows.map((r) => [r.sessionId, r]));
+  assert.deepEqual(byId.get('crew').decisions, []);
+  assert.deepEqual(byId.get('visitor').decisions, []);
+  assert.equal(byId.get('crew').attention !== 'decision', true);
+  assert.equal(byId.get('visitor').attention !== 'decision', true);
+  // Not dropped: it goes to the captain, and it is still counted once.
+  assert.equal(byId.get('captain').decisions.length, 1);
+  assert.equal(byId.get('captain').attention, 'decision');
+  assert.equal(byId.get('captain').decisionsPending, 1);
+});
+
+test('an exact window match keeps the ruling when a bystander is merely inside the worktree', () => {
+  // The two joins are not equal evidence. `fm-one` is the name firstmate pinned
+  // on this crewmate; the visitor only satisfies a containment test, which is
+  // what you do the moment you open your own agent in there to read what the
+  // crewmate is asking. Treating those as one kind of claim would quieten the
+  // row firstmate itself named, in exactly that situation.
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'captain', cwd: '/Users/x/work/firstmate' }),
+      session({ sessionId: 'crew', cwd: '/Users/x/trees/1/repo' }),
+      session({ sessionId: 'visitor', cwd: '/Users/x/trees/1/repo/src' }),
+    ],
+    branches: new Map(),
+    runs: [],
+    decisions: [decisionTask({ id: 'one', window: 'fm-one', worktree: '/Users/x/trees/1/repo' })],
+    windowNames: new Map([['crew', 'fm-one']]),
+    captainSessionId: 'captain',
+  });
+  const byId = new Map(rows.map((r) => [r.sessionId, r]));
+  assert.equal(byId.get('crew').decisions.length, 1);
+  assert.equal(byId.get('crew').attention, 'decision');
+  assert.deepEqual(byId.get('visitor').decisions, []);
+  // Placed, so the captain holds none of it - only the crew total, which is the
+  // one number on its row either way.
+  assert.deepEqual(byId.get('captain').decisions, []);
+  assert.equal(byId.get('captain').decisionsPending, 1);
+});
+
+test('two window claimants stay unplaceable, and a worktree one does not inherit it', () => {
+  // The better evidence being ambiguous does not promote the weaker one. Two
+  // panes both answer to the pinned name, so the name cannot say which - and
+  // falling back to the containment test would hand the ruling to a bystander
+  // at the moment the evidence that outranks it disagreed with itself.
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'captain', cwd: '/Users/x/work/firstmate' }),
+      session({ sessionId: 'pane-a', cwd: '/Users/x/elsewhere' }),
+      session({ sessionId: 'pane-b', cwd: '/Users/x/elsewhere' }),
+      session({ sessionId: 'visitor', cwd: '/Users/x/trees/1/repo/src' }),
+    ],
+    branches: new Map(),
+    runs: [],
+    decisions: [decisionTask({ id: 'one', window: 'fm-one', worktree: '/Users/x/trees/1/repo' })],
+    windowNames: new Map([
+      ['pane-a', 'fm-one'],
+      ['pane-b', 'fm-one'],
+    ]),
+    captainSessionId: 'captain',
+  });
+  const byId = new Map(rows.map((r) => [r.sessionId, r]));
+  assert.deepEqual(byId.get('pane-a').decisions, []);
+  assert.deepEqual(byId.get('pane-b').decisions, []);
+  // And least of all the visitor, who is the only unambiguous claimant left and
+  // is claiming on the weaker evidence.
+  assert.deepEqual(byId.get('visitor').decisions, []);
+  assert.equal(byId.get('captain').decisions.length, 1);
+  assert.equal(byId.get('captain').decisionsPending, 1);
+});
+
+test('two panes of one crewmate window place the ruling on neither', () => {
+  // The window join has the same shape as the worktree one, so it needs the
+  // same guard: a crewmate window split into two panes reports two sessions
+  // under the one pinned name.
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'captain', cwd: '/Users/x/work/firstmate' }),
+      session({ sessionId: 'pane-a', cwd: '/Users/x/elsewhere' }),
+      session({ sessionId: 'pane-b', cwd: '/Users/x/elsewhere' }),
+    ],
+    branches: new Map(),
+    runs: [],
+    decisions: [decisionTask({ id: 'one', window: 'fm-one', worktree: null })],
+    windowNames: new Map([
+      ['pane-a', 'fm-one'],
+      ['pane-b', 'fm-one'],
+    ]),
+    captainSessionId: 'captain',
+  });
+  const byId = new Map(rows.map((r) => [r.sessionId, r]));
+  assert.deepEqual(byId.get('pane-a').decisions, []);
+  assert.deepEqual(byId.get('pane-b').decisions, []);
+  assert.equal(byId.get('captain').decisions.length, 1);
+  assert.equal(byId.get('captain').decisionsPending, 1);
+});
+
+test('the captain carries the whole crew count and stays focusable', () => {
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'captain', cwd: '/Users/x/work/firstmate' }),
+      session({ sessionId: 'crew', cwd: '/Users/x/trees/1/repo' }),
+    ],
+    branches: new Map(),
+    runs: [],
+    decisions: [
+      decisionTask({
+        decisions: [
+          { key: 'a', verb: 'needs-decision', summary: 'one' },
+          { key: 'b', verb: 'blocked', summary: 'two' },
+        ],
+      }),
+      decisionTask({
+        id: 'gone',
+        window: 'fm-gone',
+        worktree: '/Users/x/trees/2/gone',
+        decisions: [{ key: 'c', verb: 'needs-decision', summary: 'three' }],
+      }),
+    ],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+    captainSessionId: 'captain',
+  });
+  const byId = new Map(rows.map((r) => [r.sessionId, r]));
+  // Decisions, not tasks: two tasks, three rulings.
+  assert.equal(byId.get('captain').decisionsPending, 3);
+  assert.equal(byId.get('captain').focusable, true);
+  // The one that joined to nobody is readable on the captain's row rather than
+  // being a number with nothing behind it.
+  assert.deepEqual(byId.get('captain').decisions.map((d) => d.key), ['c']);
+  assert.deepEqual(byId.get('crew').decisions.map((d) => d.key), ['a', 'b']);
+  // And only the captain carries the count.
+  assert.equal(byId.get('crew').decisionsPending, null);
+});
+
+test('with no captain row, an unplaceable ruling gets a card rather than disappearing', () => {
+  // The window this closes: firstmate's own lock will not read for a bounded run
+  // of ticks, so the captain cannot be identified while the reading is still
+  // held. Every ruling that joined to a crewmate is still on its row, and the
+  // remainder used to render nowhere and be counted nowhere - the set silently
+  // bounded, which is the one thing this feature may never do.
+  const input = {
+    sessions: [
+      session({ sessionId: 'captain', cwd: '/Users/x/work/firstmate' }),
+      session({ sessionId: 'crew', cwd: '/Users/x/trees/1/repo' }),
+    ],
+    branches: new Map(),
+    runs: [],
+    decisions: [
+      decisionTask({ decisions: [{ key: 'a', verb: 'needs-decision', summary: 'one' }] }),
+      decisionTask({
+        id: 'gone',
+        window: 'fm-gone',
+        worktree: '/Users/x/trees/2/gone',
+        decisions: [
+          { key: 'b', verb: 'needs-decision', summary: 'two' },
+          { key: 'c', verb: 'blocked', summary: 'three' },
+        ],
+      }),
+    ],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+  };
+
+  const withCaptain = buildRows({ ...input, captainSessionId: 'captain' });
+  assert.equal(withCaptain.some((r) => r.kind === 'decision'), false, 'no card when it has a row');
+  assert.deepEqual(
+    withCaptain.find((r) => r.sessionId === 'captain').decisions.map((d) => d.key),
+    ['b', 'c'],
+  );
+
+  const orphaned = buildRows({ ...input, captainSessionId: null });
+  // The crewmate that could be placed is untouched by any of this.
+  assert.deepEqual(
+    orphaned.find((r) => r.sessionId === 'crew').decisions.map((d) => d.key),
+    ['a'],
+  );
+  const card = orphaned.find((r) => r.kind === 'decision');
+  assert.ok(card, 'the remainder is on a card of its own');
+  // Every one of them, not a count of them: a number with nothing behind it is
+  // the same omission wearing a number.
+  assert.deepEqual(card.decisions.map((d) => d.key), ['b', 'c']);
+  assert.equal(card.attention, 'decision');
+  // It says it could not be placed, by the same boolean the unattributable run
+  // card uses, and offers no control it cannot honour.
+  assert.equal(card.attributable, false);
+  assert.equal(card.focusable, false);
+  assert.equal(card.sessionId, null);
+  // The crew-wide count belongs to the captain's row and there is not one.
+  assert.equal(card.decisionsPending, null);
+  // And it sorts below every session, because it cannot take you to anybody.
+  assert.equal(orphaned.indexOf(card), orphaned.length - 1);
+});
+
+test('a task placed on a crewmate is not counted again on the captain', () => {
+  // Claimed on the match rather than on there being something to show, so a
+  // crewmate whose decisions were all resolved does not have its silence
+  // repeated as an unplaceable row on the captain.
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'captain', cwd: '/Users/x/work/firstmate' }),
+      session({ sessionId: 'crew', cwd: '/Users/x/trees/1/repo' }),
+    ],
+    branches: new Map(),
+    runs: [],
+    decisions: [decisionTask()],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+    captainSessionId: 'captain',
+  });
+  const captain = rows.find((r) => r.sessionId === 'captain');
+  assert.deepEqual(captain.decisions, []);
+  assert.equal(captain.attention !== 'decision', true);
+  assert.equal(captain.decisionsPending, 1);
+});
+
+test('with no firstmate at all a row is exactly what it was before', () => {
+  // The rule every optional integration here is held to: its absence is not a
+  // degraded state. Empty inputs must leave the projection byte-identical.
+  const input = {
+    sessions: [session({ sessionId: 's1', state: 'idle' })],
+    branches: new Map([['s1', 'main']]),
+    runs: [run()],
+  };
+  const without = buildRows(input);
+  const withEmpty = buildRows({
+    ...input,
+    decisions: [],
+    windowNames: new Map(),
+    captainSessionId: null,
+  });
+  assert.deepEqual(withEmpty, without);
+  assert.deepEqual(without[0].decisions, []);
+  assert.equal(without[0].decisionsPending, null);
+});
+
+test('a run row and an untracked row never carry a decision', () => {
+  // A decision belongs to a crewmate's session or to the captain's. A pipeline
+  // run is a different tool's business, and placing one on an untracked row
+  // would be attributing something to a row that refuses to attribute anything.
+  const rows = buildRows({
+    sessions: [],
+    branches: new Map(),
+    runs: [run({ parked: true })],
+    untracked: [
+      {
+        key: '/t/x.jsonl',
+        transcriptPath: '/t/x.jsonl',
+        cwd: '/Users/x/trees/1/repo',
+        agent: 'claude',
+        lastSeenAt: 10,
+      },
+    ],
+    decisions: [decisionTask()],
+  });
+  for (const row of rows) {
+    if (row.kind === 'decision') continue;
+    assert.deepEqual(row.decisions, []);
+    assert.equal(row.decisionsPending, null);
+  }
+  // Not carried by either of them, and not dropped either: with no session on
+  // the page to claim it and no captain to hand it to, the ruling is on the one
+  // card whose whole content is that it could not be placed.
+  const card = rows.find((r) => r.kind === 'decision');
+  assert.deepEqual(card.decisions.map((d) => d.key), ['k1']);
+  assert.equal(card.attributable, false);
+});
+
+test('four open decisions on one crewmate reach the row as four', () => {
+  // Against the real reading, because "renders a set, never one" is the decision
+  // this item turns on and a fixture somebody imagined could not test it.
+  const tasks = parseSnapshot(fleetSnapshotJson());
+  const rows = buildRows({
+    sessions: [
+      session({
+        sessionId: 'crew',
+        cwd: APX_412_WORKTREE,
+      }),
+    ],
+    branches: new Map(),
+    runs: [],
+    decisions: tasks,
+    windowNames: new Map([['crew', `fm-${APX_412}`]]),
+  });
+  assert.equal(rows[0].attention, 'decision');
+  assert.equal(rows[0].decisions.length, 4);
+  assert.deepEqual(
+    rows[0].decisions.map((d) => d.key),
+    [
+      'apx-412-review-gate',
+      'apx-412-numbers-confirmed',
+      'apx-412-flag-ticket',
+      'apx-412-migration-order',
+    ],
+  );
+});
+
+test('a crewmate whose decision was overtaken by live work shows nothing', () => {
+  // zed-207 from the same snapshot: its status log carries seven unclosed
+  // `needs-decision` lines, and firstmate's reconciliation against the live
+  // run-step means the reading holds none. A Raise that folded the file itself
+  // would have put a confident stale alarm on this row.
+  const tasks = parseSnapshot(fleetSnapshotJson());
+  const rows = buildRows({
+    sessions: [
+      session({
+        sessionId: 'crew',
+        state: 'working',
+        cwd: ZED_207_WORKTREE,
+      }),
+    ],
+    branches: new Map(),
+    runs: [],
+    decisions: tasks,
+    windowNames: new Map([['crew', `fm-${ZED_207}`]]),
+  });
+  assert.equal(rows[0].attention, 'working');
+  assert.deepEqual(rows[0].decisions, []);
+});
+
+test('a ruling outranks the idle nudge, because the nudge is what a stopped crewmate produces', () => {
+  // Found by hand-testing the shipped branch. A crewmate that asks for a ruling
+  // stops, and a stopped Claude Code session is exactly what raises the
+  // sixty-second nudge - so the row went red saying "Waiting for you" while its
+  // own chevron offered to show the decisions, and the reader had to go and ask
+  // firstmate what the row meant. That is this feature's own premise inverted.
+  const nudged = {
+    state: 'blocked',
+    message: 'Claude is waiting for your input',
+    notificationType: 'idle_prompt',
+  };
+  assert.equal(attentionFor({ session: nudged, run: null, decisions: 1 }), 'decision');
+  // And with nothing waiting it is still just the nudge.
+  assert.equal(attentionFor({ session: nudged, run: null, decisions: 0 }), 'blocked');
+});
+
+test('a permission prompt still outranks a ruling, even with decisions open', () => {
+  // The line the fix must not cross. A prompt is a gate inside that window which
+  // only that window can clear; a ruling is answered somewhere else entirely.
+  const prompting = {
+    state: 'blocked',
+    message: 'Claude needs your permission to use Bash',
+    notificationType: 'permission_prompt',
+  };
+  assert.equal(attentionFor({ session: prompting, run: null, decisions: 4 }), 'blocked');
+  // A folded pipeline agent's block is a real gate too and is not displaced.
+  assert.equal(
+    attentionFor({
+      session: { state: 'idle' },
+      run: null,
+      agent: { state: 'blocked', activity: null, summary: null, message: 'x', lastActivityAt: null },
+      decisions: 4,
+    }),
+    'blocked',
+  );
+});
+
+test('a ruling row offers no dismiss control and does not repeat the nudge wording', () => {
+  // Two consequences of the row no longer reading `blocked`. The nudge beneath
+  // it is dismissible, but the row now says a decision is waiting and a ruling
+  // cannot be dismissed from Raise at all - answering one is firstmate's, and
+  // this tool does not write to it. A control that looks like it would quieten
+  // the row and cannot is the affordance rule broken where it matters most. And
+  // the nudge's generic wording beside "Waiting on your decision" is a second,
+  // weaker answer to a question the row has already answered.
+  const rows = buildRows({
+    sessions: [
+      session({
+        sessionId: 'crew',
+        cwd: '/Users/x/trees/1/repo',
+        state: 'blocked',
+        stateSince: 1000,
+        blockAnnouncedAt: 1000,
+        message: 'Claude is waiting for your input',
+        notificationType: 'idle_prompt',
+      }),
+    ],
+    branches: new Map(),
+    runs: [],
+    decisions: [decisionTask()],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+  });
+  assert.equal(rows[0].attention, 'decision');
+  assert.equal(rows[0].dismissible, false);
+  assert.equal(rows[0].message, null);
+  // The ruling itself is still on the row, which is the whole point.
+  assert.equal(rows[0].decisions.length, 1);
+});
+
+test('a crewmate that stopped for a ruling and drew the idle nudge still reads as a decision', () => {
+  // This is not a case a review constructed - it is the sequence the repository
+  // owner hit hand-testing the shipped branch, which is why the ranking changed
+  // at all, and it is recorded here in his order rather than the code's. A
+  // crewmate posts a ruling request and stops. Because it has stopped, Claude
+  // Code's sixty-second idle nudge fires. The row then read "Waiting for you" in
+  // red while the chevron beside it offered to show the decisions - so the row
+  // was holding the specific answer and displaying the generic one, and he had
+  // to go and ask firstmate what his own dashboard meant. The wording only
+  // became correct after he answered the ruling, at the moment it stopped being
+  // true.
+  //
+  // The two assertions are in one test on purpose, and they do not discriminate
+  // equally. The decisions assertion passed before the fix - the row carried them
+  // all along, which is exactly why the chevron offered them. The label assertion
+  // did not: with `blocked` returning first the row read the generic waiting
+  // wording, so that assertion is the regression and reverting the ranking fails
+  // it. They stay together because the defect was the two disagreeing on one row,
+  // and either alone lets that come back between two green tests.
+  const rows = buildRows({
+    sessions: [
+      session({
+        sessionId: 'crew',
+        cwd: '/Users/x/trees/1/repo',
+        state: 'blocked',
+        stateSince: 1000,
+        blockAnnouncedAt: 1000,
+        message: 'Claude is waiting for your input',
+        notificationType: 'idle_prompt',
+      }),
+    ],
+    branches: new Map(),
+    runs: [],
+    decisions: [decisionTask()],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+  });
+  const crew = rows.find((r) => r.sessionId === 'crew');
+  // What the row says, as a renderer reads it - not the generic waiting wording.
+  assert.equal(crew.attentionLabel, 'Waiting on your decision');
+  // And what the chevron was offering all along, on the same row at the same time.
+  assert.deepEqual(crew.decisions, [{ key: 'k1', verb: 'needs-decision', summary: 'which option' }]);
+});
+
+test('a ruling row that also has a Lavish poll open still offers no dismiss control', () => {
+  // The combination the ruling rule made reachable and the winning attention
+  // word did not cover. The block defers to the ruling, so the row falls past
+  // `blocked` - and a live Lavish poll then takes `review` before `decision` is
+  // reached, which was impossible while `blocked` returned first. Gated on the
+  // word rather than the condition, this row kept a `Not for me` button whose
+  // tooltip promises it will drop to Idle, on a row that would stay
+  // "Waiting on your review" after the click because the poll decides the level.
+  const rows = buildRows({
+    sessions: [
+      session({
+        sessionId: 'crew',
+        cwd: '/Users/x/trees/1/repo',
+        state: 'blocked',
+        stateSince: 1000,
+        blockAnnouncedAt: 1000,
+        message: 'Claude is waiting for your input',
+        notificationType: 'idle_prompt',
+      }),
+    ],
+    branches: new Map(),
+    runs: [],
+    summaries: new Map([
+      ['crew', { title: 't', mode: null, activity: null, lavishFile: '/p.html' }],
+    ]),
+    decisions: [decisionTask()],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+  });
+  const crew = rows.find((r) => r.sessionId === 'crew');
+  assert.equal(crew.attention, 'review');
+  assert.equal(crew.dismissible, false);
+  assert.equal(crew.message, null);
+  // The ruling is still on the row, waiting behind the review.
+  assert.equal(crew.decisions.length, 1);
+});
+
+test('a crewmate stopped on a ruling keeps its waiting figure rather than falling back to last activity', () => {
+  // The third thing the ranking change moved, and the one nobody enumerated:
+  // the row's time stamp is picked from a list of states, and `decision` was not
+  // in it. So a crewmate that used to read `blocked` and show "Waiting since"
+  // started reading `decision` and showing "Last activity" - on the one state
+  // whose whole premise is that somebody has been waiting too long, and which
+  // the tab title counts and a desktop notification announces.
+  //
+  // The figure is measured from the nudge, not from the ruling: a ruling has no
+  // timestamp of its own in the snapshot, so this runs about a minute short of
+  // the true wait. That is the number's stated meaning rather than a rounding
+  // error in it, and it beats a blank.
+  const rows = buildRows({
+    sessions: [
+      session({
+        sessionId: 'crew',
+        cwd: '/Users/x/trees/1/repo',
+        state: 'blocked',
+        stateSince: 1000,
+        blockAnnouncedAt: 1000,
+        message: 'Claude is waiting for your input',
+        notificationType: 'idle_prompt',
+      }),
+    ],
+    branches: new Map(),
+    runs: [],
+    now: 21000,
+    decisions: [decisionTask()],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+  });
+  const crew = rows.find((r) => r.sessionId === 'crew');
+  assert.equal(crew.attention, 'decision');
+  assert.equal(crew.waitingForMs, 20000);
+  // What the page reads to choose "Waiting since" over "Last activity".
+  assert.equal(crew.sessionStateSince, 1000);
+});
+
+test('one ruling beside a Lavish review still puts the marker on the row', () => {
+  // The marker used to be dropped at exactly one ruling, on the reasoning that
+  // "Waiting on your decision" had already said it. True only while that is the
+  // row's word - and this branch made two other combinations reachable. Here a
+  // live poll takes `review` first, so without the marker the card said nothing
+  // about the ruling at all while `raise status` printed it on the same row.
+  const rows = buildRows({
+    sessions: [
+      session({
+        sessionId: 'crew',
+        cwd: '/Users/x/trees/1/repo',
+        state: 'blocked',
+        stateSince: 1000,
+        blockAnnouncedAt: 1000,
+        message: 'Claude is waiting for your input',
+        notificationType: 'idle_prompt',
+      }),
+    ],
+    branches: new Map(),
+    runs: [],
+    summaries: new Map([
+      ['crew', { title: 't', mode: null, activity: null, lavishFile: '/p.html' }],
+    ]),
+    decisions: [decisionTask()],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+  });
+  const crew = rows.find((r) => r.sessionId === 'crew');
+  assert.equal(crew.attention, 'review');
+  assert.equal(crew.decisions.length, 1);
+  assert.equal(crew.decisionsLabel, '1 open');
+});
+
+test('one ruling beside a permission prompt still puts the marker on the row', () => {
+  // The other reachable combination, and the one that outlives a resumed crew:
+  // a permission prompt keeps `blocked` by design, while the snapshot reading is
+  // deliberately held for a while afterwards. The row must not go quiet about a
+  // ruling it is still holding.
+  const rows = buildRows({
+    sessions: [
+      session({
+        sessionId: 'crew',
+        cwd: '/Users/x/trees/1/repo',
+        state: 'blocked',
+        stateSince: 1000,
+        blockAnnouncedAt: 1000,
+        message: 'Claude needs your permission to use Bash',
+        notificationType: 'permission_prompt',
+      }),
+    ],
+    branches: new Map(),
+    runs: [],
+    decisions: [decisionTask()],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+  });
+  const crew = rows.find((r) => r.sessionId === 'crew');
+  assert.equal(crew.attention, 'blocked');
+  assert.equal(crew.decisions.length, 1);
+  assert.equal(crew.decisionsLabel, '1 open');
+});
+
+test('one ruling on a row that already says so carries no marker', () => {
+  // The case the suppression was written for, and it has to survive the fix:
+  // beside "Waiting on your decision" a marker reading "1 open" is the state
+  // word said twice.
+  const rows = buildRows({
+    sessions: [session({ sessionId: 'crew', cwd: '/Users/x/trees/1/repo' })],
+    branches: new Map(),
+    runs: [],
+    decisions: [decisionTask()],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+  });
+  const crew = rows.find((r) => r.sessionId === 'crew');
+  assert.equal(crew.attention, 'decision');
+  assert.equal(crew.decisionsLabel, null);
+  // And more than one is the number that changes what you do about it.
+  const many = buildRows({
+    sessions: [session({ sessionId: 'crew', cwd: '/Users/x/trees/1/repo' })],
+    branches: new Map(),
+    runs: [],
+    decisions: [
+      decisionTask({
+        decisions: [
+          { key: 'k1', verb: 'needs-decision', summary: 'which option' },
+          { key: 'k2', verb: 'needs-decision', summary: 'and the other' },
+        ],
+      }),
+    ],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+  });
+  assert.equal(many.find((r) => r.sessionId === 'crew').decisionsLabel, '2 open');
+});
+
+test('the captain carrying a ruling for somebody else claims no wait of its own', () => {
+  // The captain is the session running firstmate, so it is working rather than
+  // stopped, and its state goes on transitioning while it holds an unplaced
+  // ruling on somebody else's behalf. `stateSince` moves with every one of those
+  // transitions, so timing the row against it would report a few seconds of wait
+  // for a ruling that may have been open for half an hour. The honest answer is
+  // what the row was doing, not a wait it is not in.
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'captain', cwd: '/Users/x/work/firstmate', stateSince: 20000 }),
+    ],
+    branches: new Map(),
+    runs: [],
+    now: 21000,
+    summaries: new Map([['captain', { lastActivityAt: 9000 }]]),
+    decisions: [
+      decisionTask({
+        id: 'gone',
+        window: 'fm-gone',
+        worktree: '/Users/x/trees/2/gone',
+        decisions: [{ key: 'b', verb: 'needs-decision', summary: 'two' }],
+      }),
+    ],
+    windowNames: new Map(),
+    captainSessionId: 'captain',
+  });
+  const captain = rows.find((r) => r.sessionId === 'captain');
+  assert.equal(captain.attention, 'decision');
+  assert.equal(captain.sessionState, 'working');
+  assert.equal(captain.waitingForMs, null);
+  // What the page falls through to instead, and what its tooltip then names.
+  assert.equal(captain.lastActivityAt, 9000);
+});
+
+test('a crewmate that resumed inside the held reading claims no wait either', () => {
+  // The reading is deliberately held for a while after a crewmate resumes, so
+  // the row keeps its ruling while the session is working again. Its state has
+  // transitioned since the block, which is exactly the moment `stateSince` stops
+  // being a wait - it is now measuring how long the session has been *working*.
+  const rows = buildRows({
+    sessions: [
+      session({
+        sessionId: 'crew',
+        cwd: '/Users/x/trees/1/repo',
+        state: 'working',
+        stateSince: 20000,
+      }),
+    ],
+    branches: new Map(),
+    runs: [],
+    now: 21000,
+    summaries: new Map([['crew', { lastActivityAt: 9000 }]]),
+    decisions: [decisionTask()],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+  });
+  const crew = rows.find((r) => r.sessionId === 'crew');
+  assert.equal(crew.attention, 'decision');
+  assert.equal(crew.sessionState, 'working');
+  assert.equal(crew.waitingForMs, null);
+  assert.equal(crew.lastActivityAt, 9000);
+  // The ruling is still on the row - it is the wait that is not claimed, never
+  // the ruling itself.
+  assert.equal(crew.decisions.length, 1);
+});
+
+test('the row carries the mark its wait is measured from, and null where there is none', () => {
+  // One field, because the page and `waitingForMs` used to be two copies of the
+  // same condition and this branch edited both by hand twice. The page needs the
+  // absolute mark rather than the elapsed figure, so the mark is what the row
+  // carries and the elapsed figure is derived from it.
+  const waiting = buildRows({
+    sessions: [
+      session({
+        sessionId: 'crew',
+        cwd: '/Users/x/trees/1/repo',
+        state: 'blocked',
+        stateSince: 1000,
+        blockAnnouncedAt: 1000,
+        message: 'Claude is waiting for your input',
+        notificationType: 'idle_prompt',
+      }),
+    ],
+    branches: new Map(),
+    runs: [],
+    now: 21000,
+    decisions: [decisionTask()],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+  }).find((r) => r.sessionId === 'crew');
+  assert.equal(waiting.attention, 'decision');
+  assert.equal(waiting.waitingSince, 1000);
+  // Derived, so the two can never name different moments.
+  assert.equal(waiting.waitingForMs, 20000);
+
+  // The captain carrying somebody else's ruling while it works away, and a
+  // crewmate that resumed inside the held reading: neither is in a block, so
+  // neither has a mark.
+  const notWaiting = buildRows({
+    sessions: [
+      session({ sessionId: 'captain', cwd: '/Users/x/work/firstmate', stateSince: 20000 }),
+      session({
+        sessionId: 'crew',
+        cwd: '/Users/x/trees/1/repo',
+        state: 'working',
+        stateSince: 20000,
+      }),
+    ],
+    branches: new Map(),
+    runs: [],
+    now: 21000,
+    decisions: [
+      decisionTask(),
+      decisionTask({
+        id: 'gone',
+        window: 'fm-gone',
+        worktree: '/Users/x/trees/2/gone',
+        decisions: [{ key: 'b', verb: 'needs-decision', summary: 'two' }],
+      }),
+    ],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+    captainSessionId: 'captain',
+  });
+  for (const id of ['captain', 'crew']) {
+    const row = notWaiting.find((r) => r.sessionId === id);
+    assert.equal(row.attention, 'decision', `${id} still holds its ruling`);
+    assert.equal(row.waitingSince, null, `${id} claims no wait`);
+    assert.equal(row.waitingForMs, null, `${id} derives no figure either`);
+  }
+});
+
+test('a parked pipeline is timed from the gate, on the same field', () => {
+  // The page has always fallen through to the parked mark for a row with no
+  // block of its own, and folding that in is what makes one field enough. It was
+  // the half of the condition `waitingForMs` never carried, so the two disagreed
+  // about this row until they became one answer.
+  const rows = buildRows({
+    sessions: [],
+    branches: new Map(),
+    runs: [run({ parked: true, parkedSince: 900 })],
+    now: 1900,
+  });
+  assert.equal(rows[0].attention, 'parked');
+  assert.equal(rows[0].waitingSince, 900);
+  assert.equal(rows[0].waitingForMs, 1000);
+});
+
+test('the tab title count and the rows behind it come off one set', () => {
+  // Two written-out lists on the page until this branch added `decision` to both
+  // by hand. Asserted as the same answer rather than as arithmetic: the summary's
+  // number must be the number of rows that say they want you, whatever the set
+  // happens to contain.
+  const rows = buildRows({
+    sessions: [
+      session({ sessionId: 'blocked', cwd: '/Users/x/work/a', state: 'blocked', stateSince: 1 }),
+      session({ sessionId: 'crew', cwd: '/Users/x/trees/1/repo' }),
+      session({ sessionId: 'busy', cwd: '/Users/x/work/c' }),
+    ],
+    branches: new Map(),
+    runs: [],
+    summaries: new Map([['busy', { lavishFile: '/p.html' }]]),
+    decisions: [decisionTask()],
+    windowNames: new Map([['crew', 'fm-crew-1']]),
+  });
+  assert.deepEqual(
+    rows.filter((r) => r.wantsYou).map((r) => r.attention).sort(),
+    ['blocked', 'decision', 'review'],
+  );
+  assert.equal(summarise(rows).wantsYou, rows.filter((r) => r.wantsYou).length);
+  // And a row nobody is waiting on says so rather than being left undefined.
+  const quiet = buildRows({ sessions: [session()], branches: new Map(), runs: [] });
+  assert.equal(quiet[0].wantsYou, false);
+  assert.equal(summarise(quiet).wantsYou, 0);
 });

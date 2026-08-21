@@ -298,3 +298,178 @@ test('prune forgets the lock of a session that has gone', () => {
   watch.spawnedBy(captain);
   assert.equal(access.reads, 2, 'the entry was dropped, so it had to be read again');
 });
+
+test('captainSession names the session whose own directory is $FM_HOME', () => {
+  // Its `cwd` is what `firstmate-decisions.js` runs the fleet snapshot out of,
+  // so the path is never hardcoded and a machine with no lock never looks.
+  const access = files({ '/Users/x/work/firstmate/state/.lock': '49672\n' });
+  const watch = new FirstmateWatch({ files: access });
+  const crew = session({ sessionId: 'crew' });
+  const captain = session({
+    sessionId: 'captain',
+    cwd: '/Users/x/work/firstmate',
+    host: { pid: 49672, tmux: '', tmux_pane: null },
+  });
+  const editing = session({
+    sessionId: 'editing',
+    cwd: '/Users/x/work/firstmate',
+    host: { pid: 51234, tmux: '', tmux_pane: null },
+  });
+  assert.equal(watch.captainSession([crew, editing, captain])?.sessionId, 'captain');
+  // Same rule as the chip, by the same two halves: the directory alone is
+  // anybody with firstmate's source open.
+  assert.equal(watch.captainSession([crew, editing]), null);
+  assert.equal(watch.captainSession([]), null);
+  assert.equal(watch.captainSession(null), null);
+});
+
+test('only a read that threw is unreadable - everything a lock contains is an answer', () => {
+  // The caller acts on the absence of a captain - it is what says firstmate has
+  // gone and takes every open ruling off the page - so a null that came from a
+  // read we did not get has to be distinguishable from a null that is an answer.
+  // The line between them is drawn by the *read*, never by the text: `stat` said
+  // a lock is there and `readText` then threw.
+  const home = '/Users/x/work/firstmate';
+  const path = `${home}/state/.lock`;
+
+  // The lock is gone, which is the ordinary every-session case and an answer.
+  const gone = files({ [path]: '49672\n' });
+  gone.remove(path);
+  assert.equal(new FirstmateWatch({ files: gone }).lockUnreadableAt(home), false);
+
+  // Held by firstmate, and read: also an answer.
+  assert.equal(
+    new FirstmateWatch({ files: files({ [path]: '49672\n' }) }).lockUnreadableAt(home),
+    false,
+  );
+
+  // There and unreadable. `stat` answered, so a lock exists, and this is where
+  // a `state/.lock` *directory* lands: `stat` accepts one and the read rejects
+  // it with EISDIR.
+  const throwing = {
+    ...files({ [path]: '49672\n' }),
+    readText() {
+      throw Object.assign(new Error('EISDIR'), { code: 'EISDIR' });
+    },
+  };
+  assert.equal(new FirstmateWatch({ files: throwing }).lockUnreadableAt(home), true);
+
+  // Empty, whitespace and a foreign tool's own format are each an answer, and
+  // none of them needs a case of its own. Four rounds of review narrowed a
+  // predicate about lock text and each narrowing let a different shape through,
+  // so there is no predicate left to walk past.
+  //
+  // The last case is two NUL bytes and they are written as escapes, never typed
+  // in literally. The runtime value is identical either way, so this is not
+  // about what the test asserts - it is about the file staying searchable, and
+  // the literal form must not come back. Literal NULs make `file(1)` report this
+  // source file as `data` and make a plain `grep -r` skip it *silently*: no
+  // warning, no mention, just absent from the results. This repository is
+  // public and its diffs get swept for content that must not be published;
+  // whoever runs that sweep next will reach for grep, and a file grep quietly
+  // skipped hands them a clean result that is not true. A false clean is worse
+  // than a failed sweep, because a failure gets investigated and a clean one
+  // ends the search. That is how this was found, and it generalises: the sweep
+  // is only worth trusting if it can read every file it claims to have covered,
+  // so a fixture that makes part of the tree unreadable to ordinary tools
+  // undermines the check rather than just being untidy.
+  for (const text of ['', '   \n', 'held-by=some-other-tool\n', '\0\0']) {
+    assert.equal(
+      new FirstmateWatch({ files: files({ [path]: text }) }).lockUnreadableAt(home),
+      false,
+      `${JSON.stringify(text)} is an answer`,
+    );
+  }
+
+  // And with no home there is nothing to ask about, which is not a failed read.
+  assert.equal(new FirstmateWatch({ files: files({ [path]: '49672\n' }) }).lockUnreadableAt(null), false);
+});
+
+test('a lock at one session says nothing about any other session directory', () => {
+  // The question `lockUnreadableAt` answers is "has the captain gone", and the
+  // only lock that can answer it is the one at the home the standing reading
+  // came from. Asked across every session instead, a single stray `state/.lock`
+  // in an unrelated checkout would suppress the refresh for the whole machine
+  // and leave every crewmate row asserting a ruling for the life of the process.
+  const access = {
+    stat: () => ({ size: 1, mtimeMs: 1 }),
+    readText: (path) => {
+      if (path.startsWith('/Users/x/other/')) throw new Error('EIO');
+      return '49672\n';
+    },
+  };
+  const watch = new FirstmateWatch({ files: access });
+  assert.equal(watch.lockUnreadableAt('/Users/x/other'), true);
+  assert.equal(watch.lockUnreadableAt('/Users/x/work/firstmate'), false);
+});
+
+test('a lock that reads fine and holds no pid is an answer, and is read once', () => {
+  // `lockedPid` parses strictly on purpose: content that is not one line of
+  // digits is a file that happens to be called `.lock` and is not firstmate's.
+  const path = '/Users/x/other/state/.lock';
+  const bystander = session({
+    sessionId: 'bystander',
+    cwd: '/Users/x/other',
+    host: { pid: 700, tmux: '', tmux_pane: null },
+  });
+  const access = files({ [path]: 'held-by=some-other-tool\n' });
+  const watch = new FirstmateWatch({ files: access });
+  assert.equal(watch.captainSession([bystander]), null);
+  // And cached like any other answer. It is a stable fact about somebody else's
+  // file, where `#lockPidFor` runs twice per session per tick.
+  watch.captainSession([bystander]);
+  watch.spawnedBy(bystander);
+  assert.equal(access.reads, 1);
+});
+
+test('an empty lock is cached as an answer, and the completed write moves past it', () => {
+  // Caching it is safe by the key rather than by a predicate: `bin/fm-lock.sh`
+  // writes the lock with a single `printf`, so the only torn read possible is
+  // an empty one - and the entry it caches is keyed on a size and mtime the
+  // completed write immediately moves past.
+  const path = '/Users/x/work/firstmate/state/.lock';
+  const captain = session({
+    sessionId: 'captain',
+    cwd: '/Users/x/work/firstmate',
+    host: { pid: 49672, tmux: '', tmux_pane: null },
+  });
+  const torn = files({ [path]: '' });
+  const watch = new FirstmateWatch({ files: torn });
+  assert.equal(watch.captainSession([captain]), null);
+  torn.write(path, '49672\n');
+  assert.equal(watch.captainSession([captain])?.sessionId, 'captain');
+});
+
+test('windowName answers from the table and never schedules a read of its own', async () => {
+  // `spawnedBy` is called for every session on every tick and is what keeps the
+  // table warm. A second scheduler here would only add a way for the two to
+  // disagree about when a pane was last looked up.
+  const ran = [];
+  const watch = new FirstmateWatch({
+    files: files(),
+    execAsync: async (command, args) => {
+      ran.push(command);
+      void args;
+      return '%1\tfm-crew-1';
+    },
+  });
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+  const crew = session();
+  assert.equal(watch.windowName(crew), null, 'nothing has been read yet');
+  // Awaited before asserting, because a scheduled read runs its command on a
+  // microtask - checking synchronously would pass whether or not one was fired.
+  await settle();
+  assert.deepEqual(ran, [], 'and asking did not go and read it');
+
+  // The chip is what schedules the table.
+  watch.spawnedBy(crew, 0);
+  await settle();
+  assert.equal(watch.windowName(crew), 'fm-crew-1');
+  assert.deepEqual(ran, ['tmux']);
+
+  // A session with no pane has no window, and still runs nothing.
+  assert.equal(watch.windowName(session({ host: { pid: 1, tmux: '', tmux_pane: null } })), null);
+  assert.equal(watch.windowName(null), null);
+  await settle();
+  assert.deepEqual(ran, ['tmux']);
+});
