@@ -176,16 +176,24 @@ export const CAPTAIN_UNREADABLE = Symbol('firstmate captain unreadable');
  * counted by the same counter - see `CAPTAIN_UNREADABLE`.
  *
  * Three, because one or two failures must never clear anything - a timeout
- * while the machine is busy is ordinary. Three is at soonest three `REFRESH_MS`
- * apart, so a minute and a half, and at latest three `ASSERTION_MAX_AGE_MS`
- * apart on a fleet writing no status lines, so a quarter of an hour. Any
- * successful read resets it.
+ * while the machine is busy is ordinary. **How long three takes is not a
+ * property of any constant here**, so no figure in seconds belongs in this
+ * sentence: dispatch is driven by whichever of the mtime gate and the staleness
+ * ceiling fires first, which is three `REFRESH_MS` apart on a fleet still
+ * writing status lines and three `ASSERTION_MAX_AGE_MS` apart on a silent one.
+ * Any successful read resets it.
  *
  * Dropping the reading does not stop the retry. The count stays where it is, so
- * the ceiling goes on re-dispatching at its own cadence until a reading arrives
- * - a fourteen-second bash every five minutes on a firstmate that is broken for
- * good, which is the price of a stopped crewmate reappearing the moment it can
- * rather than never.
+ * the retry goes on until a reading arrives - and on a firstmate that is broken
+ * for good the cost is set by the **mtime gate rather than the ceiling**,
+ * because `moved` dispatches without consulting `aged` at all. A crew that is
+ * still running, and so still appending status lines, therefore keeps the
+ * snapshot going at `REFRESH_MS` however long the ceiling is. That is the price
+ * of a stopped crewmate reappearing the moment it can rather than never.
+ *
+ * That bypass is pre-existing rather than a consequence of anything here, and
+ * it is recorded on issue 28 rather than fixed: a new dispatch trigger that
+ * simply ORs into the same gate would inherit it.
  */
 export const MAX_CONSECUTIVE_FAILURES = 3;
 
