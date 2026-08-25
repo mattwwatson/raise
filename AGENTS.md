@@ -126,7 +126,7 @@ and the transcript is what qualifies that answer. Do not reorder them back.
 | the session's own transcript (tail, on change) | `src/transcript.js` | what is it working on, what is it doing right now, and did it open a pull request? |
 | the process table (one `ps`, every 3s) | `src/poll-watch.js` | is a review still open, is a pipeline still running, and whose is it? |
 | no-mistakes SQLite DB (polled, 1s) | `src/nm-state.js` | is a pipeline run parked, working, failed? |
-| firstmate's fleet snapshot (on a status-file mtime, never more often than `REFRESH_MS`) | `src/firstmate-decisions.js` | which crewmates are stopped waiting for a ruling from you? |
+| firstmate's fleet snapshot (on a status-file mtime or a stopped crewmate resuming, never more often than `REFRESH_MS`) | `src/firstmate-decisions.js` | which crewmates are stopped waiting for a ruling from you? |
 
 Something that reads like another source is deliberately not in that table, because it answers
 a different kind of question: **`src/untracked.js` walks the three agents' session directories
@@ -360,6 +360,11 @@ stratified on purpose, so read the whole file rather than one section.
 | the snapshot's own reconciliation is the half that matters, so the schema is checked exactly | `src/firstmate-decisions.js` |
 | an unreadable snapshot keeps the last answer; a snapshot with no tasks replaces it | `src/firstmate-decisions.js` (`parseSnapshot`) |
 | gated on a status-file mtime, never more often than `REFRESH_MS`, and re-taken on a ceiling while asserting or while failing | `src/firstmate-decisions.js` |
+| a crewmate that has resumed re-reads the snapshot, because the reconciliation that clears a ruling writes no status line | `src/firstmate-decisions.js` (`#crewResumed`), `docs/tasks/28-ruling-clears-on-resume.md` |
+| that trigger asks the failure count first, so it cannot join `moved` in bypassing the interval meant to bound a failing snapshot | `src/firstmate-decisions.js` (`#crewResumed`) |
+| a resume is the pinned window writing and never the worktree, because firing wrongly costs a subprocess every cycle and firing late costs nothing new | `src/firstmate-decisions.js` (`#crewSignature`) |
+| the crew baseline moves whether or not the look dispatched, which is the opposite of the status signature's rule and for a stated reason | `src/firstmate-decisions.js` (`#crewResumed`) |
+| the transcript stamp is the stat the poll already took, and says a session wrote rather than what it wrote | `src/transcript-reader.js` (`stamp`) |
 | the mtime signature is consumed only by a read that went out, so a tick that dispatched nothing cannot swallow a write | `src/firstmate-decisions.js` (`refresh`) |
 | a decision joins by the pinned window name or the worktree, and an ambiguous join places nothing | `src/dashboard.js` (`matchDecisionTask`) |
 | ambiguity is guarded in both directions, and the second one is only visible once every session has been asked | `src/dashboard.js` (`buildRows`) |
@@ -583,7 +588,7 @@ Keep it that way - it has no build step and must open as a file.
 ## Testing and Quality
 
 ```sh
-npm test          # 963 tests, no network, no dependencies, ~9s
+npm test          # 970 tests, no network, no dependencies, ~9s
 npm run lint      # oxlint over src, bin, hooks, public, test, scripts
 npm run typecheck # tsc --noEmit over src, bin, hooks, public, scripts
 ```
@@ -779,7 +784,7 @@ the [roadmap-workflow skill](.claude/skills/roadmap-workflow/SKILL.md).
 ## Commands
 
 ```sh
-npm test                       # 963 tests, ~9s
+npm test                       # 970 tests, ~9s
 npm run lint                   # oxlint, no config file
 npm run typecheck              # tsc --noEmit
 npm run coverage               # needs Node 24, see above
