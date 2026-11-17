@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { planFocus, itermUuid, focusSession, titleNeedle } from '../src/focus/index.js';
-import { orderedTerminals, ALL_TERMINALS } from '../src/focus/terminals.js';
+import { orderedTerminals, ALL_TERMINALS, ghostty } from '../src/focus/terminals.js';
 import {
   socketArgs,
   resolveTmuxTarget,
@@ -15,6 +15,7 @@ import {
   itermFocusScript,
   itermFocusByTitleScript,
   terminalAppFocusScript,
+  ghosttyFocusScript,
   escapeAppleScript,
 } from '../src/focus/applescript.js';
 
@@ -739,6 +740,21 @@ test('focusSession reports when no supported terminal is running', async () => {
   assert.match(result.reason, /No supported terminal|only implemented for macOS/);
 });
 
+test('the no-terminal message names every adapter, so a new one needs no edit there', async (t) => {
+  if (process.platform !== 'darwin') return t.skip('the message is macOS-only');
+  const terminals = ['A', 'B', 'C'].map((label) => ({
+    name: label,
+    label,
+    isAvailable: () => false,
+    focus: () => true,
+  }));
+  const result = await focusSession(
+    { host: { tty: '/dev/ttys004' } },
+    { exec: fakeExec({}), terminals },
+  );
+  assert.match(result.reason, /Raise can focus A, B and C\.$/);
+});
+
 test('the terminal adapters never run a command synchronously', async () => {
   // The whole point of the async chain: anything the /focus handler can reach
   // must hand back a promise rather than block the event loop. A sync adapter
@@ -775,4 +791,83 @@ test('the Terminal.app script matches on tty', () => {
   assert.ok(script.includes('tty of t'));
   assert.ok(script.includes('/dev/ttys009'));
   assert.ok(script.includes('set frontmost of w to true'));
+});
+
+test('the Ghostty script matches on tty and brings the window forward', () => {
+  const script = ghosttyFocusScript({ tty: '/dev/ttys017' });
+  assert.ok(script.includes('terminals whose tty is "/dev/ttys017"'));
+  assert.ok(script.includes('focus (item 1 of hits)'));
+  assert.ok(script.includes('activate'));
+  // Addressed by bundle id, never by a name whose case differs between the
+  // process and the app.
+  assert.ok(script.includes('application id "com.mitchellh.ghostty"'));
+});
+
+test('the Ghostty script reads an older Ghostty with no tty as no match', () => {
+  // Before 1.4 the lookup errors. That has to come back as notfound, not as an
+  // exception, and never as a reason to match on something weaker.
+  const script = ghosttyFocusScript({ tty: '/dev/ttys017' });
+  assert.match(script, /try\s+set hits to[\s\S]*on error\s+return "notfound"/);
+  assert.ok(!/name of|working directory/.test(script), 'no title or cwd fallback');
+});
+
+test('the Ghostty script escapes the tty', () => {
+  const script = ghosttyFocusScript({ tty: '/dev/x" & do shell script "y' });
+  assert.ok(!script.includes('/dev/x" &'), 'an unescaped quote would break out of the literal');
+});
+
+test('the Ghostty adapter focuses the tab that holds the tty', async () => {
+  const exec = fakeExec({ 'whose tty is "/dev/ttys017"': 'ok\n' });
+  assert.equal(await ghostty.focus(exec, { tty: '/dev/ttys017' }), true);
+});
+
+test('the Ghostty adapter reports no match rather than guessing', async () => {
+  const exec = fakeExec({ osascript: 'notfound' });
+  assert.equal(await ghostty.focus(exec, { tty: '/dev/ttys999' }), false);
+});
+
+test('the Ghostty adapter does nothing when handed no tty', async () => {
+  const exec = fakeExec({});
+  assert.equal(await ghostty.focus(exec, { sessionUuid: 'A-B' }), false);
+  assert.deepEqual(exec.calls, []);
+});
+
+test('Ghostty that is not installed is not available', async (t) => {
+  if (process.platform !== 'darwin') return t.skip('availability is macOS-only');
+  const exec = fakeExec({ osascript: new Error('Can’t get application id') });
+  assert.equal(await ghostty.isAvailable(exec), false);
+});
+
+test('a tmux pane inside Ghostty is raised through the client tty', async () => {
+  // The case reproduced on a real machine: tmux names a client on Ghostty's
+  // tty, iTerm2 holds no such tab, and Ghostty is tried even though the
+  // record's TERM_PROGRAM says tmux rather than ghostty.
+  const exec = fakeExec({
+    'list-panes': '%7\t$3\t@7\t1\tghostty-test',
+    'list-clients': '/dev/ttys020\t0\t$3\t@7',
+    'select-window': '',
+    'select-pane': '',
+    'whose tty is "/dev/ttys020"': 'ok',
+    osascript: 'notfound',
+  });
+  const iterm = {
+    name: 'iterm2',
+    label: 'iTerm2',
+    termProgram: 'iTerm.app',
+    isAvailable: async () => true,
+    focus: async () => false,
+  };
+  const ghosttyHere = { ...ghostty, isAvailable: async () => true };
+  const result = await focusSession(
+    {
+      host: {
+        tmux_pane: '%7',
+        tmux: '/private/tmp/tmux-502/default,53545,1',
+        term_program: 'tmux',
+      },
+    },
+    { exec, terminals: [iterm, ghosttyHere] },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.adapter, 'ghostty');
 });

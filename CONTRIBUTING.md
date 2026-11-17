@@ -24,21 +24,24 @@ disprove something but never to assert it.
 ## Adding a terminal
 
 This is the contribution the architecture was shaped for, and the one most likely to be wanted:
-Ghostty, WezTerm, Kitty, an editor's built-in terminal. Supported today are iTerm2 and
-Terminal.app, plus tmux inside either.
+WezTerm, Kitty, an editor's built-in terminal. Supported today are iTerm2, Terminal.app and
+Ghostty, plus tmux inside any of them.
 
 A terminal is **one entry in `src/focus/terminals.js`**, and that is the whole interface:
 
 ```js
-export const ghostty = {
-  name: 'ghostty',                 // machine-readable, reported back as the adapter used
-  label: 'Ghostty',                // how to name it to a human
-  termProgram: 'ghostty',          // the TERM_PROGRAM that means "this one" - ordering only
+export const wezterm = {
+  name: 'wezterm',                 // machine-readable, reported back as the adapter used
+  label: 'WezTerm',                // how to name it to a human
+  termProgram: 'WezTerm',          // the TERM_PROGRAM that means "this one" - ordering only
   async isAvailable(exec) { ... }, // is this terminal even running?
   async focus(exec, { sessionUuid, tty }) { ... },  // true if a tab was found and raised
   async focusByTitle(exec, { title }) { ... },      // optional - 'ok' | 'notfound' | 'ambiguous'
 };
 ```
+
+The `ghostty` entry is the smallest complete example: it matches by tty, the same way
+Terminal.app does.
 
 `focusByTitle` is required only if your terminal can host tmux in control mode (`tmux -CC`) -
 iTerm2 is the only implementer today. A control-mode pane is tried by title first and

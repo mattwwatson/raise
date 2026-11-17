@@ -116,6 +116,47 @@ export function terminalAppFocusScript({ tty }) {
 end tell`;
 }
 
+/**
+ * Ghostty's bundle id, used in place of a process name.
+ *
+ * Its process is `ghostty` and its app name `Ghostty`, and which of the two
+ * System Events reports is not worth depending on. A bundle id names one app.
+ */
+export const GHOSTTY_BUNDLE_ID = 'com.mitchellh.ghostty';
+
+/**
+ * Ghostty is matched by tty, which every `terminal` in its dictionary exposes
+ * from 1.4.0. The dictionary's `focus` brings the terminal's window to the
+ * front, and `activate` makes Ghostty the frontmost app.
+ *
+ * A Ghostty older than 1.4 has no `tty` property (or, before 1.3, no dictionary
+ * at all), so the lookup errors. That is caught and reported as `notfound`:
+ * the same answer as a tty Ghostty does not hold, and never a reason to match
+ * on the title or directory instead.
+ */
+export function ghosttyFocusScript({ tty }) {
+  return `tell application id "${GHOSTTY_BUNDLE_ID}"
+  try
+    set hits to (terminals whose tty is "${escapeAppleScript(tty)}")
+  on error
+    return "notfound"
+  end try
+  if (count of hits) is 0 then return "notfound"
+  focus (item 1 of hits)
+  activate
+  return "ok"
+end tell`;
+}
+
+/**
+ * Is the app with this bundle id running? `is running` never launches it, and
+ * it needs no System Events permission. An app that is not installed makes
+ * the script error, which the caller reads as not running.
+ */
+export function appRunningByIdScript(bundleId) {
+  return `return (application id "${escapeAppleScript(bundleId)}" is running) as string`;
+}
+
 /** Is this app currently running? Avoids launching it just to search it. */
 export function appRunningScript(appName) {
   return `tell application "System Events" to return (exists (processes where name is "${escapeAppleScript(
