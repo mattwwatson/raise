@@ -137,14 +137,19 @@ export const ghostty = {
   },
   /**
    * tty-only, like Terminal.app: Ghostty 1.4 exposes a tty on every terminal,
-   * and no identifier the hook could capture. See ghosttyFocusScript for what
-   * an older Ghostty does.
+   * and no identifier the hook could capture. An older Ghostty may fail the
+   * script before it runs (see ghosttyFocusScript), so any error is no match,
+   * whichever stage it came from.
    *
    * @returns {Promise<boolean>}
    */
   async focus(exec, { tty = null }) {
     if (!tty) return false;
-    return (await runScript(exec, ghosttyFocusScript({ tty }))).trim() === 'ok';
+    try {
+      return (await runScript(exec, ghosttyFocusScript({ tty }))).trim() === 'ok';
+    } catch {
+      return false;
+    }
   },
 };
 

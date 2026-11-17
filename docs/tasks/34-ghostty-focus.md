@@ -64,8 +64,9 @@ and brings its window to the front.
 
 ### Older Ghostty
 
-Before 1.3 there is no dictionary at all, and 1.3 has no `tty`. In both cases the lookup errors
-or finds nothing, and the adapter returns false: the same answer as a tty Ghostty does not
+Before 1.3 there is no dictionary at all, and 1.3 has no `tty`. In both cases osascript may fail
+to compile the script before it runs, or the lookup errors or finds nothing. The adapter
+catches any failure of the script and returns false: the same answer as a tty Ghostty does not
 hold. It does not try to work out a version, and it never falls back to title or cwd, which is
 the guessing this spec originally planned and no longer needs.
 
@@ -112,8 +113,9 @@ the guessing this spec originally planned and no longer needs.
   never launches the app and needs no System Events permission; an app that is not installed
   makes it error, which reads as not available.
 - **`ghosttyFocusScript`** in `src/focus/applescript.js` looks up `terminals whose tty is ...`
-  inside a `try`, so a Ghostty with no `tty` property answers `notfound`; then `focus` and
-  `activate`.
+  inside a `try`, then `focus` and `activate`. A Ghostty with no `tty` property may fail the
+  script at compile time, before that `try` runs, so the adapter's `focus` catches any error
+  from running the script and returns false.
 - **One change outside the adapter list, in `src/focus/index.js`.** The "no supported terminal
   is running" message hard-coded "iTerm2 and Terminal.app", so every new terminal would have
   had to edit it. It now names the adapters it was given. This is the abstraction being

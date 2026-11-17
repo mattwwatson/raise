@@ -803,12 +803,11 @@ test('the Ghostty script matches on tty and brings the window forward', () => {
   assert.ok(script.includes('application id "com.mitchellh.ghostty"'));
 });
 
-test('the Ghostty script reads an older Ghostty with no tty as no match', () => {
-  // Before 1.4 the lookup errors. That has to come back as notfound, not as an
-  // exception, and never as a reason to match on something weaker.
-  const script = ghosttyFocusScript({ tty: '/dev/ttys017' });
-  assert.match(script, /try\s+set hits to[\s\S]*on error\s+return "notfound"/);
-  assert.ok(!/name of|working directory/.test(script), 'no title or cwd fallback');
+test('the Ghostty adapter reads a script that fails to run as no match', async () => {
+  // An older Ghostty has no tty term, so osascript can fail to compile the
+  // script before its own try runs. That is no match, not an exception.
+  const exec = fakeExec({ osascript: new Error('syntax error: Expected end of line (-2741)') });
+  assert.equal(await ghostty.focus(exec, { tty: '/dev/ttys017' }), false);
 });
 
 test('the Ghostty script escapes the tty', () => {

@@ -130,9 +130,11 @@ export const GHOSTTY_BUNDLE_ID = 'com.mitchellh.ghostty';
  * front, and `activate` makes Ghostty the frontmost app.
  *
  * A Ghostty older than 1.4 has no `tty` property (or, before 1.3, no dictionary
- * at all), so the lookup errors. That is caught and reported as `notfound`:
- * the same answer as a tty Ghostty does not hold, and never a reason to match
- * on the title or directory instead.
+ * at all). osascript may then fail to compile the script, before the `try`
+ * below can run, so the adapter reads any failure of the script as no match.
+ * Where the lookup does run and errors, the `try` answers `notfound`. Either
+ * way it is the same answer as a tty Ghostty does not hold, and never a reason
+ * to match on the title or directory instead.
  */
 export function ghosttyFocusScript({ tty }) {
   return `tell application id "${GHOSTTY_BUNDLE_ID}"
