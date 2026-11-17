@@ -17,7 +17,10 @@ import {
   itermFocusScript,
   itermFocusByTitleScript,
   terminalAppFocusScript,
+  ghosttyFocusScript,
   appRunningScript,
+  appRunningByIdScript,
+  GHOSTTY_BUNDLE_ID,
 } from './applescript.js';
 
 /**
@@ -114,7 +117,43 @@ export const terminalApp = {
   },
 };
 
-export const ALL_TERMINALS = [iterm2, terminalApp];
+/** @type {Terminal} */
+export const ghostty = {
+  name: 'ghostty',
+  label: 'Ghostty',
+  termProgram: 'ghostty',
+  /**
+   * Asked by bundle id rather than through System Events, because Ghostty's
+   * process name and app name differ in case. An error means it is not
+   * installed, which is not available.
+   */
+  async isAvailable(exec) {
+    if (process.platform !== 'darwin') return false;
+    try {
+      return (await runScript(exec, appRunningByIdScript(GHOSTTY_BUNDLE_ID))).trim() === 'true';
+    } catch {
+      return false;
+    }
+  },
+  /**
+   * tty-only, like Terminal.app: Ghostty 1.4 exposes a tty on every terminal,
+   * and no identifier the hook could capture. An older Ghostty may fail the
+   * script before it runs (see ghosttyFocusScript), so any error is no match,
+   * whichever stage it came from.
+   *
+   * @returns {Promise<boolean>}
+   */
+  async focus(exec, { tty = null }) {
+    if (!tty) return false;
+    try {
+      return (await runScript(exec, ghosttyFocusScript({ tty }))).trim() === 'ok';
+    } catch {
+      return false;
+    }
+  },
+};
+
+export const ALL_TERMINALS = [iterm2, terminalApp, ghostty];
 
 /**
  * Order the adapters so the terminal the session reported is tried first.

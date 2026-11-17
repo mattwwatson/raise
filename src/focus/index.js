@@ -153,6 +153,19 @@ export function planFocus(record) {
 }
 
 /**
+ * "iTerm2, Terminal.app and Ghostty", read off the adapter list, so adding a
+ * terminal never means editing this message too.
+ *
+ * @param {Terminal[]} terminals
+ * @returns {string}
+ */
+function listLabels(terminals) {
+  const labels = terminals.map((terminal) => terminal.label);
+  if (labels.length <= 1) return labels.join('');
+  return `${labels.slice(0, -1).join(', ')} and ${labels.at(-1)}`;
+}
+
+/**
  * Try every terminal adapter in turn until one reports it found the tab.
  *
  * @param {Function} exec
@@ -184,7 +197,7 @@ async function focusTerminal(exec, { sessionUuid, tty, termProgram, terminals })
       ok: false,
       reason:
         process.platform === 'darwin'
-          ? 'No supported terminal is running. Raise can focus iTerm2 and Terminal.app.'
+          ? `No supported terminal is running. Raise can focus ${listLabels(terminals)}.`
           : `Focusing is only implemented for macOS terminals so far. On ${process.platform}, use the tmux target shown instead.`,
     };
   }

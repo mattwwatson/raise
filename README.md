@@ -31,7 +31,7 @@ changes.
 - **One supported agent**: Claude Code, [Codex](#codex-sessions) or [pi](#pi-sessions). More
   than one at a time is fine - they share the page.
 - **macOS, for clicking a row to raise its window.** Monitoring itself runs anywhere. Raising
-  a window means AppleScript against iTerm2 or Terminal.app, so that half is macOS-only -
+  a window means AppleScript against iTerm2, Terminal.app or Ghostty, so that half is macOS-only -
   worth knowing now rather than three minutes in.
 
 There are **no runtime dependencies at all** - Node's own builtins and nothing else. Everything
@@ -587,7 +587,8 @@ front - which is why a machine mixing plain tabs and tmux needs no configuration
 
 - **Plain terminal tab.** The session's own identifiers are captured at session start.
   iTerm2 tabs are matched by their session UUID, which survives the tab being dragged to
-  another window. Terminal.app is matched by tty.
+  another window. Terminal.app and Ghostty are matched by tty - Ghostty from 1.4, the first
+  version that exposes one.
 - **tmux pane.** A window can belong to more than one tmux session at once, so Raise asks for
   every session this pane lives in, and raises the terminal that is already showing it. Only
   when nothing is showing it does anything move inside tmux, and then only in that one
@@ -600,7 +601,8 @@ can be detached and reattached in a different terminal entirely. If the session 
 there is no window to focus, and Raise tells you the `tmux attach` command instead of failing
 silently.
 
-Supported terminals today: **iTerm2** and **Terminal.app**, plus **tmux** inside either.
+Supported terminals today: **iTerm2**, **Terminal.app** and **Ghostty** (1.4 or later), plus
+**tmux** inside any of them.
 
 ### Claude Desktop sessions
 
