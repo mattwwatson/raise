@@ -30,9 +30,16 @@ changes.
   earlier 22.x will not run it.
 - **One supported agent**: Claude Code, [Codex](#codex-sessions) or [pi](#pi-sessions). More
   than one at a time is fine - they share the page.
-- **macOS, for clicking a row to raise its window.** Monitoring itself runs anywhere. Raising
-  a window means AppleScript against iTerm2, Terminal.app or Ghostty, so that half is macOS-only -
-  worth knowing now rather than three minutes in.
+- **macOS, for clicking a row to raise its window.** Monitoring itself runs anywhere; raising
+  a window is done with AppleScript, so that half is macOS-only - worth knowing now rather than
+  three minutes in. Raise can bring forward:
+  - a session running directly in **Terminal.app**, **iTerm2** or **Ghostty** (1.4 or later);
+  - a session inside **[tmux](#how-focusing-works)**, when that tmux session is attached in one
+    of those terminals;
+  - a session inside **[Herdr](#herdr-sessions)**, when it is attached with an explicit
+    `hc attach <address>` in one of those terminals, or shown in the Herdr desktop app. Not when
+    you attached by picking it from `hc`'s menu: Raise cannot tell which terminal a picker
+    attach is showing.
 
 There are **no runtime dependencies at all** - Node's own builtins and nothing else. Everything
 below that names another tool is optional, and [says so](#optional-signals).
