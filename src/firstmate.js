@@ -60,7 +60,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { socketPath, tmuxCommand } from './focus/tmux.js';
+import { socketPath, tmuxCommand, hostTmuxPane } from './focus/tmux.js';
 
 /** @typedef {import('./registry.js').Session} Session */
 
@@ -293,7 +293,7 @@ export class FirstmateWatch {
    * @returns {string|null}
    */
   windowName(session) {
-    const pane = session?.host?.tmux_pane;
+    const pane = hostTmuxPane(session?.host);
     if (!pane) return null;
     const server = this.#servers.get(socketPath(session.host.tmux));
     return server?.names.get(pane) ?? null;
@@ -312,7 +312,7 @@ export class FirstmateWatch {
   async load(sessions) {
     if (!this.#execAsync) return;
     const sockets = new Set(
-      sessions.filter((s) => s?.host?.tmux_pane).map((s) => socketPath(s.host.tmux)),
+      sessions.filter((s) => hostTmuxPane(s?.host)).map((s) => socketPath(s.host.tmux)),
     );
     await Promise.all([...sockets].map((socket) => this.#read(socket)));
   }
@@ -336,7 +336,7 @@ export class FirstmateWatch {
    * @param {number} now
    */
   #isCrew(host, now) {
-    const pane = host?.tmux_pane;
+    const pane = hostTmuxPane(host);
     if (!pane) return false;
     const socket = socketPath(host.tmux);
     const server = this.#serverFor(socket);

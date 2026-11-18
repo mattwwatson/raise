@@ -30,10 +30,12 @@
  * `HC_SOCKET` in the client's environment, and macOS `ps` will not show
  * another process's environment. So the address alone could belong to a second
  * server's `t6`. A running server is visible in the process table only through
- * its holder (`herdr-core hold --socket <state dir>/<name>.holder.*.sock`), so
- * a holder in any other state directory disproves the address: two servers are
- * running and `t6` could be either. That check can only ever disprove - finding
- * no holders asserts nothing, and the typed address is still the evidence.
+ * its holder (`herdr-core hold --socket <dir>/<name>.holder.*.sock`), whose socket
+ * sits beside its server's - measured for the default server and for one started
+ * on its own `HC_SOCKET`. So a holder in any other directory than the session's
+ * socket disproves the address: two servers are running and `t6` could be
+ * either. That check can only ever disprove - finding no holders asserts
+ * nothing, and the typed address is still the evidence.
  *
  * **The desktop app speaks to one server, and it is the default one.**
  * `herdr-app` takes no socket, so a session on any other server must never
@@ -71,7 +73,7 @@ const ADDRESS = /^t\d+$/;
 const CLIENT_ATTACH =
   /^(?:\S*\/|\/.*\.app\/Contents\/MacOS\/)?(?:hc|herdr-core)\s+attach(?:\s+(.*))?$/;
 
-/** A server's holder process, and the socket that names its state directory. */
+/** A server's holder process, and its socket, which sits beside the server's own. */
 const HOLDER = /(?:^|\/)herdr-core\s+hold\s(?:.*\s)?--socket[=\s](\S+)/;
 
 /** Flags `hc attach` takes that carry no value. Anything else is not understood. */
@@ -164,7 +166,7 @@ function parseLine(line) {
  * @typedef {object} HerdrSighting
  * @property {string[]} attachTtys the tabs holding a typed `hc attach <address>`
  *   for this address, one per tty
- * @property {string[]} serverDirs the state directory of every running server
+ * @property {string[]} serverDirs the socket directory of every running server
  */
 
 /**

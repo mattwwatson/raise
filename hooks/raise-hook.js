@@ -69,7 +69,7 @@ function readProcess(pid) {
 }
 
 function collectHost() {
-  const { tty, agentPid, app } = inspectHost(process.ppid, { readProcess });
+  const { tty, agentPid, app, multiplexer } = inspectHost(process.ppid, { readProcess });
   return {
     term_program: process.env.TERM_PROGRAM || null,
     // Which application is hosting this session, when it is not a terminal.
@@ -92,6 +92,10 @@ function collectHost() {
     // says where the session is shown. See src/focus/herdr.js.
     hc_terminal_id: process.env.HC_TERMINAL_ID || null,
     hc_terminal_socket: process.env.HC_TERMINAL_SOCKET || null,
+    // Which of tmux and Herdr really holds the session, from its nearest
+    // ancestor. Both pairs above are environment, and each can be inherited from
+    // a server the other started - see `hostMultiplexer`.
+    multiplexer,
     tty,
     // Only ever the agent itself. The shell that runs this hook exits the
     // instant it returns, and a session recorded against a dead pid is pruned.

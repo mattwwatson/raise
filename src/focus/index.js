@@ -21,7 +21,7 @@
  * has no window a tty can name. It gets its own branch and ./claude-desktop.js.
  */
 
-import { resolveTmuxTarget, selectPane } from './tmux.js';
+import { resolveTmuxTarget, selectPane, hostTmuxPane } from './tmux.js';
 import { orderedTerminals, ALL_TERMINALS } from './terminals.js';
 import { focusClaudeDesktop } from './claude-desktop.js';
 import { isHerdrAddress, findTypedAttach, isAppServer, showInHerdrApp, attachHint } from './herdr.js';
@@ -131,10 +131,15 @@ export function planFocus(record) {
   if (host.app === 'claude-desktop') {
     return { kind: 'app', app: 'claude-desktop' };
   }
-  if (host.tmux_pane) {
+  // Each multiplexer's environment can be inherited from a server the other one
+  // started, so where the process tree has said which one really holds the
+  // session, the other's variables are not believed. Where it has not said, the
+  // order below is unchanged. See `hostMultiplexer` in ../process-tree.js.
+  const pane = hostTmuxPane(host);
+  if (pane) {
     return {
       kind: 'tmux',
-      pane: host.tmux_pane,
+      pane,
       tmuxEnv: host.tmux || null,
       termProgram: host.term_program || null,
     };
@@ -142,9 +147,8 @@ export function planFocus(record) {
   // Before anything that reads the terminal, because for a Herdr session none
   // of it is true: Herdr sets TERM_PROGRAM=ghostty in every terminal whatever
   // app shows it, and the tty is Herdr's own pseudo-terminal, which no app's tab
-  // will ever match. After tmux, which is unaffected by any of this and keeps
-  // its own path. See ./herdr.js.
-  if (host.hc_terminal_id) {
+  // will ever match. See ./herdr.js.
+  if (host.hc_terminal_id && host.multiplexer !== 'tmux') {
     if (!isHerdrAddress(host.hc_terminal_id)) {
       return {
         kind: 'unfocusable',

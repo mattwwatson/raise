@@ -163,33 +163,100 @@ the next step, never as an error.
   was used last - it cannot list clients at all - so there was nothing better to build to. With
   the app not running the click refuses with *"More than one terminal is attached to Herdr
   terminal t6, so Raise cannot tell which is this session."* and moves nothing.
-- **How the client is matched to a server.** Settled by measurement on `hc` 0.1.21, and the
-  answer is that **a client's argv cannot say**. `hc attach` takes no server option at all -
-  `hc help attach` lists `--json`, `--observe` and `--history` and nothing else - so the server
-  comes only from `HC_SESSION` or `HC_SOCKET` in the client's environment, and `ps -E` /
-  `ps eww` on this macOS print no environment for another process, even one of the same user.
-  A client against a non-default server therefore reads `hc attach t6`, identical to one
-  against the default. What the process table *does* show is each running server's holder,
-  `herdr-core hold --socket <state>/<name>/<name>.holder.<hex>.sock`, and the server's own
-  socket is `<state>/<name>/<name>.sock` (`core.lock` names
-  `~/.local/state/herdr-core/default/default.sock`). So the address is used alone **only while
-  no holder for another server's state directory is running**: a second holder disproves it,
-  because `t6` could then be either server's. Seeing no holder at all asserts nothing - the
-  typed address is still the evidence - so that check only ever removes a sighting.
+- **How the client is matched to a server.** Settled by measurement on `hc` 0.1.21, against a
+  throwaway server (see [Measured against a throwaway hc server](#measured-against-a-throwaway-hc-server)),
+  and the answer is that **a client's argv cannot say**. A client attached to that non-default
+  server showed in `ps` as `/Users/mattw/.local/bin/hc attach t1` on `ttys022` - the same shape
+  as one against the default. `hc attach` takes no server option at all - `hc help attach`
+  lists `--json`, `--observe` and `--history` and nothing else - so the server comes only from
+  `HC_SESSION` or `HC_SOCKET` in the client's environment, and `ps -E` / `ps eww` on this macOS
+  print no environment for another process, even one of the same user. What the process table
+  *does* show is each running server's holder, `herdr-core hold --socket <dir>/<name>.holder.<hex>.sock`,
+  and the holder's socket always sits in the same directory as its server's socket: the
+  default server's are `~/.local/state/herdr-core/default/default.sock` and
+  `default.holder.42bd4a65.sock` beside it, and the throwaway server's, started with
+  `HC_SOCKET=<lab>/fmr40.sock`, were `<lab>/fmr40.sock` and `<lab>/fmr40.holder.65ee4428.sock`.
+  So the address is used alone **only while no holder for another server's socket directory is
+  running**: a second holder disproves it, because `t6` could then be either server's. Seeing
+  no holder at all asserts nothing - the typed address is still the evidence - so that check
+  only ever removes a sighting.
 
   The same finding reaches the desktop app: `herdr-app` takes no socket either, and its
   local core is the default server's. So steps 2 and 3 run only for a session whose recorded
   socket has the `default/default.sock` shape, and a session on any other server gets the
   attach hint with its socket named, `HC_SOCKET=<socket> hc attach t6`.
 
-  **This was measured from the installed binaries rather than against a second running
-  server.** The isolated Herdr lab helper (`fm-herdr-lab.sh`) requires a `herdr` 0.7.3 CLI,
-  and this machine has `hc` / `herdr-core` 0.1.21 and Herdr.app 0.1.16 instead, so `prepare`
-  stops at `herdr is required`. Starting a second server by hand would have bypassed the helper,
-  so it was not done. The command-line surface and the process-table shapes above are enough
-  to build to; confirming against a live second server is in the manual testing.
+  **firstmate has no isolated harness for this Herdr.** Its Herdr lab (`fm-herdr-lab.sh`)
+  drives `herdr`, a separate terminal multiplexer with its own CLI. The Herdr this item is
+  about is a different product: the Herdr desktop app (Herdr.app 0.1.16) and Herdr Core, whose
+  CLI is `hc` (0.1.21). The lab does not cover either, which is why its `prepare` stopped at
+  `herdr is required` - not because of a version gap. The measurements in this spec were
+  therefore taken against a throwaway `hc` server started for the purpose, below; the desktop
+  app has no equivalent and is checked only by hand.
 - **The note on step 3.** `FocusResult.note`, unchanged - #35 (Warp) has not landed, so there
   was no other shape to use.
+
+### Measured against a throwaway hc server
+
+On 18/11/2026, with `hc` 0.1.21. Nothing here touched the default server, its socket or the
+desktop app.
+
+**Isolation.** Every `hc` call went through one wrapper setting `HC_SESSION=fmr40`, scratch
+`XDG_STATE_HOME`, `XDG_CONFIG_HOME` and `XDG_RUNTIME_DIR`, and `HC_SOCKET` under the
+worktree's `tmp/`. The first call (`hc server status`) started a core of its own - a new core
+id, its socket and holder in the worktree, its state under the scratch `XDG_STATE_HOME`. The
+default server's processes, `core.lock`, socket, state directories and launchd entries were
+recorded before and compared after: identical. The lab server was stopped through its own
+socket, and every other process started for it was killed by pid.
+
+**What a Herdr terminal's environment holds.** A program run with `hc run` saw
+`HC_TERMINAL_ID=t1`, `HC_TERMINAL_SOCKET=<lab>/fmr40.sock` - the server's own socket, the same
+path as `HC_SOCKET` - `TERM_PROGRAM=ghostty`, and its own pty. That confirms the hook records
+the right two fields. It also saw `HC_SESSION` and `HC_SOCKET`, and **every other variable of
+the shell that started the server**: this server was started from a tmux pane inside iTerm2,
+and every terminal on it carried that pane's `TMUX`, `TMUX_PANE=%11` and `ITERM_SESSION_ID`.
+Herdr Core's own documentation says a core keeps the environment it started with, and any `hc`
+command starts one when none is running.
+
+**That broke the change as first written, and it is fixed here.** `planFocus` checked tmux
+before Herdr, so a Herdr session on a server started from a tmux pane planned as tmux and
+focused the pane that started the server - and since that pane was in a firstmate `fm-`
+window, the session would also have been chipped as a crewmate. The reverse inheritance is
+just as possible: a tmux server started inside a Herdr terminal hands `HC_TERMINAL_ID` to every
+pane. The process tree settles it, because a parent is not inherited: a Herdr terminal's
+programs descend from the server's holder (`program -> sh -> herdr-core hold -> core`,
+measured), and a tmux pane's from the tmux server. So the hook now records
+`multiplexer: 'tmux'|'herdr'|null`, the nearest of the two among the ancestors it already walks,
+and the other multiplexer's variables are not believed when it names one. A record without it -
+from a hook installed before this change - keeps the old order.
+
+**Step 1, typed attach.** A client attached with `hc attach t1` ran in a pseudo-terminal of its
+own (`script`, no window) and showed in `ps` as `/Users/mattw/.local/bin/hc attach t1` on
+`ttys022`. Raise's real focus path was then run against the real `ps`, with only `ps` allowed to
+execute and recording adapters in place of the terminal ones, so no window could move:
+
+- With the real process table, the default server's holder was running beside the lab's, so
+  the typed attach was dropped as possibly the default server's `t1` - the designed guard,
+  firing - and the click refused with `HC_SOCKET=<lab>/fmr40.sock hc attach t1`. The desktop
+  app was not asked, the lab socket not being the default server's.
+- With the process table cut down to the lab's processes and `hc` clients - a machine where
+  the lab server is the only one - the click handed `/dev/ttys022`, the client's real tty, to
+  the adapters.
+
+**Step 4, refusal.** With the typed client replaced by a bare picker client, which showed in
+`ps` as `/Users/mattw/.local/bin/hc` with no address, the click refused with
+*"Not shown anywhere Raise can see."* and the hint, in both versions of the process table, and
+no adapter was asked to raise anything.
+
+**The hook, for real.** `hooks/raise-hook.js` was run inside a lab terminal with a `Stop`
+payload carrying an assistant message, posting to a local capture server. The post held
+`session_id`, `hook_event_name` and `host` - no message text - with `hc_terminal_id`, the lab
+socket, the inherited `tmux_pane: %11` and `multiplexer: herdr`, and `planFocus` on that exact
+record gave `{kind: 'herdr', address: 't3', socket: <lab>/fmr40.sock}`.
+
+**Not measured here, by design.** Steps 2 and 3 need the desktop app, which belongs to the
+captain; they are in the manual testing. Raising a real terminal window was not done either -
+the adapters themselves are unchanged and already tested.
 
 ---
 
@@ -261,9 +328,12 @@ case; check no other route still produces it.
 - **Where it lives.** `src/focus/herdr.js` holds the Herdr-specific reading - the typed attach
   parse, the holder check, the server name, and the `herdr-app` calls. `focusHerdr` in
   `src/focus/index.js` runs the four steps in order and owns the step 3 note, as the spec put
-  it. `planFocus` returns `kind: 'herdr'` after tmux and before anything that reads
-  `term_program` or the tty: a tmux pane inside a Herdr terminal keeps the tmux path it always
-  had, which is the one thing it is still right about.
+  it. `planFocus` returns `kind: 'herdr'` before anything that reads `term_program` or the
+  tty. Between tmux and Herdr, the session's nearest multiplexer ancestor decides
+  (`hostMultiplexer` in `src/process-tree.js`), because each one's environment can be inherited
+  from a server the other started - measured, above. `hostTmuxPane` in `src/focus/tmux.js` is
+  the one place that rule is read, and firstmate's crewmate check uses it as well as
+  `planFocus`. With no ancestor recorded, tmux is still checked first.
 - **The hook records `hc_terminal_id` and `hc_terminal_socket`**, in `hooks/raise-hook.js` and
   in the pi extension, which runs in Herdr terminals just as readily. They are added to the
   `host` block the reporter builds, not to `REPORTABLE_FIELDS`, so the payload allowlist did
@@ -304,7 +374,8 @@ case; check no other route still produces it.
   produces that message for a Herdr session is a typed attach whose real tab no adapter found,
   where it is true. Every other route to it - plain tabs and tmux - is about a tab the session
   itself is in, and was not changed.
-- **Not verified by hand here.** The Herdr lab could not be provisioned (see the second open
-  question), and the safety contract keeps every hands-on Herdr check off the captain's own
-  server and app. So each step was verified against a stubbed `exec` only, and the hand checks
-  in Acceptance are in the pull request's manual testing.
+- **What was verified, and how.** Every step is unit-tested against a stubbed `exec`. Steps 1
+  and 4, the hook and the client argv were also measured against a throwaway `hc` server (see
+  [Measured against a throwaway hc server](#measured-against-a-throwaway-hc-server)). Steps 2
+  and 3 need the desktop app and are in the pull request's manual testing, along with raising
+  real windows.

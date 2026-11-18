@@ -407,6 +407,7 @@ stratified on purpose, so read the whole file rather than one section.
 | only a typed `hc attach <address>` is a sighting; the picker leaves no trace and is not guessed at | `src/focus/herdr.js` (`typedAttachAddress`) |
 | a typed attach names no server, so a second running server's holder disproves it | `src/focus/herdr.js` (`findTypedAttach`) |
 | the desktop app takes no socket and shows the default server, so no other server's session reaches it | `src/focus/herdr.js` (`isAppServer`) |
+| between tmux and Herdr the nearest ancestor decides, because each one's environment is inherited from a server the other started | `src/process-tree.js` (`hostMultiplexer`), `src/focus/tmux.js` (`hostTmuxPane`) |
 | the hook may never fail and never block; every path exits 0 within the timeout | `hooks/raise-hook.js` |
 | recording the wrong agent pid is worse than recording none | `src/process-tree.js` |
 | the hook payload is an allowlist, and why it must be | `src/hook-payload.js` |

@@ -916,9 +916,31 @@ test('planFocus routes a Herdr session to the Herdr path, not to its recorded tt
   assert.deepEqual(plan, { kind: 'herdr', address: 't6', socket: HERDR_DEFAULT });
 });
 
-test('planFocus leaves a tmux pane on the tmux path even inside Herdr', () => {
+test('planFocus leaves a tmux pane on the tmux path when the process tree did not say', () => {
+  // A record from before the hook read the multiplexer: the order is unchanged.
   const plan = planFocus(herdrSession({ tmux_pane: '%3' }));
   assert.equal(plan.kind, 'tmux');
+});
+
+test('planFocus ignores a tmux pane a Herdr session inherited from the shell that started its server', () => {
+  // Measured: a Herdr server started by an hc command typed in tmux pane %11
+  // gave every terminal TMUX_PANE=%11. Planned as tmux, clicking the session
+  // raised the pane that started the server.
+  const plan = planFocus(
+    herdrSession({ tmux: '/private/tmp/tmux-502/default,53545,0', tmux_pane: '%11', multiplexer: 'herdr' }),
+  );
+  assert.deepEqual(plan, { kind: 'herdr', address: 't6', socket: HERDR_DEFAULT });
+});
+
+test('planFocus ignores a Herdr address a tmux pane inherited from a server started inside Herdr', () => {
+  const plan = planFocus(herdrSession({ tmux_pane: '%3', multiplexer: 'tmux' }));
+  assert.equal(plan.kind, 'tmux');
+  assert.equal(plan.pane, '%3');
+});
+
+test('planFocus does not plan a Herdr path for a session the process tree puts in tmux', () => {
+  const plan = planFocus(herdrSession({ multiplexer: 'tmux' }));
+  assert.notEqual(plan.kind, 'herdr');
 });
 
 test('planFocus refuses a Herdr address it does not recognise rather than guessing', () => {

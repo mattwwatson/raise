@@ -253,13 +253,54 @@ export function hostApp(chain = []) {
 }
 
 /**
+ * A Herdr terminal's programs are children of the server's holder process.
+ * Matched on the full argument vector because the holder runs from inside an
+ * app bundle whose path holds a space (`Herdr Core.app`).
+ */
+const HERDR_HOLDER = /(?:^|\/)herdr-core\s+hold(?:\s|$)/;
+
+/**
+ * Which multiplexer actually holds this session, read from its nearest
+ * ancestor: a tmux pane's programs are children of the tmux server, and a Herdr
+ * terminal's are children of the Herdr holder.
+ *
+ * **The environment cannot answer this, measured on hc 0.1.21.** A Herdr server
+ * gives every terminal the environment it was started with, so a server first
+ * started by an `hc` command typed in a tmux pane hands every Herdr terminal
+ * that pane's `TMUX` and `TMUX_PANE` - and planned by environment, every Herdr
+ * session then focused the tmux pane that happened to start the server. The
+ * reverse is just as real: a tmux server started inside a Herdr terminal hands
+ * `HC_TERMINAL_ID` to every pane. The parent process is not inherited, so the
+ * nearest of the two is the one the session is really in.
+ *
+ * Null when neither is an ancestor within the walk, which is not evidence of
+ * anything: the caller keeps its ordinary order then.
+ *
+ * @param {ProcessRecord[]} chain nearest ancestor first
+ * @returns {'tmux'|'herdr'|null}
+ */
+export function hostMultiplexer(chain = []) {
+  for (const proc of chain) {
+    if (HERDR_HOLDER.test(proc.args || '')) return 'herdr';
+    if (basename(proc.command || '') === 'tmux') return 'tmux';
+  }
+  return null;
+}
+
+/**
  * @param {number} startPid
  * @param {object} options
  * @param {ReadProcess} options.readProcess
  * @param {number} [options.maxDepth]
- * @returns {{tty: string|null, agentPid: number|null, app: 'claude-desktop'|null}}
+ * @returns {{tty: string|null, agentPid: number|null, app: 'claude-desktop'|null,
+ *   multiplexer: 'tmux'|'herdr'|null}}
  */
 export function inspectHost(startPid, { readProcess, maxDepth = 8 }) {
   const chain = readAncestors(startPid, { readProcess, maxDepth });
-  return { tty: resolveTty(chain), agentPid: pickAgentPid(chain), app: hostApp(chain) };
+  return {
+    tty: resolveTty(chain),
+    agentPid: pickAgentPid(chain),
+    app: hostApp(chain),
+    multiplexer: hostMultiplexer(chain),
+  };
 }
