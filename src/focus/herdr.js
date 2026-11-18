@@ -285,13 +285,15 @@ async function osascript(exec, script) {
 }
 
 /**
- * How the desktop app came to show the terminal.
+ * How the desktop app came to show the terminal, and whether it came forward.
  *
- * `pane` is the app's own pane for it, on its own space and tab. `shown` is a
- * pane that belongs to something else, borrowed until the user switches back -
- * which is worth saying, because the window looks like the session moved.
+ * `via: 'pane'` is the app's own pane for it, on its own space and tab.
+ * `via: 'shown'` is a pane that belongs to something else, borrowed until the
+ * user switches back - which is worth saying, because the window looks like the
+ * session moved. `front` is false when the app switched its pane but would not
+ * come forward: the pane has still changed, so that is not "not shown".
  *
- * @typedef {'pane'|'shown'|null} HerdrAppOutcome
+ * @typedef {{via: 'pane'|'shown', front: boolean}|null} HerdrAppOutcome
  */
 
 /**
@@ -300,8 +302,8 @@ async function osascript(exec, script) {
  * `pane.focus` first, because it selects the space and tab the terminal already
  * lives in and disturbs nothing. Only when the app has no pane of its own for
  * it does `terminal.show` borrow the focused one. Neither brings the app
- * forward, so both are followed by activating it, and an app that will not come
- * forward has not shown anything.
+ * forward, so both are followed by activating it. An app that will not come
+ * forward has still changed its pane, and the outcome says so with `front`.
  *
  * @param {Function} exec
  * @param {{address: string}} target
@@ -311,16 +313,16 @@ export async function showInHerdrApp(exec, { address }) {
   // `is running` never launches it. Starting the app to show one terminal would
   // open a window the user did not ask for.
   if ((await osascript(exec, appRunningByIdScript(HERDR_BUNDLE_ID))) !== 'true') return null;
-  /** @type {HerdrAppOutcome} */
-  let outcome = null;
+  /** @type {'pane'|'shown'|null} */
+  let via = null;
   if (await herdrAppDo(exec, ['pane.focus', '--terminal', address])) {
-    outcome = 'pane';
+    via = 'pane';
   } else if (await herdrAppDo(exec, ['terminal.show', '--terminal', address])) {
-    outcome = 'shown';
+    via = 'shown';
   }
-  if (!outcome) return null;
-  if ((await osascript(exec, activateAppByIdScript(HERDR_BUNDLE_ID))) === null) return null;
-  return outcome;
+  if (!via) return null;
+  const front = (await osascript(exec, activateAppByIdScript(HERDR_BUNDLE_ID))) !== null;
+  return { via, front };
 }
 
 /**

@@ -383,8 +383,16 @@ async function focusHerdr(exec, { address, socket, terminals }) {
   // a different terminal.
   if (isAppServer(socket)) {
     const shown = await showInHerdrApp(exec, { address });
-    if (shown === 'pane') return { ok: true, adapter: 'herdr-app' };
-    if (shown === 'shown') {
+    if (shown && !shown.front) {
+      const where = shown.via === 'shown' ? ' in its focused pane for now' : '';
+      return {
+        ok: false,
+        reason: `The Herdr app is showing terminal ${address}${where}, but Raise could not bring it to the front.`,
+        hint,
+      };
+    }
+    if (shown?.via === 'pane') return { ok: true, adapter: 'herdr-app' };
+    if (shown?.via === 'shown') {
       return {
         ok: true,
         adapter: 'herdr-app',

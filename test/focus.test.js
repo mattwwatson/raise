@@ -1001,6 +1001,40 @@ test('step 3: the desktop app with no pane for it shows it in the focused pane, 
   assert.ok(exec.calls.includes('herdr-app do terminal.show --terminal t8'));
 });
 
+test('a pane the app focused but could not bring forward is reported, not refused as unshown', async () => {
+  const ghosttyTab = terminalHolding('ghostty', []);
+  const exec = fakeExec({
+    ps: 'ttys022  hc attach t6',
+    'is running': 'true',
+    'pane.focus': '{}',
+    activate: new Error('osascript failed'),
+  });
+  const result = await focusSession(herdrSession(), { exec, terminals: [ghosttyTab] });
+  assert.deepEqual(result, {
+    ok: false,
+    reason: 'The Herdr app is showing terminal t6, but Raise could not bring it to the front.',
+    hint: 'hc attach t6',
+  });
+  assert.ok(!exec.calls.some((c) => c.includes('terminal.show')), 'no pane was borrowed');
+});
+
+test('a borrowed pane the app could not bring forward says it is in the focused pane for now', async () => {
+  const exec = fakeExec({
+    ps: '',
+    'is running': 'true',
+    'pane.focus': new Error('herdr-app exited 1: {"error":"no such pane"}'),
+    'terminal.show': '{}',
+    activate: new Error('osascript failed'),
+  });
+  const result = await focusSession(herdrSession({ hc_terminal_id: 't8' }), { exec, terminals: [] });
+  assert.deepEqual(result, {
+    ok: false,
+    reason:
+      'The Herdr app is showing terminal t8 in its focused pane for now, but Raise could not bring it to the front.',
+    hint: 'hc attach t8',
+  });
+});
+
 test('step 4: a picker-only session with the app not running refuses and moves no window', async () => {
   const ghosttyTab = terminalHolding('ghostty', ['/dev/ttys021', '/dev/ttys099']);
   const exec = fakeExec({ ps: `ttys021  hc\nttys023  hc attach\n${HERDR_HOLDER}`, 'is running': 'false' });

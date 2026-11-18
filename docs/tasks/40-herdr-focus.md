@@ -289,7 +289,11 @@ case; check no other route still produces it.
 - **`herdr-app do` success** is an exec that resolved with no output or a JSON object with no
   `error`. Anything else, including output that is not JSON, is "not available there".
 - **The desktop app is never launched.** It is checked with `is running` by bundle id first,
-  and `activate` - which would launch it - is only sent after a command succeeded.
+  and `activate` - which would launch it - is only sent after a command succeeded. If
+  `activate` then fails, the app has already switched its pane, so the click does not fall
+  through to the refusal: it fails with a reason saying the app is showing the terminal (in
+  its focused pane for now, after `terminal.show`) but could not be brought to the front,
+  and the `hc attach <id>` hint.
 - **The host chip says `herdr`.** `hostKindFor` would otherwise have called a Herdr session
   `unknown`, and before this change it said `tab`. `herdr` is the one thing known for certain
   until the click works out which app shows it.

@@ -182,7 +182,7 @@ test('showInHerdrApp focuses the app\'s own pane and brings the app forward', as
     'pane.focus': '{}',
     activate: '',
   });
-  assert.equal(await showInHerdrApp(exec, { address: 't5' }), 'pane');
+  assert.deepEqual(await showInHerdrApp(exec, { address: 't5' }), { via: 'pane', front: true });
   assert.deepEqual(exec.calls.slice(1), [
     'herdr-app do pane.focus --terminal t5',
     `osascript -e tell application id "${HERDR_BUNDLE_ID}" to activate`,
@@ -197,7 +197,7 @@ test('showInHerdrApp borrows the focused pane only when the app has none for it'
     'terminal.show': '{}',
     activate: '',
   });
-  assert.equal(await showInHerdrApp(exec, { address: 't8' }), 'shown');
+  assert.deepEqual(await showInHerdrApp(exec, { address: 't8' }), { via: 'shown', front: true });
   assert.ok(exec.calls.includes('herdr-app do terminal.show --terminal t8'));
   assert.ok(exec.calls.at(-1).includes('activate'));
 });
@@ -209,13 +209,23 @@ test('showInHerdrApp never launches the app and never runs herdr-app when it is 
   assert.ok(!exec.calls.some((c) => c.startsWith('herdr-app') || c.includes('to activate')));
 });
 
-test('showInHerdrApp counts an app that would not come forward as not shown', async () => {
+test('showInHerdrApp still reports a focused pane when the app would not come forward', async () => {
   const exec = fakeExec({
     'is running': 'true',
     'pane.focus': '{}',
     activate: new Error('osascript failed'),
   });
-  assert.equal(await showInHerdrApp(exec, { address: 't5' }), null);
+  assert.deepEqual(await showInHerdrApp(exec, { address: 't5' }), { via: 'pane', front: false });
+});
+
+test('showInHerdrApp still reports a borrowed pane when the app would not come forward', async () => {
+  const exec = fakeExec({
+    'is running': 'true',
+    'pane.focus': '{ "error": "no such pane" }',
+    'terminal.show': '{}',
+    activate: new Error('osascript failed'),
+  });
+  assert.deepEqual(await showInHerdrApp(exec, { address: 't8' }), { via: 'shown', front: false });
 });
 
 test('showInHerdrApp reports nothing when neither command works', async () => {
