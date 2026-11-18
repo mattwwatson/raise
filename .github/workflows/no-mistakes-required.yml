@@ -49,9 +49,21 @@ jobs:
     name: PR body carries the no-mistakes signature
     runs-on: ubuntu-latest
     # Bots do not run the pipeline and cannot be asked to.
+    #
+    # Nor does a release pull request. `npm run release` opens it with `gh`,
+    # carrying only the version bump and the release notes, so it would fail
+    # here on every release - a red check that is expected is a check people
+    # learn to ignore. A branch called `release/...` is not let off: it is held
+    # to `release-check.yml`'s "Release notes are current" instead, which is
+    # required and fails unless the body carries release notes recording every
+    # shipping pull request since the last release. Like this check, that is a
+    # convention check on a user-editable field and not proof - naming a branch
+    # `release/` to skip this one means writing a valid release body instead of
+    # pasting one line. See docs/tasks/39-release-process.md.
     if: >-
       github.event.pull_request.user.login != 'github-actions[bot]' &&
-      github.event.pull_request.user.login != 'dependabot[bot]'
+      github.event.pull_request.user.login != 'dependabot[bot]' &&
+      !startsWith(github.event.pull_request.head.ref, 'release/')
     steps:
       - name: Look for the signature in the pull request body
         env:
