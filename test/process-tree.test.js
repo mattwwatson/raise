@@ -9,6 +9,7 @@ import {
   looksLikeClaude,
   looksLikeCodex,
   hostApp,
+  hostMultiplexer,
   inspectHost,
 } from '../src/process-tree.js';
 
@@ -238,4 +239,73 @@ test('a session merely working on Codex is not claimed as one', () => {
   assert.equal(looksLikeCodex(parsePsLine('1 s001 rg codex src/')), false);
   assert.equal(looksLikeCodex(parsePsLine('1 s001 node /opt/tools/codex-helper.js')), false);
   assert.equal(looksLikeCodex(null), false);
+});
+
+/** The holder line as `ps` printed it on hc 0.1.21, space in the bundle name and all. */
+const HERDR_HOLDER_LINE =
+  '66774 ?? /Users/me/.local/share/herdr-core/active/Herdr Core.app/Contents/MacOS/herdr-core hold --socket /Users/me/.local/state/herdr-core/default/default.holder.42bd4a65.sock';
+
+test('a session whose nearest multiplexer ancestor is the Herdr holder is in Herdr', () => {
+  // The chain measured in a throwaway hc server: program, its shell, the
+  // holder, then the core.
+  const chain = readAncestors(900, {
+    readProcess: fakeTable({
+      900: '800 ttys023 /bin/sh -c node hooks/raise-hook.js',
+      800: '700 ttys023 claude',
+      700: '600 ttys023 -zsh',
+      600: HERDR_HOLDER_LINE,
+      66774: '1 ?? /Users/me/.local/bin/hc --hc-launchd /tmp/hc-launchd-1/ready',
+    }),
+  });
+  assert.equal(hostMultiplexer(chain), 'herdr');
+});
+
+test('a session whose nearest multiplexer ancestor is the tmux server is in tmux', () => {
+  const chain = readAncestors(900, {
+    readProcess: fakeTable({
+      900: '800 ttys031 /bin/sh -c node hooks/raise-hook.js',
+      800: '700 ttys031 claude',
+      700: '600 ttys031 -zsh',
+      600: '1 ?? /opt/homebrew/bin/tmux new-session -d -s work',
+    }),
+  });
+  assert.equal(hostMultiplexer(chain), 'tmux');
+});
+
+test('the nearest of the two wins, whichever way round they are nested', () => {
+  const tmuxInsideHerdr = [
+    { pid: 3, ppid: 2, tty: null, command: 'claude', args: 'claude' },
+    { pid: 2, ppid: 1, tty: null, command: 'tmux', args: 'tmux' },
+    { pid: 1, ppid: 0, tty: null, command: '/x/herdr-core', args: '/x/herdr-core hold --socket /s' },
+  ];
+  assert.equal(hostMultiplexer(tmuxInsideHerdr), 'tmux');
+  assert.equal(hostMultiplexer([tmuxInsideHerdr[0], tmuxInsideHerdr[2], tmuxInsideHerdr[1]]), 'herdr');
+});
+
+test('no multiplexer ancestor says nothing, and a tmux client or hc command is not one', () => {
+  assert.equal(hostMultiplexer([]), null);
+  assert.equal(
+    hostMultiplexer([
+      { pid: 2, ppid: 1, tty: 'ttys1', command: 'claude', args: 'claude' },
+      { pid: 1, ppid: 0, tty: 'ttys1', command: '-zsh', args: '-zsh' },
+    ]),
+    null,
+  );
+  // `herdr-core attach` or `hc` is a client in a tab, never a parent of the session.
+  assert.equal(
+    hostMultiplexer([{ pid: 1, ppid: 0, tty: null, command: 'hc', args: 'hc attach t5' }]),
+    null,
+  );
+});
+
+test('inspectHost reports the multiplexer beside the tty', () => {
+  const host = inspectHost(900, {
+    readProcess: fakeTable({
+      900: '800 ttys023 /bin/sh -c node hooks/raise-hook.js',
+      800: '600 ttys023 claude',
+      600: HERDR_HOLDER_LINE,
+    }),
+  });
+  assert.equal(host.multiplexer, 'herdr');
+  assert.equal(host.tty, '/dev/ttys023');
 });
