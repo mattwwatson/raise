@@ -134,8 +134,12 @@ It uses Node builtins only, like the rest of the repository, and `gh` for GitHub
    authenticated;
 2. finds the latest `v*` tag and lists the pull requests merged since it;
 3. keeps the ones whose files touch `files` (decision 2), and renders the notes (decision 3);
-4. creates `release/<version>`, runs `npm version <bump> --no-git-tag-version`, and commits;
-5. pushes and opens the pull request with the notes as its description. It never merges it.
+4. refuses if `origin` already has `release/<version>`, left by an earlier release pull request
+   that was closed without deleting its branch; otherwise creates `release/<version>`, runs
+   `npm version <bump> --no-git-tag-version`, and commits;
+5. pushes and opens the pull request with the notes as its description. It never merges it;
+6. switches back to `main` and deletes the local release branch, since merging deletes the remote
+   one and would leave the checkout tracking a branch that no longer exists.
 
 `--dry-run` prints the version and the notes, and changes nothing. That is also how the notes
 logic gets tested by hand.
