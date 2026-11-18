@@ -145,6 +145,12 @@ function prepare(args) {
   if (dryRun) return;
 
   const branch = `${RELEASE_BRANCH_PREFIX}${version}`;
+  if (must('git', ['ls-remote', '--heads', 'origin', `refs/heads/${branch}`], { cwd: root })) {
+    throw new Error(
+      `origin already has ${branch}, left by an earlier release pull request. ` +
+        'Close it and delete its branch with `gh pr close <number> --delete-branch`, then run this again.',
+    );
+  }
   must('git', ['switch', '--create', branch], { cwd: root });
   must('npm', ['version', bump, '--no-git-tag-version'], { cwd: root });
   must('git', ['commit', '--all', '--message', `release: ${version}`], { cwd: root });

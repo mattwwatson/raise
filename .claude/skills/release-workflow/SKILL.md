@@ -37,7 +37,9 @@ on a release branch whose remote is deleted when it merges.
 
 **Merge anything else you want in this release first.** A pull request that changes shipped code
 and merges while the release pull request is open makes "Release notes are current" fail, because
-the notes no longer cover everything. Close the release pull request and prepare it again.
+the notes no longer cover everything. Close the release pull request and delete its branch, with
+`gh pr close <number> --delete-branch`, then prepare it again. Closing alone leaves
+`release/<version>` on GitHub, and `npm run release` refuses to start while it is there.
 
 ## 2. Review and edit the notes
 
@@ -121,7 +123,8 @@ These exist and should only need redoing if something is renamed or recreated:
 
 - **"Release notes are current" fails** on a release pull request: something shipping merged
   after the notes were written, or the markers or the `raise-release-prs` line were removed.
-  Restore what was removed, or close the pull request and run `npm run release` again.
+  Restore what was removed, or close the pull request and delete its branch with
+  `gh pr close <number> --delete-branch`, then run `npm run release` again.
 - **`release.yml` refuses** on `main`, or fails partway: see **Recovery** in the spec.
 - **`release.yml` fails on every push** after a version bump: `package.json` carries a version
   that did not come from a release pull request. See Recovery; the next `npm run release` moves
