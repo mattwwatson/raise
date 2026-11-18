@@ -120,6 +120,8 @@ It must refuse, not publish, when:
 
 - the version is not greater than the latest tag;
 - the merge commit has no associated release pull request, so there are no reviewed notes to use;
+- a pull request that changed the package merged after the notes were written (see Implementation
+  notes);
 - `npm test`, `lint` or `typecheck` fails. `prepublishOnly` already runs them, and that is kept as
   the last guard.
 
@@ -183,8 +185,8 @@ from `LICENSE`, which npm always adds. Tag `3a16735` as `v0.1.0`.
   links, the notes markers, `nextVersion`, `latestTag` and `planRelease`, the workflow's
   decision. It reuses `isNewerVersion` from `src/update-check.js` rather than a second version
   comparison. Tested directly in `test/release-notes.test.js`.
-- **`scripts/release.js`** is the I/O: `prepare` (`npm run release -- <bump> [--dry-run]`) and
-  `ci`, the workflow's half, which writes `release`, `tag` and `notes-file` to
+- **`scripts/release.js`** is the I/O: `npm run release -- <bump> [--dry-run]` and `ci`, the
+  workflow's half, which writes `publish`, `release`, `tag` and `notes-file` to
   `$GITHUB_OUTPUT`. Pull requests since the last tag are matched by **merge commit within
   `tag..HEAD`**, not by date.
 - **`README.md` does not count (decision 2, settled 18/11/2026).** On the first real notes the
@@ -192,6 +194,19 @@ from `LICENSE`, which npm always adds. Tag `3a16735` as `v0.1.0`.
   `NOT_NEWS` excludes it. #17 still appears under Other: it also changed comments in nine `src/`
   files, which is a change to shipped code. That is the rule working, and removing the line in
   review is what the review step is for.
+- **The notes record which pull requests they were written from.** Branch protection on `main`
+  requires the release branch to be up to date before it merges, and updating it can bring in a
+  shipping pull request the notes never saw. That pull request is then an ancestor of the new tag,
+  so no later release would list it either. So the release body carries a hidden
+  `<!-- raise-release-prs: 18,21,23 -->` comment inside the markers, which `extractNotes` leaves
+  out, and `ci` recomputes the shipping pull requests merged since the previous tag with the same
+  rule the notes use. `planRelease` refuses when any of them is not on the recorded list, naming
+  them, and when the list is missing. The check is against the recorded list and not the rendered
+  lines, so deleting a line in review still releases.
+- **The workflow skips only when the tag and its GitHub Release both exist.** A tag with no
+  Release is a run that stopped after tagging, so the plan is `release-only`: the job creates the
+  Release from the notes and does not stage or tag again. A `v0.1.0` GitHub Release was created
+  for that reason, so the first run on `main` after this merges skips.
 - **A release branch reads as untracked to `tasks:gate`** (`release/0.2.0` has no `-` after its
   digits). A test pins that, since a change to the gate's pattern would otherwise block every
   release pull request.
@@ -207,3 +222,16 @@ from `LICENSE`, which npm always adds. Tag `3a16735` as `v0.1.0`.
   trusted publisher on npmjs.com (user `mattwwatson`, repository `raise`, workflow
   `release.yml`, no environment) on the day, since an unused configuration expires after two
   days.
+
+---
+
+## Recovery
+
+- **The tag push failed after a successful stage.** A re-run would stage again, which npm
+  refuses, and checking for an existing stage needs interactive auth, so this is left to fail
+  loudly. Push the tag by hand at the release merge commit
+  (`git tag v<version> <sha> && git push origin v<version>`) and re-run the job. It then finds the
+  tag with no GitHub Release and creates only the Release.
+- **The tag was pushed but `gh release create` failed.** Re-run the job; it creates only the
+  Release.
+- **A release run was cancelled by the `concurrency` group.** Re-run it from the Actions tab.

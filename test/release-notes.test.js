@@ -10,6 +10,7 @@ import {
   latestTag,
   nextVersion,
   planRelease,
+  recordedPullRequests,
   releaseBody,
   renderNotes,
 } from '../scripts/release-notes.js';
@@ -34,9 +35,21 @@ function releasePr(overrides = {}) {
   return {
     ...pr({ number: 50, title: 'release: 0.2.0', headRefName: 'release/0.2.0' }),
     mergedAt: '2026-11-18T00:00:00Z',
-    body: releaseBody('### Features\n\n- A thing (#1)'),
+    body: releaseBody('### Features\n\n- A thing (#1)', [1]),
     ...overrides,
   };
+}
+
+/** The workflow's input for a release of 0.2.0 after 0.1.0, with overrides. */
+function plan(overrides = {}) {
+  return planRelease({
+    version: '0.2.0',
+    tags: ['v0.1.0'],
+    released: false,
+    shipping: [1],
+    pullRequests: [releasePr()],
+    ...overrides,
+  });
 }
 
 test('a directory entry covers everything under it, and a file entry only itself', () => {
@@ -146,8 +159,9 @@ test('classify reads a breaking-change marker and keeps an unscoped prefix', () 
 });
 
 test('the notes come back out of the release body exactly, and only from between the markers', () => {
-  const body = releaseBody('### Fixes\n\n- One');
+  const body = releaseBody('### Fixes\n\n- One', [18, 21]);
   assert.equal(extractNotes(body), '### Fixes\n\n- One');
+  assert.deepEqual(recordedPullRequests(body), [18, 21]);
   const edited = `Reviewer chatter\n${NOTES_START}\nEdited notes\n${NOTES_END}\n## Pipeline\nnoise`;
   assert.equal(extractNotes(edited), 'Edited notes');
 });
@@ -173,13 +187,12 @@ test('latestTag ranks numerically and ignores tags that are not releases', () =>
 });
 
 test('an ordinary push to main is not a release', () => {
-  const plan = planRelease({ version: '0.1.0', tags: ['v0.1.0'], pullRequests: [] });
-  assert.equal(plan.action, 'skip');
+  const result = plan({ version: '0.1.0', tags: ['v0.1.0'], released: true, pullRequests: [] });
+  assert.equal(result.action, 'skip');
 });
 
 test('a merged release pull request is released with the notes from its description', () => {
-  const plan = planRelease({ version: '0.2.0', tags: ['v0.1.0'], pullRequests: [releasePr()] });
-  assert.deepEqual(plan, {
+  assert.deepEqual(plan(), {
     action: 'release',
     tag: 'v0.2.0',
     notes: '### Features\n\n- A thing (#1)',
@@ -188,40 +201,74 @@ test('a merged release pull request is released with the notes from its descript
 });
 
 test('a version that is not newer than the last release is refused', () => {
-  const plan = planRelease({
+  const result = plan({
     version: '0.1.5',
     tags: ['v0.1.0', 'v0.2.0'],
     pullRequests: [releasePr({ headRefName: 'release/0.1.5' })],
   });
-  assert.equal(plan.action, 'refuse');
-  assert.match(plan.action === 'refuse' ? plan.reason : '', /not newer than the latest release v0\.2\.0/);
+  assert.equal(result.action, 'refuse');
+  assert.match(result.action === 'refuse' ? result.reason : '', /not newer than the latest release v0\.2\.0/);
 });
 
 test('a version bump that did not come through a release pull request is refused', () => {
   // Somebody bumped package.json in an ordinary pull request: there are no
   // reviewed notes, so publishing would ship a release nobody described.
-  const ordinary = releasePr({ headRefName: 'fix/something' });
-  const plan = planRelease({ version: '0.2.0', tags: ['v0.1.0'], pullRequests: [ordinary] });
-  assert.equal(plan.action, 'refuse');
+  const result = plan({ pullRequests: [releasePr({ headRefName: 'fix/something' })] });
+  assert.equal(result.action, 'refuse');
 });
 
 test('an unmerged pull request for the release branch does not count', () => {
-  const plan = planRelease({
-    version: '0.2.0',
-    tags: ['v0.1.0'],
-    pullRequests: [releasePr({ mergedAt: null })],
-  });
-  assert.equal(plan.action, 'refuse');
+  const result = plan({ pullRequests: [releasePr({ mergedAt: null })] });
+  assert.equal(result.action, 'refuse');
 });
 
 test('a release pull request whose markers were deleted is refused rather than released bare', () => {
-  const plan = planRelease({
-    version: '0.2.0',
-    tags: ['v0.1.0'],
-    pullRequests: [releasePr({ body: 'notes went here' })],
+  const result = plan({ pullRequests: [releasePr({ body: 'notes went here' })] });
+  assert.equal(result.action, 'refuse');
+  assert.match(result.action === 'refuse' ? result.reason : '', /#50 has no release notes/);
+});
+
+test('a shipping pull request merged after the notes were written is refused, by number', () => {
+  // The release branch was brought up to date after #7 merged, so #7 is in the
+  // tagged commit but not in the notes - and no later release could list it.
+  const result = plan({ shipping: [1, 7] });
+  assert.equal(result.action, 'refuse');
+  assert.match(result.action === 'refuse' ? result.reason : '', /#7 changed the package after/);
+});
+
+test('a line deleted from the notes in review is still released', () => {
+  const body = releaseBody('### Features\n\n- A thing (#1)', [1, 2]);
+  const edited = body.replace('\n- A thing (#1)', '');
+  const result = plan({ shipping: [1, 2], pullRequests: [releasePr({ body: edited })] });
+  assert.equal(result.action, 'release');
+});
+
+test('notes that do not record which pull requests they came from are refused', () => {
+  const body = `${NOTES_START}\n### Features\n\n- A thing (#1)\n${NOTES_END}`;
+  const result = plan({ pullRequests: [releasePr({ body })] });
+  assert.equal(result.action, 'refuse');
+  assert.match(result.action === 'refuse' ? result.reason : '', /does not record/);
+});
+
+test('a tag with no GitHub Release creates only the Release', () => {
+  // The run stopped after staging and tagging; staging again would be refused.
+  const result = plan({ tags: ['v0.1.0', 'v0.2.0'], released: false });
+  assert.deepEqual(result, {
+    action: 'release-only',
+    tag: 'v0.2.0',
+    notes: '### Features\n\n- A thing (#1)',
+    pr: 50,
   });
-  assert.equal(plan.action, 'refuse');
-  assert.match(plan.action === 'refuse' ? plan.reason : '', /#50 has no release notes/);
+});
+
+test('a tag with no GitHub Release on a later commit is refused rather than skipped', () => {
+  const result = plan({ tags: ['v0.1.0', 'v0.2.0'], released: false, pullRequests: [] });
+  assert.equal(result.action, 'refuse');
+});
+
+test('a version with both its tag and its GitHub Release is skipped', () => {
+  const result = plan({ tags: ['v0.1.0', 'v0.2.0'], released: true });
+  assert.equal(result.action, 'skip');
 });
 
 test('a release branch never reads as a tracked item to the roadmap gate', async () => {

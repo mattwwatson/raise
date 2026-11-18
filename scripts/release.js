@@ -7,7 +7,8 @@
  *
  *   node scripts/release.js ci
  *       the workflow's half, run on every push to `main`: decide whether this
- *       commit is a release and say so to GitHub Actions
+ *       commit is a release, or a release that still needs its GitHub Release,
+ *       and say so to GitHub Actions
  *
  * Publishing is not here, and that is the point of the split. It happens in
  * `.github/workflows/release.yml` through npm Trusted Publishing, so no npm
@@ -33,6 +34,7 @@ import {
   planRelease,
   releaseBody,
   renderNotes,
+  shippingPullRequests,
 } from './release-notes.js';
 
 /**
@@ -75,17 +77,17 @@ function releaseTags(root) {
 }
 
 /**
- * The pull requests merged into `main` since a tag.
+ * The pull requests merged into `main` between a tag and a commit.
  *
- * Matched on merge commits that are in `tag..HEAD`, not on dates: a date range
+ * Matched on merge commits that are in `tag..head`, not on dates: a date range
  * would catch a pull request merged a minute after the tag was cut from an older
  * commit, and miss nothing it should not - but "the commits between two points"
  * is the exact question, so ask it.
  *
  * @returns {import('./release-notes.js').PullRequest[]}
  */
-function mergedSince(root, tag) {
-  const range = tag ? `${tag}..HEAD` : 'HEAD';
+function mergedSince(root, tag, head) {
+  const range = tag ? `${tag}..${head}` : head;
   const commits = new Set(
     must('git', ['rev-list', range], { cwd: root }).split('\n').filter(Boolean),
   );
@@ -128,7 +130,7 @@ function prepare(args) {
   const pkg = readPackage(root);
   const version = nextVersion(pkg.version, bump);
   const previousTag = latestTag(releaseTags(root));
-  const prs = mergedSince(root, previousTag);
+  const prs = mergedSince(root, previousTag, 'HEAD');
   const { markdown, included } = renderNotes({ version, previousTag, prs, files: pkg.files });
 
   console.log(`${pkg.version} -> ${version}, since ${previousTag ?? 'the beginning'}`);
@@ -143,16 +145,29 @@ function prepare(args) {
   must('git', ['push', '--set-upstream', 'origin', branch], { cwd: root });
   const url = must('gh', [
     'pr', 'create', '--repo', REPO, '--base', 'main', '--head', branch,
-    '--title', `release: ${version}`, '--body', releaseBody(markdown),
+    '--title', `release: ${version}`,
+    '--body', releaseBody(markdown, included.map((pr) => pr.number)),
   ]);
   console.log(`\nRelease pull request: ${url}`);
   console.log('Review the notes, merge it, then approve the staged package on npmjs.com.');
 }
 
 /**
+ * Whether a tag has a GitHub Release. Only "not found" is an answer of no; any
+ * other failure stops the job, since guessing either way is wrong.
+ */
+function hasRelease(tag) {
+  const result = run('gh', ['release', 'view', tag, '--repo', REPO, '--json', 'tagName']);
+  if (result.ok) return true;
+  if (/not found/i.test(result.stderr)) return false;
+  throw new Error(`gh release view ${tag} failed:\n${result.stderr.trim()}`);
+}
+
+/**
  * The workflow's question: is the commit it was started for a release?
  *
- * Writes `release`, `tag` and `notes-file` to `$GITHUB_OUTPUT`. The notes come
+ * Writes `publish` (stage and tag), `release` (create the GitHub Release), `tag`
+ * and `notes-file` to `$GITHUB_OUTPUT`. The notes come
  * from a pull request description, which anybody who can open one controls, so
  * they reach the workflow as a file path and are never interpolated into a
  * `run:` block - the same rule `no-mistakes-required.yml` follows.
@@ -160,7 +175,10 @@ function prepare(args) {
 function ci() {
   const root = repoRoot();
   const sha = process.env.GITHUB_SHA || must('git', ['rev-parse', 'HEAD'], { cwd: root });
-  const { version } = readPackage(root);
+  const { version, files } = readPackage(root);
+  const tags = releaseTags(root);
+  const tag = `v${version}`;
+  const released = tags.includes(tag) && hasRelease(tag);
   const pullRequests = JSON.parse(
     must('gh', ['api', `repos/${REPO}/commits/${sha}/pulls`]),
   ).map((pr) => ({
@@ -172,12 +190,18 @@ function ci() {
     body: pr.body,
   }));
 
-  const plan = planRelease({ version, tags: releaseTags(root), pullRequests });
+  const previousTag = latestTag(tags.filter((name) => name !== tag));
+  const shipping = shippingPullRequests(mergedSince(root, previousTag, sha), files).map(
+    (pr) => pr.number,
+  );
+
+  const plan = planRelease({ version, tags, released, shipping, pullRequests });
   const output = process.env.GITHUB_OUTPUT;
   const say = (line) => (output ? appendFileSync(output, `${line}\n`) : console.log(line));
 
   if (plan.action === 'skip') {
     console.log(`Not a release: ${plan.reason}.`);
+    say('publish=false');
     say('release=false');
     return;
   }
@@ -185,7 +209,13 @@ function ci() {
 
   const notesFile = join(process.env.RUNNER_TEMP || root, 'release-notes.md');
   writeFileSync(notesFile, `${plan.notes}\n`);
-  console.log(`Releasing ${plan.tag} from #${plan.pr}.`);
+  const publish = plan.action === 'release';
+  console.log(
+    publish
+      ? `Releasing ${plan.tag} from #${plan.pr}.`
+      : `${plan.tag} is tagged with no GitHub Release; creating only the Release from #${plan.pr}.`,
+  );
+  say(`publish=${publish}`);
   say('release=true');
   say(`tag=${plan.tag}`);
   say(`notes-file=${notesFile}`);
@@ -195,7 +225,7 @@ function main() {
   const [command, ...args] = process.argv.slice(2);
   try {
     if (command === 'ci') return ci();
-    return prepare(command === 'prepare' ? args : [command, ...args].filter(Boolean));
+    return prepare([command, ...args].filter(Boolean));
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;

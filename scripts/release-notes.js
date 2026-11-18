@@ -30,6 +30,17 @@
  * them back out of the *merged* description. So an edit made in review is what
  * the GitHub Release says, and anything outside the markers - a reviewer's
  * comment, a pipeline section - is not.
+ *
+ * **The notes may lose a line in review, and may not miss a pull request.** The
+ * notes are written when the release branch is cut, and main's branch
+ * protection makes the maintainer bring that branch up to date before it can
+ * merge, which can pull in a shipping pull request the notes never saw. It is
+ * then an ancestor of the new tag, so no later release could list it either.
+ * So the preparing script records the numbers it rendered in a hidden comment
+ * inside the markers, and the workflow refuses when a shipping pull request
+ * merged since the last release is not on that list. The check is against the
+ * recorded list, not the rendered lines, so deleting a line in review is still
+ * allowed.
  */
 
 import { isNewerVersion } from '../src/update-check.js';
@@ -42,6 +53,9 @@ export const RELEASE_BRANCH_PREFIX = 'release/';
 
 export const NOTES_START = '<!-- raise-release-notes:start -->';
 export const NOTES_END = '<!-- raise-release-notes:end -->';
+
+/** The hidden list of pull requests the notes were rendered from. */
+const RECORDED_PATTERN = /<!-- raise-release-prs:([\d,\s]*)-->/;
 
 /**
  * Entries in `files` that ship but whose changes are not news on their own. A
@@ -136,16 +150,27 @@ function entry(pr, text) {
 }
 
 /**
+ * The pull requests that belong in the notes, in number order: the ones that
+ * changed a shipped file other than `NOT_NEWS`. The notes and the workflow's
+ * check both ask this, so they cannot disagree about what counts.
+ *
+ * @param {PullRequest[]} prs
+ * @param {string[]} files
+ * @returns {PullRequest[]}
+ */
+export function shippingPullRequests(prs, files) {
+  const counted = files.filter((file) => !NOT_NEWS.includes(file));
+  return prs.filter((pr) => touchesPackage(pr, counted)).sort((a, b) => a.number - b.number);
+}
+
+/**
  * The release notes for the pull requests merged since the last release.
  *
  * @param {{version: string, previousTag: string|null, prs: PullRequest[], files: string[]}} input
  * @returns {{markdown: string, included: PullRequest[]}}
  */
 export function renderNotes({ version, previousTag, prs, files }) {
-  const counted = files.filter((file) => !NOT_NEWS.includes(file));
-  const included = prs
-    .filter((pr) => touchesPackage(pr, counted))
-    .sort((a, b) => a.number - b.number);
+  const included = shippingPullRequests(prs, files);
 
   const lines = [];
   if (included.length === 0) {
@@ -168,14 +193,17 @@ export function renderNotes({ version, previousTag, prs, files }) {
 
 /**
  * The release pull request's description: the notes, between the markers the
- * workflow reads them back from, and a note to the reviewer outside them.
+ * workflow reads them back from, with the numbers of the pull requests they
+ * were rendered from in a hidden comment, and a note to the reviewer outside.
  *
  * @param {string} notes
+ * @param {number[]} recorded
  * @returns {string}
  */
-export function releaseBody(notes) {
+export function releaseBody(notes, recorded) {
   return [
     NOTES_START,
+    `<!-- raise-release-prs: ${recorded.join(',')} -->`,
     notes,
     NOTES_END,
     '',
@@ -198,8 +226,20 @@ export function extractNotes(body) {
   const start = text.indexOf(NOTES_START);
   const end = text.indexOf(NOTES_END);
   if (start === -1 || end === -1 || end < start) return null;
-  const notes = text.slice(start + NOTES_START.length, end).trim();
+  const notes = text.slice(start + NOTES_START.length, end).replace(RECORDED_PATTERN, '').trim();
   return notes || null;
+}
+
+/**
+ * The pull request numbers a release body says its notes were rendered from.
+ *
+ * @param {string|null|undefined} body
+ * @returns {number[]|null} null when the body carries no list
+ */
+export function recordedPullRequests(body) {
+  const match = RECORDED_PATTERN.exec(String(body || ''));
+  if (!match) return null;
+  return match[1].split(',').map((n) => n.trim()).filter(Boolean).map(Number);
 }
 
 /**
@@ -240,22 +280,37 @@ export function latestTag(tags) {
  * What the workflow should do with a commit that has landed on `main`.
  *
  * Every push to `main` asks this, and nearly every answer is `skip`: the version
- * in `package.json` already has its tag. Only a version with no tag is a release,
- * and then each way it could be one nobody reviewed is a refusal - which fails
- * the job, visibly, rather than publishing or quietly doing nothing.
+ * in `package.json` already has its tag and its GitHub Release. Only a version
+ * with no tag is a release, and then each way it could be one nobody reviewed is
+ * a refusal - which fails the job, visibly, rather than publishing or quietly
+ * doing nothing.
  *
- * @param {{version: string, tags: string[], pullRequests: (PullRequest & {body?: string, mergedAt?: string|null})[]}} input
- *   `pullRequests` are the ones GitHub associates with the commit
+ * A tag with no GitHub Release is a release that stopped after staging and
+ * tagging, and the answer is `release-only`: create the Release, and do not
+ * stage or tag again. Skipping it would leave the version with no changelog,
+ * and nothing would say so.
+ *
+ * @param {{
+ *   version: string,
+ *   tags: string[],
+ *   released: boolean,
+ *   shipping: number[],
+ *   pullRequests: (PullRequest & {body?: string, mergedAt?: string|null})[],
+ * }} input
+ *   `released` is whether the tag has a GitHub Release; `shipping` is the
+ *   numbers of the pull requests merged since the last release that belong in
+ *   the notes; `pullRequests` are the ones GitHub associates with the commit
  * @returns {{action: 'skip', reason: string}
  *   | {action: 'refuse', reason: string}
- *   | {action: 'release', tag: string, notes: string, pr: number}}
+ *   | {action: 'release' | 'release-only', tag: string, notes: string, pr: number}}
  */
-export function planRelease({ version, tags, pullRequests }) {
+export function planRelease({ version, tags, released, shipping, pullRequests }) {
   const tag = `v${version}`;
-  if (tags.includes(tag)) return { action: 'skip', reason: `${tag} is already tagged` };
+  const tagged = tags.includes(tag);
+  if (tagged && released) return { action: 'skip', reason: `${tag} is already released` };
 
   const previous = latestTag(tags);
-  if (previous && !isNewerVersion(previous.slice(1), version)) {
+  if (!tagged && previous && !isNewerVersion(previous.slice(1), version)) {
     return {
       action: 'refuse',
       reason: `package.json says ${version}, which is not newer than the latest release ${previous}`,
@@ -266,6 +321,14 @@ export function planRelease({ version, tags, pullRequests }) {
     (candidate) => candidate.headRefName === `${RELEASE_BRANCH_PREFIX}${version}` && candidate.mergedAt,
   );
   if (!pr) {
+    if (tagged) {
+      return {
+        action: 'refuse',
+        reason:
+          `${tag} is tagged but has no GitHub Release, and this commit is not its release ` +
+          'pull request. Re-run the workflow run for the release merge.',
+      };
+    }
     return {
       action: 'refuse',
       reason:
@@ -280,6 +343,27 @@ export function planRelease({ version, tags, pullRequests }) {
     return {
       action: 'refuse',
       reason: `#${pr.number} has no release notes between its markers; restore them and release again`,
+    };
+  }
+  if (tagged) return { action: 'release-only', tag, notes, pr: pr.number };
+
+  const recorded = recordedPullRequests(pr.body);
+  if (!recorded) {
+    return {
+      action: 'refuse',
+      reason:
+        `#${pr.number} does not record which pull requests its notes were written from. ` +
+        'Regenerate the notes: close the pull request and run `npm run release` again.',
+    };
+  }
+  const missing = shipping.filter((number) => !recorded.includes(number));
+  if (missing.length) {
+    return {
+      action: 'refuse',
+      reason:
+        `${missing.map((n) => `#${n}`).join(', ')} changed the package after the notes in ` +
+        `#${pr.number} were written. Regenerate the notes: close the pull request and run ` +
+        '`npm run release` again.',
     };
   }
   return { action: 'release', tag, notes, pr: pr.number };
