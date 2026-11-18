@@ -870,3 +870,283 @@ test('a tmux pane inside Ghostty is raised through the client tty', async () => 
   assert.equal(result.ok, true);
   assert.equal(result.adapter, 'ghostty');
 });
+
+// --- Herdr ------------------------------------------------------------------
+
+const HERDR_DEFAULT = '/Users/me/.local/state/herdr-core/default/default.sock';
+const HERDR_LAB = '/Users/me/.local/state/herdr-core/lab/lab.sock';
+const HERDR_HOLDER =
+  '?? /Users/me/.local/share/herdr-core/active/Herdr Core.app/Contents/MacOS/herdr-core hold --socket /Users/me/.local/state/herdr-core/default/default.holder.1.sock';
+
+/**
+ * A Herdr session as the hook records it: Herdr's own pty and Herdr's
+ * TERM_PROGRAM=ghostty, both of which are true of every Herdr terminal and say
+ * nothing about where this one is shown.
+ */
+function herdrSession(overrides = {}) {
+  return {
+    host: {
+      term_program: 'ghostty',
+      tty: '/dev/ttys099',
+      hc_terminal_id: 't6',
+      hc_terminal_socket: HERDR_DEFAULT,
+      ...overrides,
+    },
+  };
+}
+
+/** A terminal adapter that holds exactly the tabs given, and records each ask. */
+function terminalHolding(name, ttys = []) {
+  const asked = [];
+  return {
+    asked,
+    name,
+    label: name,
+    termProgram: name,
+    isAvailable: async () => true,
+    focus: async (_exec, { tty }) => {
+      asked.push(tty);
+      return ttys.includes(tty);
+    },
+  };
+}
+
+test('planFocus routes a Herdr session to the Herdr path, not to its recorded tty', () => {
+  const plan = planFocus(herdrSession());
+  assert.deepEqual(plan, { kind: 'herdr', address: 't6', socket: HERDR_DEFAULT });
+});
+
+test('planFocus leaves a tmux pane on the tmux path when the process tree did not say', () => {
+  // A record from before the hook read the multiplexer: the order is unchanged.
+  const plan = planFocus(herdrSession({ tmux_pane: '%3' }));
+  assert.equal(plan.kind, 'tmux');
+});
+
+test('planFocus ignores a tmux pane a Herdr session inherited from the shell that started its server', () => {
+  // Measured: a Herdr server started by an hc command typed in tmux pane %11
+  // gave every terminal TMUX_PANE=%11. Planned as tmux, clicking the session
+  // raised the pane that started the server.
+  const plan = planFocus(
+    herdrSession({ tmux: '/private/tmp/tmux-502/default,53545,0', tmux_pane: '%11', multiplexer: 'herdr' }),
+  );
+  assert.deepEqual(plan, { kind: 'herdr', address: 't6', socket: HERDR_DEFAULT });
+});
+
+test('planFocus ignores a Herdr address a tmux pane inherited from a server started inside Herdr', () => {
+  const plan = planFocus(herdrSession({ tmux_pane: '%3', multiplexer: 'tmux' }));
+  assert.equal(plan.kind, 'tmux');
+  assert.equal(plan.pane, '%3');
+});
+
+test('planFocus does not plan a Herdr path for a session the process tree puts in tmux', () => {
+  const plan = planFocus(herdrSession({ multiplexer: 'tmux' }));
+  assert.notEqual(plan.kind, 'herdr');
+});
+
+test('planFocus refuses a Herdr address it does not recognise rather than guessing', () => {
+  const plan = planFocus(herdrSession({ hc_terminal_id: '--terminal' }));
+  assert.equal(plan.kind, 'unfocusable');
+  assert.match(plan.reason, /Herdr/);
+});
+
+test('a Herdr session is never handed to the terminal adapters by its recorded tty', async () => {
+  // The bug: Herdr's own pty went to the Ghostty adapter, which correctly found
+  // nothing, and the click blamed Ghostty for a session it never held.
+  const ghosttyTab = terminalHolding('ghostty', ['/dev/ttys099']);
+  const exec = fakeExec({ ps: '', 'is running': 'false' });
+  const result = await focusSession(herdrSession(), { exec, terminals: [ghosttyTab] });
+  assert.deepEqual(ghosttyTab.asked, []);
+  assert.equal(result.ok, false);
+  assert.doesNotMatch(result.reason, /Ghostty/);
+});
+
+test('step 1: a typed hc attach is raised through the adapter holding its tab', async () => {
+  const iterm = terminalHolding('iterm2', ['/dev/ttys020']);
+  const exec = fakeExec({ ps: `ttys020  hc attach t6\n${HERDR_HOLDER}` });
+  const result = await focusSession(herdrSession(), { exec, terminals: [iterm] });
+  assert.deepEqual(result, { ok: true, adapter: 'iterm2' });
+  assert.deepEqual(iterm.asked, ['/dev/ttys020']);
+  // Taken: the typed attach. Dropped: the desktop app, never asked.
+  assert.ok(!exec.calls.some((c) => c.includes('herdr-app') || c.includes('dev.herdr.app')));
+});
+
+test('a typed attach wins over the desktop app when both show the session', async () => {
+  const ghosttyTab = terminalHolding('ghostty', ['/dev/ttys022']);
+  const exec = fakeExec({
+    ps: `ttys022  hc attach t6\n${HERDR_HOLDER}`,
+    'is running': 'true',
+    'pane.focus': '{}',
+    activate: '',
+  });
+  const result = await focusSession(herdrSession(), { exec, terminals: [ghosttyTab] });
+  assert.equal(result.adapter, 'ghostty');
+  assert.ok(!exec.calls.some((c) => c.includes('herdr-app')), 'the app pane was not used');
+});
+
+test('step 1 falls through to the desktop app when no adapter holds the attach tab', async () => {
+  // A typed attach in a terminal Raise has no adapter for, or a tab that closed.
+  const ghosttyTab = terminalHolding('ghostty', []);
+  const exec = fakeExec({
+    ps: 'ttys022  hc attach t6',
+    'is running': 'true',
+    'pane.focus': '{}',
+    activate: '',
+  });
+  const result = await focusSession(herdrSession(), { exec, terminals: [ghosttyTab] });
+  assert.deepEqual(ghosttyTab.asked, ['/dev/ttys022']);
+  assert.deepEqual(result, { ok: true, adapter: 'herdr-app' });
+});
+
+test('step 2: with no typed attach, the desktop app\'s own pane is focused and no pane is borrowed', async () => {
+  const exec = fakeExec({ ps: 'ttys021  hc', 'is running': 'true', 'pane.focus': '{}', activate: '' });
+  const result = await focusSession(herdrSession(), { exec, terminals: [] });
+  assert.deepEqual(result, { ok: true, adapter: 'herdr-app' });
+  assert.ok(exec.calls.includes('herdr-app do pane.focus --terminal t6'));
+  assert.ok(!exec.calls.some((c) => c.includes('terminal.show')));
+});
+
+test('step 3: the desktop app with no pane for it shows it in the focused pane, and says so', async () => {
+  const exec = fakeExec({
+    ps: '',
+    'is running': 'true',
+    'pane.focus': new Error('herdr-app exited 1: {"error":"no such pane"}'),
+    'terminal.show': '{}',
+    activate: '',
+  });
+  const result = await focusSession(herdrSession({ hc_terminal_id: 't8' }), { exec, terminals: [] });
+  assert.equal(result.ok, true);
+  assert.equal(result.adapter, 'herdr-app');
+  assert.equal(
+    result.note,
+    'Shown in the Herdr app. To bring up your own terminal instead, attach it with hc attach t8.',
+  );
+  assert.ok(exec.calls.includes('herdr-app do terminal.show --terminal t8'));
+});
+
+test('a pane the app focused but could not bring forward is reported, not refused as unshown', async () => {
+  const ghosttyTab = terminalHolding('ghostty', []);
+  const exec = fakeExec({
+    ps: 'ttys022  hc attach t6',
+    'is running': 'true',
+    'pane.focus': '{}',
+    activate: new Error('osascript failed'),
+  });
+  const result = await focusSession(herdrSession(), { exec, terminals: [ghosttyTab] });
+  assert.deepEqual(result, {
+    ok: false,
+    reason: 'The Herdr app is showing terminal t6, but Raise could not bring it to the front.',
+    hint: 'hc attach t6',
+  });
+  assert.ok(!exec.calls.some((c) => c.includes('terminal.show')), 'no pane was borrowed');
+});
+
+test('a borrowed pane the app could not bring forward says it is in the focused pane for now', async () => {
+  const exec = fakeExec({
+    ps: '',
+    'is running': 'true',
+    'pane.focus': new Error('herdr-app exited 1: {"error":"no such pane"}'),
+    'terminal.show': '{}',
+    activate: new Error('osascript failed'),
+  });
+  const result = await focusSession(herdrSession({ hc_terminal_id: 't8' }), { exec, terminals: [] });
+  assert.deepEqual(result, {
+    ok: false,
+    reason:
+      'The Herdr app is showing terminal t8 in its focused pane for now, but Raise could not bring it to the front.',
+    hint: 'hc attach t8',
+  });
+});
+
+test('step 4: a picker-only session with the app not running refuses and moves no window', async () => {
+  const ghosttyTab = terminalHolding('ghostty', ['/dev/ttys021', '/dev/ttys099']);
+  const exec = fakeExec({ ps: `ttys021  hc\nttys023  hc attach\n${HERDR_HOLDER}`, 'is running': 'false' });
+  const result = await focusSession(herdrSession({ hc_terminal_id: 't8' }), {
+    exec,
+    terminals: [ghosttyTab],
+  });
+  assert.deepEqual(result, {
+    ok: false,
+    reason: 'Not shown anywhere Raise can see.',
+    hint: 'hc attach t8',
+  });
+  assert.deepEqual(ghosttyTab.asked, [], 'no adapter was asked to raise anything');
+  assert.ok(!exec.calls.some((c) => c.startsWith('herdr-app') || c.includes('to activate')));
+});
+
+test('two typed attaches of one terminal fall through to the desktop app', async () => {
+  const ghosttyTab = terminalHolding('ghostty', ['/dev/ttys020', '/dev/ttys022']);
+  const exec = fakeExec({
+    ps: 'ttys020  hc attach t6\nttys022  hc attach t6',
+    'is running': 'true',
+    'pane.focus': '{}',
+    activate: '',
+  });
+  const result = await focusSession(herdrSession(), { exec, terminals: [ghosttyTab] });
+  assert.deepEqual(result, { ok: true, adapter: 'herdr-app' });
+  assert.deepEqual(ghosttyTab.asked, [], 'neither tab was guessed at');
+});
+
+test('two typed attaches with no desktop app refuse as ambiguous', async () => {
+  const ghosttyTab = terminalHolding('ghostty', ['/dev/ttys020', '/dev/ttys022']);
+  const exec = fakeExec({
+    ps: 'ttys020  hc attach t6\nttys022  hc attach t6',
+    'is running': 'false',
+  });
+  const result = await focusSession(herdrSession(), { exec, terminals: [ghosttyTab] });
+  assert.equal(result.ok, false);
+  assert.equal(result.ambiguous, true);
+  assert.match(result.reason, /More than one terminal is attached to Herdr terminal t6/);
+  assert.deepEqual(ghosttyTab.asked, []);
+});
+
+test('a typed attach no adapter can raise, with no app, reports the attempt and the way out', async () => {
+  const ghosttyTab = terminalHolding('ghostty', []);
+  const exec = fakeExec({ ps: 'ttys022  hc attach t6', 'is running': 'false' });
+  const result = await focusSession(herdrSession(), { exec, terminals: [ghosttyTab] });
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /Could not find that tab in ghostty/);
+  assert.equal(result.hint, 'hc attach t6');
+});
+
+test('Herdr commands go only to the server the session recorded', async () => {
+  // The desktop app takes no socket and shows the default server. A session on
+  // the lab server has its own t6, and focusing the app's t6 would raise a
+  // different terminal - so the app is never asked, even while it runs.
+  const exec = fakeExec({ ps: '', 'is running': 'true', 'pane.focus': '{}', activate: '' });
+  const result = await focusSession(herdrSession({ hc_terminal_socket: HERDR_LAB }), {
+    exec,
+    terminals: [],
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.hint, `HC_SOCKET=${HERDR_LAB} hc attach t6`);
+  assert.ok(!exec.calls.some((c) => c.startsWith('herdr-app') || c.includes('dev.herdr.app')));
+});
+
+test('a typed attach is not trusted while another Herdr server is running', async () => {
+  // `hc attach t6` names no server, so with the lab server up it could be the
+  // lab's t6. The default server's own app pane is used instead.
+  const ghosttyTab = terminalHolding('ghostty', ['/dev/ttys022']);
+  const exec = fakeExec({
+    ps: [
+      'ttys022  hc attach t6',
+      HERDR_HOLDER,
+      '?? herdr-core hold --socket /Users/me/.local/state/herdr-core/lab/lab.holder.2.sock',
+    ].join('\n'),
+    'is running': 'true',
+    'pane.focus': '{}',
+    activate: '',
+  });
+  const result = await focusSession(herdrSession(), { exec, terminals: [ghosttyTab] });
+  assert.deepEqual(ghosttyTab.asked, []);
+  assert.deepEqual(result, { ok: true, adapter: 'herdr-app' });
+});
+
+test('a Herdr session with no recorded server is refused rather than sent to the default one', async () => {
+  const exec = fakeExec({ 'is running': 'true', 'pane.focus': '{}', activate: '' });
+  const result = await focusSession(herdrSession({ hc_terminal_socket: null }), {
+    exec,
+    terminals: [],
+  });
+  assert.equal(result.ok, false);
+  assert.deepEqual(exec.calls, [], 'nothing was run');
+});

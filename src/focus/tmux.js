@@ -63,6 +63,26 @@ export function socketPath(tmuxEnv) {
 }
 
 /**
+ * The tmux pane a session is in, or null when it is not in one.
+ *
+ * `TMUX_PANE` is environment, and a Herdr server hands its own environment to
+ * every terminal it starts - so a Herdr server first started from a tmux pane
+ * gives every Herdr session that pane. Where the process tree says the session
+ * is really held by Herdr, the pane is not believed: planned as tmux, the
+ * session focused the pane that started the server, and firstmate's `fm-`
+ * window name on that pane made it a crewmate. See `hostMultiplexer` in
+ * ../process-tree.js. A session the process tree said nothing about keeps its
+ * pane, which is how every session behaved before.
+ *
+ * @param {import('../registry.js').Host|null|undefined} host
+ * @returns {string|null}
+ */
+export function hostTmuxPane(host) {
+  if (!host?.tmux_pane || host.multiplexer === 'herdr') return null;
+  return host.tmux_pane;
+}
+
+/**
  * A custom tmux socket must be honoured or we would query the wrong server.
  * $TMUX is "<socket path>,<pid>,<session index>".
  */

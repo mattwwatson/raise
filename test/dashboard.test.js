@@ -389,6 +389,27 @@ test('buildRows tags a tmux-hosted session', () => {
   assert.equal(rows[0].hostKind, 'tmux');
 });
 
+test('buildRows tags a Herdr session as herdr, never as the Ghostty tab its TERM_PROGRAM claims', () => {
+  // Herdr sets TERM_PROGRAM=ghostty in every terminal and records its own pty,
+  // so "tab" would be a confident claim about a window nobody has found yet.
+  const rows = build({
+    sessions: [
+      session({
+        host: {
+          term_program: 'ghostty',
+          tty: '/dev/ttys099',
+          hc_terminal_id: 't6',
+          hc_terminal_socket: '/Users/me/.local/state/herdr-core/default/default.sock',
+        },
+      }),
+    ],
+    runs: [],
+    now: 5000,
+  });
+  assert.equal(rows[0].hostKind, 'herdr');
+  assert.equal(rows[0].focusable, true);
+});
+
 test('buildRows tags a Claude Desktop session and keeps it focusable', () => {
   // The card this exists for: no tty, no terminal, and until now not focusable
   // either - so opening an old session in the desktop app put a row on the page
