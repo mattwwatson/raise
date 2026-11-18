@@ -11,6 +11,10 @@
  *   - the controlling terminal, which is what focusing a window needs
  *   - the pid of the long-lived agent, which is what liveness pruning needs
  *
+ * The same walk also names the app hosting a session that has no terminal
+ * (`hostApp`) and which of tmux and Herdr really holds it (`hostMultiplexer`);
+ * each carries its own reasoning below.
+ *
  * The pid is the dangerous one. Recording the wrong pid is worse than
  * recording none: the shell that runs the hook exits the moment the hook
  * returns, so a session recorded against it is pruned within a poll tick and
