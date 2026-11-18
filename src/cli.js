@@ -55,7 +55,7 @@ import { PollWatch } from './poll-watch.js';
 import { FirstmateWatch } from './firstmate.js';
 import { FirstmateDecisions } from './firstmate-decisions.js';
 import { UntrackedScan } from './untracked.js';
-import { focusSession } from './focus/index.js';
+import { focusSession, planFocus } from './focus/index.js';
 import { ALL_TERMINALS } from './focus/terminals.js';
 import { exec, execAsync, tryExec, tryExecAsync } from './exec.js';
 import {
@@ -1209,9 +1209,9 @@ async function cmdDoctor() {
   }
 
   if (sessions.length > 0) {
-    const focusable = sessions.filter(
-      (s) => s.host?.tmux_pane || s.host?.hc_terminal_id || s.host?.iterm_session_id || s.host?.tty,
-    );
+    // The rule the page and `raise focus` use, so the three never disagree
+    // about one session - a Herdr address Raise does not recognise included.
+    const focusable = sessions.filter((s) => planFocus(s).kind !== 'unfocusable');
     ok('Sessions', `${sessions.length} registered, ${focusable.length} focusable`);
   } else {
     warn('Sessions', 'none registered yet - start a Claude session after installing the hooks');
