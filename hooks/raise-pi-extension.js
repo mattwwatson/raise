@@ -129,6 +129,9 @@ function collectHost(read) {
     term_session_id: process.env.TERM_SESSION_ID || null,
     tmux: process.env.TMUX || null,
     tmux_pane: process.env.TMUX_PANE || null,
+    // pi runs in a Herdr terminal as readily as in tmux. See the hook.
+    hc_terminal_id: process.env.HC_TERMINAL_ID || null,
+    hc_terminal_socket: process.env.HC_TERMINAL_SOCKET || null,
     tty,
     // The extension is the agent, so this needs no walking and cannot be wrong.
     pid: process.pid,

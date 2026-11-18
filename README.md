@@ -470,8 +470,8 @@ when you click it. Rows without a live agent session behind them - a pipeline ru
 no session attached, or a session found on disk that has never reported one - are plain and do
 nothing.
 
-The chip beside a row says where the session lives - `tmux`, `tab`, `desktop` - and a session
-whose window Raise could not place says `no window` rather than guessing at one. Focusing is
+The chip beside a row says where the session lives - `tmux`, `herdr`, `tab`, `desktop` - and a
+session whose window Raise could not place says `no window` rather than guessing at one. Focusing is
 otherwise silent, since the window arriving in front of you is the answer; a short message
 means you were raised onto something less than the row you clicked.
 
@@ -602,7 +602,8 @@ there is no window to focus, and Raise tells you the `tmux attach` command inste
 silently.
 
 Supported terminals today: **iTerm2**, **Terminal.app** and **Ghostty** (1.4 or later), plus
-**tmux** inside any of them.
+**tmux** inside any of them, and **Herdr** terminals attached with `hc attach <address>` in any of
+them or shown in the Herdr desktop app - see below.
 
 ### Claude Desktop sessions
 
@@ -620,6 +621,32 @@ one it is already running leaves you with two entries over the same conversation
 where the app would recognise the id instead of copying is a session an earlier such click
 already imported, so the link would land on that duplicate rather than the session you clicked
 - which is why Raise never uses it.
+
+### Herdr sessions
+
+A session running in a Herdr terminal is marked `herdr`, and focusing it
+brings up whatever is showing that terminal, worked out when you click:
+
+1. **A terminal app holding `hc attach <address>`** - Raise raises that tab, in iTerm2,
+   Terminal.app or Ghostty, exactly as it raises any other tab.
+2. **The Herdr desktop app, with a pane for it** - the app comes forward on that space and tab.
+3. **The Herdr desktop app, with no pane for it** - the app comes forward showing the terminal
+   in its focused pane for now, and a toast says so, since that pane now shows something else
+   until you switch back.
+4. **Nothing Raise can see** - it says so and gives you the `hc attach <address>` command.
+
+**Attach with the address: `hc attach t5`, not bare `hc` or `hc attach` and the picker.**
+Raise finds the tab showing a terminal by its command line, and only a typed address puts the
+terminal there. A picker client's command line stays `hc` whichever terminal you chose, and
+Herdr offers no way to ask a client what it is showing, so Raise cannot tell two picker tabs
+apart and does not guess. Every session's address is in its environment as `$HC_TERMINAL_ID`,
+and `hc ls` lists them. Two tabs attached to the same address are refused for the same reason,
+and fall back to the desktop app if it is running.
+
+Two limits worth knowing. The desktop app only ever reaches the default Herdr server, so a
+session on another server (`HC_SESSION` or `HC_SOCKET`) is raised only through a typed attach,
+and the hint names its socket. And while a second Herdr server is running, a typed attach is
+not trusted at all, because `hc attach t5` does not say which server's `t5` it means.
 
 ## Pull request state from the forge
 

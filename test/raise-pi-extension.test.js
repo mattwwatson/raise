@@ -105,6 +105,34 @@ test('the window identity is walked once and sent with every post', async () => 
   }
 });
 
+test('a pi session in a Herdr terminal reports its address and server, and nothing else of Herdr\'s', async () => {
+  const h = harness();
+  const previous = {
+    id: process.env.HC_TERMINAL_ID,
+    socket: process.env.HC_TERMINAL_SOCKET,
+  };
+  process.env.HC_TERMINAL_ID = 't5';
+  process.env.HC_TERMINAL_SOCKET = '/Users/me/.local/state/herdr-core/default/default.sock';
+  try {
+    (await loadExtension())(h.pi, { readProcess: h.readProcess });
+    h.fire('session_start', {});
+    assert.equal(h.posts[0].host.hc_terminal_id, 't5');
+    assert.equal(
+      h.posts[0].host.hc_terminal_socket,
+      '/Users/me/.local/state/herdr-core/default/default.sock',
+    );
+  } finally {
+    for (const [key, value] of [
+      ['HC_TERMINAL_ID', previous.id],
+      ['HC_TERMINAL_SOCKET', previous.socket],
+    ]) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    h.cleanup();
+  }
+});
+
 test('a session that started while Raise was down still reports its window', async () => {
   // Anchoring the identity to session_start would strand this session: its only
   // chance to be placed went nowhere, and it would render as a dead card and

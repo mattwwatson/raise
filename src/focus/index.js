@@ -1,12 +1,14 @@
 /**
  * Focusing the window that wants you.
  *
- * Both terminal hosting styles collapse to the same final step - bring the tab
+ * Every terminal hosting style collapses to the same final step - bring the tab
  * with a given tty (or iTerm2 session UUID) to the front:
  *
  *   plain tab  ->  the session's own identifiers, captured at session start
  *   tmux pane  ->  choose which attached client to raise, then select the pane
  *                  inside that client's session and raise its tty
+ *   Herdr      ->  the tab holding a typed `hc attach <address>`, if one does;
+ *                  otherwise the Herdr desktop app, which is not a tab at all
  *
  * The tmux order is that way round because a pane's window can belong to more
  * than one session, so which client to raise is the question, and everything
@@ -22,6 +24,7 @@
 import { resolveTmuxTarget, selectPane } from './tmux.js';
 import { orderedTerminals, ALL_TERMINALS } from './terminals.js';
 import { focusClaudeDesktop } from './claude-desktop.js';
+import { isHerdrAddress, findTypedAttach, isAppServer, showInHerdrApp, attachHint } from './herdr.js';
 
 /** @typedef {import('./terminals.js').Terminal} Terminal */
 /** @typedef {import('../registry.js').Session} Session */
@@ -35,9 +38,11 @@ import { focusClaudeDesktop } from './claude-desktop.js';
  * carries only the reason to show the user.
  *
  * @typedef {object} FocusPlan
- * @property {'tmux'|'tab'|'app'|'unfocusable'} kind
+ * @property {'tmux'|'herdr'|'tab'|'app'|'unfocusable'} kind
  * @property {string} [pane] tmux only
  * @property {string|null} [tmuxEnv] tmux only, the TMUX socket
+ * @property {string} [address] herdr only, the terminal's `t5` address
+ * @property {string|null} [socket] herdr only, the server that address is on
  * @property {string|null} [sessionUuid] tab only
  * @property {string|null} [tty] tab only
  * @property {string|null} [termProgram] which adapter to try first
@@ -133,6 +138,20 @@ export function planFocus(record) {
       tmuxEnv: host.tmux || null,
       termProgram: host.term_program || null,
     };
+  }
+  // Before anything that reads the terminal, because for a Herdr session none
+  // of it is true: Herdr sets TERM_PROGRAM=ghostty in every terminal whatever
+  // app shows it, and the tty is Herdr's own pseudo-terminal, which no app's tab
+  // will ever match. After tmux, which is unaffected by any of this and keeps
+  // its own path. See ./herdr.js.
+  if (host.hc_terminal_id) {
+    if (!isHerdrAddress(host.hc_terminal_id)) {
+      return {
+        kind: 'unfocusable',
+        reason: 'This session runs in Herdr, but reported a terminal address Raise does not recognise.',
+      };
+    }
+    return { kind: 'herdr', address: host.hc_terminal_id, socket: host.hc_terminal_socket || null };
   }
   const sessionUuid = terminalSessionUuid(host);
   const tty = host.tty || null;
@@ -230,6 +249,10 @@ export async function focusSession(record, { exec, terminals = ALL_TERMINALS }) 
     return focusTerminal(exec, { ...plan, terminals });
   }
 
+  if (plan.kind === 'herdr') {
+    return focusHerdr(exec, { address: plan.address, socket: plan.socket, terminals });
+  }
+
   // tmux: put the right pane in front inside tmux first, then surface the
   // terminal window that tmux client is living in.
   const target = await resolveTmuxTarget(exec, { pane: plan.pane, tmuxEnv: plan.tmuxEnv });
@@ -311,4 +334,75 @@ async function focusByPaneTitle(exec, { title, termProgram, terminals }) {
     }
   }
   return { ok: false };
+}
+
+/**
+ * Bring up a session that runs in a Herdr terminal. First match wins:
+ *
+ *   1. a typed `hc attach <address>` shows it - raise that tab through the
+ *      terminal adapters, as the tmux path raises a tmux client's tty. It wins
+ *      because typing the address is a deliberate choice of where to look.
+ *   2. the desktop app has a pane for it - focus that pane, on its own space and
+ *      tab, and bring the app forward.
+ *   3. the desktop app is running - show it in the focused pane for now, and say
+ *      so, because the user's pane now shows something else until they switch
+ *      back. The same trade tmux makes when Raise moves a client to another
+ *      window.
+ *   4. nothing Raise can use - refuse, and name the command that attaches it.
+ *
+ * The recorded tty is never used: it is Herdr's own, and handing it to the
+ * adapters is exactly what produced "Could not find that tab in Ghostty" about a
+ * session that was in no Ghostty tab.
+ *
+ * @param {Function} exec
+ * @param {{address: string, socket: string|null, terminals: Terminal[]}} target
+ * @returns {Promise<FocusResult>}
+ */
+async function focusHerdr(exec, { address, socket, terminals }) {
+  const hint = attachHint({ address, socket });
+
+  const attach = await findTypedAttach(exec, { address, socket });
+  /** @type {FocusResult|null} */
+  let attachFailure = null;
+  if (attach.tty) {
+    // No termProgram to lead with: the one the session recorded is Herdr's
+    // `ghostty`, true of every Herdr terminal, and says nothing about which app
+    // holds this client.
+    const result = await focusTerminal(exec, {
+      sessionUuid: null,
+      tty: attach.tty,
+      termProgram: null,
+      terminals,
+    });
+    if (result.ok) return result;
+    attachFailure = result;
+  }
+
+  // The desktop app takes no socket and speaks to the default server, so a
+  // session on any other server must never reach it - the same address there is
+  // a different terminal.
+  if (isAppServer(socket)) {
+    const shown = await showInHerdrApp(exec, { address });
+    if (shown === 'pane') return { ok: true, adapter: 'herdr-app' };
+    if (shown === 'shown') {
+      return {
+        ok: true,
+        adapter: 'herdr-app',
+        note: `Shown in the Herdr app. To bring up your own terminal instead, attach it with \`hc attach ${address}\`.`,
+      };
+    }
+  }
+
+  if (attach.ambiguous) {
+    return {
+      ok: false,
+      ambiguous: true,
+      reason: `More than one terminal is attached to Herdr terminal ${address}, so Raise cannot tell which is this session.`,
+    };
+  }
+  // A typed attach existed and no adapter could raise it - in a terminal Raise
+  // has no adapter for, or a tab that has since closed. That attempt is the
+  // truest thing to report, and it is about a real tab this time.
+  if (attachFailure) return { ...attachFailure, hint };
+  return { ok: false, reason: 'Not shown anywhere Raise can see.', hint };
 }

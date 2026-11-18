@@ -149,7 +149,7 @@ import { pullRequestKey } from './forge.js';
  *   renderers say so, since a signal quietly hidden is the same quiet staleness
  *   this page exists to avoid, wearing different clothes
  * @property {boolean} focusable whether clicking this row can do anything
- * @property {'tmux'|'tab'|'app'|'unknown'|null} hostKind where the session lives
+ * @property {'tmux'|'herdr'|'tab'|'app'|'unknown'|null} hostKind where the session lives
  * @property {import('./registry.js').AgentKind|null} agentKind which agent is
  *   running it; null for a run with no session behind it
  * @property {import('./firstmate.js').SpawnedBy|null} spawnedBy which tool
@@ -1773,10 +1773,11 @@ export function buildRows({
  * confidence. It says "unknown" now, which is the only thing we know.
  *
  * @param {import('./focus/index.js').FocusPlan} plan
- * @returns {'tmux'|'tab'|'app'|'unknown'}
+ * @returns {'tmux'|'herdr'|'tab'|'app'|'unknown'}
  */
 function hostKindFor(plan) {
   if (plan.kind === 'tmux') return 'tmux';
+  if (plan.kind === 'herdr') return 'herdr';
   if (plan.kind === 'app') return 'app';
   if (plan.kind === 'tab') return 'tab';
   return 'unknown';

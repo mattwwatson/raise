@@ -85,6 +85,13 @@ function collectHost() {
     // focus time because the session can be reattached elsewhere.
     tmux: process.env.TMUX || null,
     tmux_pane: process.env.TMUX_PANE || null,
+    // Inside Herdr, the terminal's address and its server's socket - an address
+    // and a path, no content, the same kind of identity as the tmux pair. They
+    // are what makes a Herdr session focusable at all: Herdr sets TERM_PROGRAM
+    // to ghostty in every terminal, and the tty below is its own, so neither
+    // says where the session is shown. See src/focus/herdr.js.
+    hc_terminal_id: process.env.HC_TERMINAL_ID || null,
+    hc_terminal_socket: process.env.HC_TERMINAL_SOCKET || null,
     tty,
     // Only ever the agent itself. The shell that runs this hook exits the
     // instant it returns, and a session recorded against a dead pid is pruned.

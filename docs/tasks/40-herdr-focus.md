@@ -1,8 +1,10 @@
 ---
 issue: 40
-status: backlog
+status: shipped
 size: M
 depends: -
+branch: fm/raise-40-herdr-focus
+shipped: 2026-11-18
 ---
 # 40 - Clicking a session running in Herdr does nothing useful
 
@@ -154,17 +156,40 @@ Every command is run through the injected `exec` and asynchronously. Herdr is at
 failed command, unparseable output or unknown field counts as "not available there" and moves to
 the next step, never as an error.
 
-### Open questions to settle before writing code
+### Open questions, and how each was settled
 
-- **More than one typed attach of the same terminal.** Refuse as ambiguous and fall through to
-  the desktop app, matching the control-mode title match, unless Herdr can say which was used
-  last.
-- **How the client is matched to a server.** `hc attach t6` names an address and not a server.
-  Confirm what a client's argv looks like against a non-default server before relying on the
-  address alone.
-- **The note on step 3** needs the partial-result shape: `FocusResult.note` exists, and only
-  `src/focus/index.js` sets it, which is where this path lives anyway. If #35 (Warp) has
-  changed how a note is returned by then, use its shape.
+- **More than one typed attach of the same terminal.** Settled by the default this spec gave:
+  refuse as ambiguous and fall through to the desktop app. Herdr has no way to say which client
+  was used last - it cannot list clients at all - so there was nothing better to build to. With
+  the app not running the click refuses with *"More than one terminal is attached to Herdr
+  terminal t6, so Raise cannot tell which is this session."* and moves nothing.
+- **How the client is matched to a server.** Settled by measurement on `hc` 0.1.21, and the
+  answer is that **a client's argv cannot say**. `hc attach` takes no server option at all -
+  `hc help attach` lists `--json`, `--observe` and `--history` and nothing else - so the server
+  comes only from `HC_SESSION` or `HC_SOCKET` in the client's environment, and `ps -E` /
+  `ps eww` on this macOS print no environment for another process, even one of the same user.
+  A client against a non-default server therefore reads `hc attach t6`, identical to one
+  against the default. What the process table *does* show is each running server's holder,
+  `herdr-core hold --socket <state>/<name>/<name>.holder.<hex>.sock`, and the server's own
+  socket is `<state>/<name>/<name>.sock` (`core.lock` names
+  `~/.local/state/herdr-core/default/default.sock`). So the address is used alone **only while
+  no holder for another server's state directory is running**: a second holder disproves it,
+  because `t6` could then be either server's. Seeing no holder at all asserts nothing - the
+  typed address is still the evidence - so that check only ever removes a sighting.
+
+  The same finding reaches the desktop app: `herdr-app` takes no socket either, and its
+  local core is the default server's. So steps 2 and 3 run only for a session whose recorded
+  socket has the `default/default.sock` shape, and a session on any other server gets the
+  attach hint with its socket named, `HC_SOCKET=<socket> hc attach t6`.
+
+  **This was measured from the installed binaries rather than against a second running
+  server.** The isolated Herdr lab helper (`fm-herdr-lab.sh`) requires a `herdr` 0.7.3 CLI,
+  and this machine has `hc` / `herdr-core` 0.1.21 and Herdr.app 0.1.16 instead, so `prepare`
+  stops at `herdr is required`. Starting a second server by hand would have bypassed the helper,
+  so it was not done. The command-line surface and the process-table shapes above are enough
+  to build to; confirming against a live second server is in the manual testing.
+- **The note on step 3.** `FocusResult.note`, unchanged - #35 (Warp) has not landed, so there
+  was no other shape to use.
 
 ---
 
@@ -175,6 +200,20 @@ showing, so step 1 cannot see it. That is why the README steers people to the ty
 Herdr reporting, per attached client, the terminal it is showing and the client's tty - an
 `hc clients` list, or the address in the client's argv - would let step 1 cover the picker too.
 Ask upstream (`herdr-app feedback`) when this is picked up, and build to it if it has shipped.
+
+It had not shipped in `hc` 0.1.21. Sending the request is outward-facing, so it was drafted and
+not sent; the text, ready for `herdr-app feedback`:
+
+> A tool that raises the window showing a given Herdr terminal (Raise, a session monitor) can
+> find a typed `hc attach t6` client from its argv, but cannot place a client started from the
+> `hc` picker: its argv stays `hc` or `hc attach` whatever it shows, and there is no API to list
+> clients. Two things would each fix it. (1) An `hc clients --json` listing, per attached
+> client, the terminal address it is showing, the client's pid and its tty. Or (2) the picker
+> re-executing itself as `hc attach <address>` once a terminal is chosen, so argv names it.
+> Separately, `hc attach` cannot name its server in argv (only `HC_SESSION`/`HC_SOCKET` in its
+> environment), so with two servers running a client's `t6` is ambiguous; an
+> `hc attach --session <name>` flag, or (1) including the server's socket, would resolve that
+> too.
 
 ---
 
@@ -214,3 +253,52 @@ case; check no other route still produces it.
 - Commands go to the server named by the recorded socket, asserted by a test.
 - Tests use the injected `fakeExec` only.
 - `npm test`, `npm run lint` and `npm run typecheck` pass.
+
+---
+
+## Implementation notes
+
+- **Where it lives.** `src/focus/herdr.js` holds the Herdr-specific reading - the typed attach
+  parse, the holder check, the server name, and the `herdr-app` calls. `focusHerdr` in
+  `src/focus/index.js` runs the four steps in order and owns the step 3 note, as the spec put
+  it. `planFocus` returns `kind: 'herdr'` after tmux and before anything that reads
+  `term_program` or the tty: a tmux pane inside a Herdr terminal keeps the tmux path it always
+  had, which is the one thing it is still right about.
+- **The hook records `hc_terminal_id` and `hc_terminal_socket`**, in `hooks/raise-hook.js` and
+  in the pi extension, which runs in Herdr terminals just as readily. They are added to the
+  `host` block the reporter builds, not to `REPORTABLE_FIELDS`, so the payload allowlist did
+  not move.
+- **An address that is not `t<number>` is unfocusable**, rather than passed to `herdr-app` as
+  an argument or pasted into a hint. herdr-core's own error text says addresses are
+  `t<number>`.
+- **What a typed attach is.** The executable is `hc` or `herdr-core`, bare or by path - a path
+  holding a space is accepted only inside an `.app` bundle, so `vim notes/hc attach t6` is not
+  a client. Its flags are the three `hc help attach` lists, and any other flag makes the line
+  untrusted, because a flag taking a value would make that value look like the address.
+  `hc attach machine/t6` is another machine's terminal and does not match, and neither does an
+  attach by name (`hc attach fix`), which only the server can resolve. A client with no tty
+  has no tab to raise and is not counted.
+- **A typed attach no adapter can raise falls through**, rather than ending the click: it may
+  be in a terminal Raise has no adapter for, or a tab that has since closed. If nothing after
+  it works either, the adapters' own message is returned - it is about a real tab now - with
+  the attach hint.
+- **The refusal is a reason and a hint**, `Not shown anywhere Raise can see.` and
+  `hc attach t8`, rather than one sentence holding both: the page shows them as
+  `reason  ->  hint` and `raise focus` as the reason then `Try: <hint>`, the same split the tmux
+  `attach` hint uses.
+- **`herdr-app do` success** is an exec that resolved with no output or a JSON object with no
+  `error`. Anything else, including output that is not JSON, is "not available there".
+- **The desktop app is never launched.** It is checked with `is running` by bundle id first,
+  and `activate` - which would launch it - is only sent after a command succeeded.
+- **The host chip says `herdr`.** `hostKindFor` would otherwise have called a Herdr session
+  `unknown`, and before this change it said `tab`. `herdr` is the one thing known for certain
+  until the click works out which app shows it.
+- **Side bug.** A Herdr session no longer reaches `focusTerminal` with its own tty, so it can
+  no longer produce *"Could not find that tab in Ghostty or iTerm2"*. The one route that still
+  produces that message for a Herdr session is a typed attach whose real tab no adapter found,
+  where it is true. Every other route to it - plain tabs and tmux - is about a tab the session
+  itself is in, and was not changed.
+- **Not verified by hand here.** The Herdr lab could not be provisioned (see the second open
+  question), and the safety contract keeps every hands-on Herdr check off the captain's own
+  server and app. So each step was verified against a stubbed `exec` only, and the hand checks
+  in Acceptance are in the pull request's manual testing.

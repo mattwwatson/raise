@@ -1209,7 +1209,9 @@ async function cmdDoctor() {
   }
 
   if (sessions.length > 0) {
-    const focusable = sessions.filter((s) => s.host?.tmux_pane || s.host?.iterm_session_id || s.host?.tty);
+    const focusable = sessions.filter(
+      (s) => s.host?.tmux_pane || s.host?.hc_terminal_id || s.host?.iterm_session_id || s.host?.tty,
+    );
     ok('Sessions', `${sessions.length} registered, ${focusable.length} focusable`);
   } else {
     warn('Sessions', 'none registered yet - start a Claude session after installing the hooks');
