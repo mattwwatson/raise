@@ -37,7 +37,8 @@
  * merge, which can pull in a shipping pull request the notes never saw. It is
  * then an ancestor of the new tag, so no later release could list it either.
  * So the preparing script records the numbers it rendered in a hidden comment
- * inside the markers, and the workflow refuses when a shipping pull request
+ * below the end marker, outside the region reviewers are told to edit, and the
+ * pre-merge check and the workflow both refuse when a shipping pull request
  * merged since the last release is not on that list. The check is against the
  * recorded list, not the rendered lines, so deleting a line in review is still
  * allowed.
@@ -193,8 +194,8 @@ export function renderNotes({ version, previousTag, prs, files }) {
 
 /**
  * The release pull request's description: the notes, between the markers the
- * workflow reads them back from, with the numbers of the pull requests they
- * were rendered from in a hidden comment, and a note to the reviewer outside.
+ * workflow reads them back from, a note to the reviewer, and below it the
+ * numbers of the pull requests the notes were rendered from in a hidden comment.
  *
  * @param {string} notes
  * @param {number[]} recorded
@@ -203,7 +204,6 @@ export function renderNotes({ version, previousTag, prs, files }) {
 export function releaseBody(notes, recorded) {
   return [
     NOTES_START,
-    `<!-- raise-release-prs: ${recorded.join(',')} -->`,
     notes,
     NOTES_END,
     '',
@@ -212,6 +212,9 @@ export function releaseBody(notes, recorded) {
     'Edit the notes above the line as you like - what is between the markers when',
     'this merges is what the GitHub Release says. Merging stages the package on npm;',
     'it is public once you approve it with `npm stage approve` or on npmjs.com.',
+    '',
+    'The line below records which pull requests these notes cover - do not remove it.',
+    `<!-- raise-release-prs: ${recorded.join(',')} -->`,
   ].join('\n');
 }
 
@@ -226,7 +229,7 @@ export function extractNotes(body) {
   const start = text.indexOf(NOTES_START);
   const end = text.indexOf(NOTES_END);
   if (start === -1 || end === -1 || end < start) return null;
-  const notes = text.slice(start + NOTES_START.length, end).replace(RECORDED_PATTERN, '').trim();
+  const notes = text.slice(start + NOTES_START.length, end).trim();
   return notes || null;
 }
 

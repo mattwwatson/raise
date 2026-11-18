@@ -746,6 +746,11 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
   syntax would execute. Same rule `src/exec.js` follows for argv. It is also not redundant with
   `ci.yml` and must not be folded into it: `ci.yml` asks whether the code is good, this asks how
   the change got here, and only this one needs the `edited` trigger.
+- **`.github/workflows/release-check.yml` reads a pull request body too**, the same untrusted
+  input under the same rule: the script reads it with `gh`, and nothing interpolates it into
+  `run:`. It has its own workflow for the same reason, the `edited` trigger. Its job name,
+  `Release notes are current`, is a required status check matched by name, so renaming the job
+  drops the requirement.
 - **`bin/raise.js` reaches `src/cli.js` through `await import()`, and that is not a style
   choice.** An unresolvable `node:` specifier - `node:sqlite` on Node 22.5 to 22.12 - throws
   while the module graph is *linked*, before any module body runs, so no static arrangement can

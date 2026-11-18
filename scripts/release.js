@@ -6,8 +6,9 @@
  *       description is the release notes, for a person to review and merge
  *
  *   node scripts/release.js check
- *       CI's half on a pull request: fail a release pull request whose notes
- *       miss a shipping pull request, while it can still be closed and redone
+ *       `release-check.yml`'s half on a pull request: fail a release pull
+ *       request whose notes miss a shipping pull request, while it can still be
+ *       closed and redone
  *
  *   node scripts/release.js ci
  *       the workflow's half, run on every push to `main`: decide whether this
@@ -227,7 +228,7 @@ function ci() {
 }
 
 /**
- * The pre-merge check, run by `ci.yml` on every pull request. The branch and
+ * The pre-merge check, run by `release-check.yml` on every pull request. The branch and
  * number come from the environment; the description is read with `gh` and never
  * passes through a `run:` block.
  */

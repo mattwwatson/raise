@@ -272,6 +272,20 @@ test('an open release pull request with no recorded list or no notes fails the c
   assert.match(checkReleasePullRequest('no markers', []) ?? '', /has no release notes/);
 });
 
+test('rewriting everything between the markers keeps the recorded list', () => {
+  // The list sits below the end marker, outside the region reviewers are told to edit.
+  const body = releaseBody('- A thing (#1)', [1]);
+  const start = body.indexOf(NOTES_START) + NOTES_START.length;
+  const rewritten = `${body.slice(0, start)}\nRewritten\n${body.slice(body.indexOf(NOTES_END))}`;
+  assert.equal(extractNotes(rewritten), 'Rewritten');
+  assert.equal(checkReleasePullRequest(rewritten, [1]), null);
+});
+
+test('deleting the recorded list from a release body fails the check', () => {
+  const body = releaseBody('- A thing (#1)', [1]).replace(/<!-- raise-release-prs:[^>]*-->/, '');
+  assert.match(checkReleasePullRequest(body, [1]) ?? '', /does not record/);
+});
+
 test('a tag with no GitHub Release creates only the Release', () => {
   // The run stopped after staging and tagging; staging again would be refused.
   const result = plan({ tags: ['v0.1.0', 'v0.2.0'], released: false });

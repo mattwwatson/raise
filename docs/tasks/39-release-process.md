@@ -198,18 +198,23 @@ from `LICENSE`, which npm always adds. Tag `3a16735` as `v0.1.0`.
   requires the release branch to be up to date before it merges, and updating it can bring in a
   shipping pull request the notes never saw. That pull request is then an ancestor of the new tag,
   so no later release would list it either. So the release body carries a hidden
-  `<!-- raise-release-prs: 18,21,23 -->` comment inside the markers, which `extractNotes` leaves
-  out, and `ci` recomputes the shipping pull requests merged since the previous tag with the same
+  `<!-- raise-release-prs: 18,21,23 -->` line below the end marker, outside the notes reviewers
+  are told to edit, with a visible note not to remove it, and `ci` recomputes the shipping pull requests merged since the previous tag with the same
   rule the notes use. `planRelease` refuses when any of them is not on the recorded list, naming
   them, and when the list is missing. The check is against the recorded list and not the rendered
   lines, so deleting a line in review still releases.
-- **The same check runs before the merge.** `node scripts/release.js check` is a step in CI's
-  `Lint, tests and typecheck (Node 24)` job, on pull requests only, and does nothing on a branch
-  that is not `release/<version>`. On a release pull request it reads the current description
-  with `gh` and fails through the same `notesProblem` that `planRelease` uses, while the remedy -
-  close it and run `npm run release -- <bump>` again from an up-to-date `main` - is still open.
-  That job checks out with `fetch-depth: 0` so it can see the tags. After the merge the only
-  remedy left is the next version, so that is what the workflow's refusal says.
+- **The same check runs before the merge, in `.github/workflows/release-check.yml`.** Its one
+  job, `Release notes are current`, runs `node scripts/release.js check` on `opened`,
+  `synchronize`, `reopened` and `edited`, so updating the branch and editing the description both
+  re-run it. It passes at once on a branch that is not `release/<version>`. On a release pull
+  request it reads the current description with `gh` and fails through the same `notesProblem`
+  that `planRelease` uses, while the remedy - close it and run `npm run release -- <bump>` again
+  from an up-to-date `main` - is still open. It checks out with `fetch-depth: 0` to see the tags,
+  and needs no `npm ci`. It is not a step in `ci.yml` because `edited` there would re-run every
+  test on every title change. **The maintainer adds `Release notes are current` as a required
+  status check on `main`**; branch protection matches it by name, so the job name is part of the
+  contract. After the merge the only remedy left is the next version, so that is what the
+  workflow's refusal says.
 - **The workflow skips only when the tag and its GitHub Release both exist.** A tag with no
   Release is a run that stopped after tagging, so the plan is `release-only`: the job creates the
   Release from the notes and does not stage or tag again. A `v0.1.0` GitHub Release was created
@@ -243,6 +248,6 @@ from `LICENSE`, which npm always adds. Tag `3a16735` as `v0.1.0`.
   Release.
 - **A release run was cancelled by the `concurrency` group.** Re-run it from the Actions tab.
 - **The workflow refused a merged release pull request whose notes miss a shipping pull request,
-  or record no list.** CI's pre-merge check should have stopped it, so this means it was bypassed.
-  That version will not be published. Prepare the next release with `npm run release -- <bump>`
+  or record no list.** `Release notes are current` fails on the push or edit that causes either,
+  so this means the check was not required or was overridden. That version will not be published. Prepare the next release with `npm run release -- <bump>`
   from `main`; its notes cover everything since the last tag, the missed pull request included.
