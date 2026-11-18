@@ -189,6 +189,28 @@ test('a lock written after the session started is still picked up', () => {
   assert.equal(watch.spawnedBy(captain), 'firstmate');
 });
 
+test('a Herdr session that inherited a crewmate\'s tmux pane is not chipped as crew', async () => {
+  // Measured on hc 0.1.21: a Herdr server started from a tmux pane hands that
+  // pane's TMUX_PANE to every terminal it makes. Here the pane is a crewmate's
+  // fm- window, and the process tree says the session is really in Herdr.
+  const ran = [];
+  const watch = new FirstmateWatch({
+    execAsync: async (command) => {
+      ran.push(command);
+      return PANES;
+    },
+    files: files(),
+  });
+  const herdr = session({
+    host: { pid: 100, tmux: '', tmux_pane: '%358', hc_terminal_id: 't2', multiplexer: 'herdr' },
+  });
+  watch.spawnedBy(herdr);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(watch.spawnedBy(herdr), null);
+  assert.equal(watch.windowName(herdr), null);
+  assert.deepEqual(ran, [], 'the inherited pane was never looked up');
+});
+
 test('a session with no tmux pane never runs tmux', () => {
   const ran = [];
   const watch = new FirstmateWatch({

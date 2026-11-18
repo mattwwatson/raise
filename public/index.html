@@ -983,9 +983,17 @@
        * that tells you to go looking somewhere it is not. A kind with no entry
        * here renders nothing at all, deliberately: this used to fall back to
        * "tab", which turned every host we failed to recognise into a confident
-       * claim about a terminal.
+       * claim about a terminal. "herdr" says the session is in a Herdr terminal
+       * and no more, because which app shows that terminal is only worked out
+       * when you click.
        */
-      const HOST_LABELS = { tmux: 'tmux', tab: 'tab', app: 'desktop', unknown: 'no window' };
+      const HOST_LABELS = {
+        tmux: 'tmux',
+        herdr: 'herdr',
+        tab: 'tab',
+        app: 'desktop',
+        unknown: 'no window',
+      };
 
       /*
        * Which agent, named only when it is worth naming. Claude Code has no

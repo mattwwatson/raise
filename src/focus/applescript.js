@@ -159,6 +159,15 @@ export function appRunningByIdScript(bundleId) {
   return `return (application id "${escapeAppleScript(bundleId)}" is running) as string`;
 }
 
+/**
+ * Bring an app to the front by bundle id. Only ever sent after
+ * `appRunningByIdScript` said it is running, because `activate` on an app that
+ * is not would launch it.
+ */
+export function activateAppByIdScript(bundleId) {
+  return `tell application id "${escapeAppleScript(bundleId)}" to activate`;
+}
+
 /** Is this app currently running? Avoids launching it just to search it. */
 export function appRunningScript(appName) {
   return `tell application "System Events" to return (exists (processes where name is "${escapeAppleScript(

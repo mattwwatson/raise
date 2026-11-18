@@ -114,8 +114,9 @@ function readProcess(pid) {
  */
 function collectHost(read) {
   let tty = null;
+  let multiplexer = null;
   try {
-    ({ tty } = inspectHost(process.pid, { readProcess: read }));
+    ({ tty, multiplexer } = inspectHost(process.pid, { readProcess: read }));
   } catch {
     // A session we cannot place is rendered as "no window" rather than as a
     // confident claim about a terminal that is not there.
@@ -129,6 +130,10 @@ function collectHost(read) {
     term_session_id: process.env.TERM_SESSION_ID || null,
     tmux: process.env.TMUX || null,
     tmux_pane: process.env.TMUX_PANE || null,
+    // pi runs in a Herdr terminal as readily as in tmux. See the hook.
+    hc_terminal_id: process.env.HC_TERMINAL_ID || null,
+    hc_terminal_socket: process.env.HC_TERMINAL_SOCKET || null,
+    multiplexer,
     tty,
     // The extension is the agent, so this needs no walking and cannot be wrong.
     pid: process.pid,

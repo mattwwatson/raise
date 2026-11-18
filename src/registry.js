@@ -54,6 +54,13 @@ import { UNTRACKED_WINDOW_MS } from './untracked.js';
  *   present when shell integration is not
  * @property {string|null} [tmux] the TMUX socket, when running under tmux
  * @property {string|null} [tmux_pane] the pane, when running under tmux
+ * @property {string|null} [hc_terminal_id] the Herdr terminal's address (`t5`),
+ *   when running in Herdr - which says nothing about which app shows it
+ * @property {string|null} [hc_terminal_socket] that terminal's Herdr server, since
+ *   two servers on one machine can both have a `t5`
+ * @property {'tmux'|'herdr'|null} [multiplexer] which of the two really holds the
+ *   session, from its nearest ancestor process. The four fields above are
+ *   environment, and a server hands its own to everything it starts
  * @property {string|null} [tty] the controlling terminal, walked up from the hook
  * @property {number|null} [pid] the agent process, used only for liveness pruning
  * @property {string|null} [hostname]

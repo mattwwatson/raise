@@ -156,7 +156,7 @@ See the header of `src/untracked.js`.
 | `src/firstmate-decisions.js` | which crewmates are stopped waiting for a ruling from you |
 | `src/run-owner.js` | which session started which run, remembered across the gaps |
 | `src/dashboard.js` | joins them all into ranked rows (pure) |
-| `src/focus/` | tmux resolution, per-terminal adapters, and raising Claude Desktop |
+| `src/focus/` | tmux and Herdr resolution, per-terminal adapters, and raising Claude Desktop |
 | `src/process-tree.js` | which terminal or app, and which agent process, a hook is running under |
 | `src/security.js` | token, Host and Origin checks (pure) |
 | `src/build-stamp.js` | which build of the page is being served, so a pinned tab can tell it is running superseded code |
@@ -403,6 +403,11 @@ stratified on purpose, so read the whole file rather than one section.
 | two picks from one ranking, and `controlMode` is a property of the ranked set | `src/focus/tmux.js` (`chooseTmuxClient`) |
 | no `-t` target is ever a session name, and the `tmux attach` hint is shell-quoted | `src/focus/tmux.js` (`shellQuote`) |
 | a new terminal is one entry, and nothing else in the codebase changes | `src/focus/terminals.js` |
+| Herdr is a multiplexer path like tmux, and a Herdr session's own tty and `TERM_PROGRAM` are never used | `src/focus/herdr.js`, `src/focus/index.js` (`focusHerdr`) |
+| only a typed `hc attach <address>` is a sighting; the picker leaves no trace and is not guessed at | `src/focus/herdr.js` (`typedAttachAddress`) |
+| a typed attach names no server, so a second running server's holder disproves it | `src/focus/herdr.js` (`findTypedAttach`) |
+| the desktop app takes no socket and shows the default server, so no other server's session reaches it | `src/focus/herdr.js` (`isAppServer`) |
+| between tmux and Herdr the nearest ancestor decides, because each one's environment is inherited from a server the other started | `src/process-tree.js` (`hostMultiplexer`), `src/focus/tmux.js` (`hostTmuxPane`) |
 | the hook may never fail and never block; every path exits 0 within the timeout | `hooks/raise-hook.js` |
 | recording the wrong agent pid is worse than recording none | `src/process-tree.js` |
 | the hook payload is an allowlist, and why it must be | `src/hook-payload.js` |
