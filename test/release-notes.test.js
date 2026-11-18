@@ -122,19 +122,39 @@ test('a shipping pull request with no recognised prefix goes under Other, never 
   assert.match(markdown, /### Other\n\n- Docs: move reasoning into the code/);
 });
 
-test('each entry links its pull request and every issue it closes', () => {
+test('each entry links its pull request and every issue it closed', () => {
   const { markdown } = renderNotes({
     version: '0.2.0',
     previousTag: 'v0.1.0',
     files: FILES,
-    prs: [pr({ number: 21, closingIssuesReferences: [{ number: 12 }, { number: 13 }] })],
+    prs: [
+      pr({ number: 21, closingIssuesReferences: [{ number: 12 }, { number: 13 }] }),
+      pr({ number: 23, closingIssuesReferences: [{ number: 22 }] }),
+    ],
   });
   assert.ok(markdown.includes('[#21](https://github.com/mattwwatson/raise/pull/21)'));
   assert.ok(
     markdown.includes(
-      'closes [#12](https://github.com/mattwwatson/raise/issues/12), [#13](https://github.com/mattwwatson/raise/issues/13)',
+      'issues [#12](https://github.com/mattwwatson/raise/issues/12), [#13](https://github.com/mattwwatson/raise/issues/13)',
     ),
   );
+  assert.ok(markdown.includes('issue [#22](https://github.com/mattwwatson/raise/issues/22)'));
+});
+
+test('the notes never say anything GitHub reads as closing an issue', () => {
+  // The notes are the release pull request's description, and GitHub links
+  // "closes [#12](...)" as a closing keyword even inside a Markdown link. On
+  // 18/11/2026 that linked the 0.2.0 release pull request to seven issues
+  // already closed, and the board's linked-pull-request automation moved every
+  // one of them from Done back to In Review.
+  const { markdown } = renderNotes({
+    version: '0.2.0',
+    previousTag: 'v0.1.0',
+    files: FILES,
+    prs: [pr({ number: 21, closingIssuesReferences: [{ number: 12 }] })],
+  });
+  const keyword = /\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\b:?\s*\[?#\d+/i;
+  assert.doesNotMatch(markdown, keyword);
 });
 
 test('the notes end with the comparison against the previous release', () => {
