@@ -251,3 +251,9 @@ from `LICENSE`, which npm always adds. Tag `3a16735` as `v0.1.0`.
   or record no list.** `Release notes are current` fails on the push or edit that causes either,
   so this means the check was not required or was overridden. That version will not be published. Prepare the next release with `npm run release -- <bump>`
   from `main`; its notes cover everything since the last tag, the missed pull request included.
+- **Issues are introduced by "issue", not "closes" (fixed 18/11/2026).** The first release pull
+  request said "closes [#12](...)" for each entry, which GitHub reads as a closing keyword even
+  inside a link. It linked the 0.2.0 release pull request to seven issues that were already
+  closed, and the board automation moved them from Done back to In Review. They were moved back
+  by hand, the release pull request's notes were reworded, and a test now asserts the notes
+  carry no closing keyword.

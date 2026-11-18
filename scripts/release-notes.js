@@ -138,6 +138,14 @@ const HEADINGS = /** @type {const} */ ([
 /**
  * One line of the notes, linked to its pull request and to every issue it closed.
  *
+ * **The issues are introduced by "issue", never by "closes".** These notes are the
+ * release pull request's description, and GitHub reads "closes [#12](...)" as a
+ * closing keyword even inside a Markdown link. On 18/11/2026 that linked the 0.2.0
+ * release pull request to seven issues already closed, and the board's
+ * linked-pull-request automation moved all of them from Done back to In Review.
+ * A pull request title can still carry a keyword of its own; the release check
+ * does not police titles, so read the notes before merging.
+ *
  * @param {PullRequest} pr
  * @param {string} text
  * @returns {string}
@@ -147,7 +155,9 @@ function entry(pr, text) {
   const issues = (pr.closingIssuesReferences || []).map(
     (issue) => `[#${issue.number}](https://github.com/${REPO}/issues/${issue.number})`,
   );
-  return `- ${text} (${link}${issues.length ? `, closes ${issues.join(', ')}` : ''})`;
+  if (issues.length === 0) return `- ${text} (${link})`;
+  const label = issues.length === 1 ? 'issue' : 'issues';
+  return `- ${text} (${link}, ${label} ${issues.join(', ')})`;
 }
 
 /**
