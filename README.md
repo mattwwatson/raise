@@ -651,8 +651,9 @@ not trusted at all, because `hc attach t5` does not say which server's `t5` it m
 A Herdr server hands its own starting environment to every terminal, so if it was first started
 by an `hc` command typed inside tmux, every Herdr session appears to be in that tmux pane. Raise
 does not go by the environment for this: the hook records whether tmux or Herdr is the session's
-nearest parent process, and focuses through that one. Sessions started before this version of
-the hook still go by the environment, so restart them.
+nearest parent process, and focuses through that one. A Claude Code or Codex session already
+open picks this up at its next hook event, with no restart. A pi session loads the extension
+when it starts, so restart it.
 
 ## Pull request state from the forge
 
