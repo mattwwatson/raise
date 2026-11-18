@@ -1,6 +1,6 @@
 {
   "name": "raise-cli",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "One page that shows every agent session on your machine - Claude Code, Claude Desktop, pi and Codex - tells you which one is waiting for you, and jumps to that window when you click it.",
   "type": "module",
   "keywords": [
