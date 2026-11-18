@@ -174,11 +174,11 @@ See the header of `src/untracked.js`.
 | `public/index.html` | the page, self-contained |
 | `public/connection.js` | the liveness rule, and whether the page's own code is current (pure, no DOM, injected clock) |
 
-`scripts/` is **not** part of the product. It holds this repository's own roadmap tooling -
-the board, the link check, the shipped-spec CI gate and the issue reconciliation - and is
-absent from `files` in `package.json` for that reason, so none of it ships. `scripts/` may
-import from `src/`, as the gate does for `GitBranch`; `src/` must never import from
-`scripts/`.
+`scripts/` is **not** part of the product. It holds this repository's own tooling - the
+roadmap board, the link check, the shipped-spec CI gate, the issue reconciliation and the
+release script - and is absent from `files` in `package.json` for that reason, so none of it
+ships. `scripts/` may import from `src/`, as the gate does for `GitBranch`; `src/` must never
+import from `scripts/`.
 
 Rules:
 
@@ -419,6 +419,9 @@ stratified on purpose, so read the whole file rather than one section.
 | the no-mistakes signature check is a convention check, and not a required check | `.github/workflows/no-mistakes-required.yml`, `docs/tasks/7-require-no-mistakes.md` |
 | two Node versions in CI, and why coverage is not a job | `.github/workflows/ci.yml` |
 | the gate reads the branch name only, and the unkeyed-branch gap is deliberate | `scripts/task-gate.js`, `docs/tasks/9-gate-passes-an-unkeyed-branch.md` |
+| a pull request is in the release notes only if it changed a file the package ships, `README.md` excepted | `scripts/release-notes.js` |
+| the notes that ship are the ones between the markers in the merged release pull request | `scripts/release-notes.js` |
+| a version with no tag that did not come through a release pull request fails the workflow rather than publishing | `scripts/release-notes.js` (`planRelease`), `.github/workflows/release.yml` |
 
 ## Coding Conventions
 
@@ -730,6 +733,13 @@ PATH="$(brew --prefix node@24)/bin:$PATH" npm run coverage
   written to say so rather than to be true by technicality. It had to be rewritten to admit a
   second; issue 12 is the worked example of what that costs and what honesty it demands. Adding
   one quietly is the failure this project is built against, turned on its own documentation.
+- **`.github/workflows/release.yml` is the only thing that publishes to npm, and it does so with
+  no npm token.** npm Trusted Publishing trusts that file by name, so renaming it stops
+  publishing until the setting on npmjs.com is changed to match. Never add an `NPM_TOKEN` secret
+  or publish from a laptop to work around it: the point is that no publish credential exists.
+  It stages rather than publishes, and a person approves with 2FA. It also reads a pull request
+  body (the release notes), so the untrusted-input rule below applies to it too. See
+  [docs/tasks/39-release-process.md](docs/tasks/39-release-process.md).
 - **`.github/workflows/no-mistakes-required.yml` reads a pull request body, which is untrusted
   input.** It takes it through the environment and never interpolates `${{ }}` into the `run:`
   block, because that substitution happens before the shell sees it - a body containing shell
@@ -798,6 +808,13 @@ npm run tasks                  # the board from docs/tasks/
 npm run tasks:links            # every docs/tasks reference resolves
 npm run tasks:gate             # this branch's spec says shipped
 npm run tasks:validate         # how disk and the issues differ - needs an authenticated `gh`
+```
+
+Releasing, from an up-to-date `main` with an authenticated `gh`:
+
+```sh
+npm run release -- minor --dry-run   # the version and the notes; changes nothing
+npm run release -- minor             # opens the release pull request
 ```
 
 The `raise` commands themselves, and their flags, are documented in
