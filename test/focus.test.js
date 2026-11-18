@@ -996,7 +996,7 @@ test('step 3: the desktop app with no pane for it shows it in the focused pane, 
   assert.equal(result.adapter, 'herdr-app');
   assert.equal(
     result.note,
-    'Shown in the Herdr app. To bring up your own terminal instead, attach it with `hc attach t8`.',
+    'Shown in the Herdr app. To bring up your own terminal instead, attach it with hc attach t8.',
   );
   assert.ok(exec.calls.includes('herdr-app do terminal.show --terminal t8'));
 });

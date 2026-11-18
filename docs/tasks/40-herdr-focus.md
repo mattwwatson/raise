@@ -102,7 +102,7 @@ client can only be raised if it is already showing the session.
   and tab.
 - **Any other session, while the desktop app is running,** comes forward in the app, shown in
   the focused pane, with a neutral note: *"Shown in the Herdr app. To bring up your own
-  terminal instead, attach it with `hc attach t8`."*
+  terminal instead, attach it with hc attach t8."*
 - **Otherwise** the click says so and names the way out: *"Not shown anywhere Raise can see.
   Run `hc attach t8`."* It no longer names Ghostty.
 - **README:** the Herdr section tells people to attach with `hc attach <address>` rather than
@@ -294,6 +294,8 @@ case; check no other route still produces it.
   through to the refusal: it fails with a reason saying the app is showing the terminal (in
   its focused pane for now, after `terminal.show`) but could not be brought to the front,
   and the `hc attach <id>` hint.
+- **The step 3 note does not wrap the command in backticks**, because the page toast renders
+  plain text and would show them as stray characters.
 - **The host chip says `herdr`.** `hostKindFor` would otherwise have called a Herdr session
   `unknown`, and before this change it said `tab`. `herdr` is the one thing known for certain
   until the click works out which app shows it.

@@ -396,7 +396,7 @@ async function focusHerdr(exec, { address, socket, terminals }) {
       return {
         ok: true,
         adapter: 'herdr-app',
-        note: `Shown in the Herdr app. To bring up your own terminal instead, attach it with \`hc attach ${address}\`.`,
+        note: `Shown in the Herdr app. To bring up your own terminal instead, attach it with hc attach ${address}.`,
       };
     }
   }
