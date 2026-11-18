@@ -51,6 +51,10 @@ a temporary cache that npm later deletes. Your sessions then stop reporting whil
 carries on looking healthy - which is the one failure this tool exists to prevent, caused by
 installing it. There is no warning when it happens, because nothing is left to warn you.
 
+**What each version changed is on the [Releases page](https://github.com/mattwwatson/raise/releases)**,
+listing only what reaches the installed package. To upgrade, run `npm install -g raise-cli@latest`
+and restart `raise serve`; the hooks point at the same place and need no reinstall.
+
 Or from a checkout, which is what you want if you intend to change anything:
 
 ```sh
@@ -746,6 +750,9 @@ With it on, `raise serve` says so at startup, once, and nothing else changes:
   Upgrade with npm install -g raise-cli.
 ```
 
+What the newer version contains is on the
+[Releases page](https://github.com/mattwwatson/raise/releases).
+
 It never upgrades anything. It does not appear on the dashboard - that page is for your
 sessions, not for us - and there is nothing in the hook or the pi extension, which run inside
 your agent and are held to stricter rules again.
@@ -846,6 +853,12 @@ contribution the architecture was shaped for. Changes are pushed through the
 [no-mistakes](https://github.com/kunchenguid/no-mistakes) pipeline rather than straight to the
 remote, the maintainer's included; `CONTRIBUTING.md` has the two commands. Security reports go through
 [SECURITY.md](SECURITY.md) rather than an issue.
+
+**Releases are prepared by `npm run release -- <patch|minor|major>`**, which opens a pull request
+carrying the version bump and the generated release notes for review. Merging it stages the
+package on npm from GitHub Actions, with no npm token anywhere and a provenance attestation, and
+the maintainer approves it with 2FA before it is public. `--dry-run` prints the notes and
+changes nothing.
 
 ## Roadmap
 

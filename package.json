@@ -36,6 +36,7 @@
     "tasks:links": "node scripts/tasks.js links",
     "tasks:gate": "node scripts/tasks.js gate",
     "tasks:validate": "node scripts/tasks.js validate",
+    "release": "node scripts/release.js",
     "prepublishOnly": "npm run lint && npm test && npm run typecheck"
   },
   "files": [

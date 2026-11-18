@@ -1,0 +1,110 @@
+# Why this exists: it is the only thing that publishes Raise to npm. A laptop
+# never does - see docs/tasks/39-release-process.md.
+#
+# It runs on every push to `main` and nearly always does nothing: it asks
+# `scripts/release.js ci` whether the version in package.json already has its
+# tag and its GitHub Release, and stops when it has both. Only the merge of a `release/<version>` pull
+# request, which `npm run release` opens, leaves an untagged version behind.
+# Every other way of reaching that state - a version bumped in an ordinary pull
+# request, a release pull request whose notes were deleted, a version that went
+# backwards, notes written before a shipping pull request merged - FAILS the job
+# instead of publishing, so it is seen rather than quietly skipped. The last of
+# those is checked first on the open pull request by release-check.yml; here it
+# is the backstop, and that version is not published.
+#
+# A version that is tagged but has no GitHub Release stopped after staging and
+# tagging. A re-run then creates only the Release (`publish` is false and
+# `release` is true), and never stages or tags again.
+#
+# Publishing uses npm Trusted Publishing: `id-token: write` lets npm swap this
+# workflow's OIDC token for a one-off publish credential, so no npm token exists
+# in this repository or anywhere else, and npm attaches a provenance attestation
+# saying which commit and workflow built the tarball. The trusted publisher on
+# npmjs.com names THIS FILE: renaming it breaks publishing until the setting is
+# changed to match.
+#
+# It STAGES rather than publishes. The package is public only once a maintainer
+# approves it with 2FA, on npmjs.com or with `npm stage approve` - approval cannot
+# use OIDC, so it is always a person. That is the one step a compromised workflow
+# still cannot take on its own. The GitHub Release is created at staging, so for
+# the minutes before approval it leads npm; that was accepted in the spec.
+#
+# The notes come from a pull request description, which is untrusted input. They
+# reach `gh release create` as a file written by the script, never as `${{ }}`
+# inside a `run:` block, which would be substituted before the shell parsed it.
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+# Two merges in quick succession must not race each other to the same tag.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write # push the tag and create the GitHub Release
+  id-token: write # npm Trusted Publishing
+  pull-requests: read # find the release pull request a commit came from
+
+jobs:
+  release:
+    name: Publish a release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Every tag, so the script can see what has already been released.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - id: plan
+        run: node scripts/release.js ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      # Everything up to the GitHub Release runs only when publishing.
+
+      - if: steps.plan.outputs.publish == 'true'
+        run: npm ci
+
+      # prepublishOnly runs these as well. They are here in their own steps so a
+      # failure says which check failed, before anything is staged.
+      - if: steps.plan.outputs.publish == 'true'
+        run: npm run lint
+      - if: steps.plan.outputs.publish == 'true'
+        run: npm test
+      - if: steps.plan.outputs.publish == 'true'
+        run: npm run typecheck
+
+      # Pinned exactly. `npm stage` is an npm 12 command, Trusted Publishing needs
+      # 11.5.1 or later, and the npm bundled with Node 24 is neither guaranteed.
+      # npm 12.2.3 needs Node ^24.15.0, which `node-version: 24` provides.
+      - if: steps.plan.outputs.publish == 'true'
+        run: npm install --global npm@12.2.3
+
+      # Staged first, tagged after: a stage that fails leaves no tag behind, so
+      # re-running the job tries again rather than finding the tag. A tag push
+      # that fails after a successful stage cannot be retried by a re-run; see
+      # Recovery in docs/tasks/39-release-process.md.
+      - if: steps.plan.outputs.publish == 'true'
+        run: npm stage publish
+
+      - if: steps.plan.outputs.publish == 'true'
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+        run: |
+          git tag "$TAG" "$GITHUB_SHA"
+          git push origin "$TAG"
+
+      - if: steps.plan.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.plan.outputs.tag }}
+          NOTES_FILE: ${{ steps.plan.outputs.notes-file }}
+        run: gh release create "$TAG" --verify-tag --title "$TAG" --notes-file "$NOTES_FILE"

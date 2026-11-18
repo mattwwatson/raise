@@ -1,0 +1,52 @@
+# Why this exists: a release pull request's notes are written when the branch is
+# cut, and they can fall behind before it merges. Bringing the branch up to date
+# can pull in a pull request that changed the package, and a reviewer can delete
+# the hidden line recording which pull requests the notes cover. Either way
+# `release.yml` would refuse after the merge, when the only remedy left is to
+# give up that version. This check says so while the pull request is still open,
+# and closing it and running `npm run release -- <bump>` again is still possible.
+#
+# It is its own workflow, not a step in ci.yml, because it must re-run when the
+# description is edited, and `edited` on ci.yml would re-run every test on every
+# title change of every pull request. It needs no `npm ci`: the script uses Node
+# builtins and `gh` only.
+#
+# The job name `Release notes are current` is a contract. The maintainer makes it
+# a required status check on `main`, and branch protection matches it by name,
+# so renaming the job silently drops the requirement. Being required, it has to
+# report on every pull request: on any branch that is not `release/<version>` it
+# says so and passes at once.
+#
+# The pull request description is untrusted input. The script reads it with `gh`
+# and nothing here interpolates the title or body into a `run:` block; the
+# branch name reaches the script as GITHUB_HEAD_REF, through the environment.
+
+name: Release check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  release-notes:
+    name: Release notes are current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Every tag and the history behind them, to list what merged since the
+          # last release.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - run: node scripts/release.js check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
