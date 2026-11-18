@@ -134,8 +134,12 @@ It uses Node builtins only, like the rest of the repository, and `gh` for GitHub
    authenticated;
 2. finds the latest `v*` tag and lists the pull requests merged since it;
 3. keeps the ones whose files touch `files` (decision 2), and renders the notes (decision 3);
-4. creates `release/<version>`, runs `npm version <bump> --no-git-tag-version`, and commits;
-5. pushes and opens the pull request with the notes as its description. It never merges it.
+4. refuses if `origin` already has `release/<version>`, left by an earlier release pull request
+   that was closed without deleting its branch; otherwise creates `release/<version>`, runs
+   `npm version <bump> --no-git-tag-version`, and commits;
+5. pushes and opens the pull request with the notes as its description. It never merges it;
+6. switches back to `main` and deletes the local release branch, since merging deletes the remote
+   one and would leave the checkout tracking a branch that no longer exists.
 
 `--dry-run` prints the version and the notes, and changes nothing. That is also how the notes
 logic gets tested by hand.
@@ -234,6 +238,12 @@ from `LICENSE`, which npm always adds. Tag `3a16735` as `v0.1.0`.
   trusted publisher on npmjs.com (user `mattwwatson`, repository `raise`, workflow
   `release.yml`, no environment) on the day, since an unused configuration expires after two
   days.
+- **Issues are introduced by "issue", not "closes" (fixed 18/11/2026).** The first release pull
+  request said "closes [#12](...)" for each entry, which GitHub reads as a closing keyword even
+  inside a link. It linked the 0.2.0 release pull request to seven issues that were already
+  closed, and the board automation moved them from Done back to In Review. They were moved back
+  by hand, the release pull request's notes were reworded, and a test now asserts the notes
+  carry no closing keyword.
 
 ---
 
@@ -251,9 +261,3 @@ from `LICENSE`, which npm always adds. Tag `3a16735` as `v0.1.0`.
   or record no list.** `Release notes are current` fails on the push or edit that causes either,
   so this means the check was not required or was overridden. That version will not be published. Prepare the next release with `npm run release -- <bump>`
   from `main`; its notes cover everything since the last tag, the missed pull request included.
-- **Issues are introduced by "issue", not "closes" (fixed 18/11/2026).** The first release pull
-  request said "closes [#12](...)" for each entry, which GitHub reads as a closing keyword even
-  inside a link. It linked the 0.2.0 release pull request to seven issues that were already
-  closed, and the board automation moved them from Done back to In Review. They were moved back
-  by hand, the release pull request's notes were reworded, and a test now asserts the notes
-  carry no closing keyword.

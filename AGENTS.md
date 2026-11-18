@@ -827,6 +827,10 @@ npm run release -- minor --dry-run   # the version and the notes; changes nothin
 npm run release -- minor             # opens the release pull request
 ```
 
+The whole procedure - editing the notes, merging, approving the staged package, checking it
+went out - is the [release-workflow skill](.claude/skills/release-workflow/SKILL.md).
+**Load it before releasing.**
+
 The `raise` commands themselves, and their flags, are documented in
 [README.md](README.md#commands) and only there - a second copy is what drifts.
 

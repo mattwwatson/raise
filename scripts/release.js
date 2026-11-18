@@ -145,6 +145,12 @@ function prepare(args) {
   if (dryRun) return;
 
   const branch = `${RELEASE_BRANCH_PREFIX}${version}`;
+  if (must('git', ['ls-remote', '--heads', 'origin', `refs/heads/${branch}`], { cwd: root })) {
+    throw new Error(
+      `origin already has ${branch}, left by an earlier release pull request. ` +
+        'Close it and delete its branch with `gh pr close <number> --delete-branch`, then run this again.',
+    );
+  }
   must('git', ['switch', '--create', branch], { cwd: root });
   must('npm', ['version', bump, '--no-git-tag-version'], { cwd: root });
   must('git', ['commit', '--all', '--message', `release: ${version}`], { cwd: root });
@@ -154,8 +160,14 @@ function prepare(args) {
     '--title', `release: ${version}`,
     '--body', releaseBody(markdown, included.map((pr) => pr.number)),
   ]);
+  // Back to main, and the local release branch gone: the pull request is where the
+  // release is edited from here, and merging it deletes the remote branch, which
+  // would leave this checkout on a branch whose upstream no longer exists.
+  must('git', ['switch', 'main'], { cwd: root });
+  must('git', ['branch', '--delete', '--force', branch], { cwd: root });
   console.log(`\nRelease pull request: ${url}`);
   console.log('Review the notes, merge it, then approve the staged package on npmjs.com.');
+  console.log('The steps are in .claude/skills/release-workflow/SKILL.md.');
 }
 
 /**

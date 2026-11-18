@@ -865,7 +865,8 @@ remote, the maintainer's included; `CONTRIBUTING.md` has the two commands. Secur
 carrying the version bump and the generated release notes for review. Merging it stages the
 package on npm from GitHub Actions, with no npm token anywhere and a provenance attestation, and
 the maintainer approves it with 2FA before it is public. `--dry-run` prints the notes and
-changes nothing.
+changes nothing. The step-by-step is in the
+[release-workflow skill](.claude/skills/release-workflow/SKILL.md).
 
 ## Roadmap
 
