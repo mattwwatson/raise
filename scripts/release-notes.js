@@ -277,6 +277,53 @@ export function latestTag(tags) {
 }
 
 /**
+ * What is wrong with a release pull request's description, if anything: no
+ * notes between the markers, no recorded list, or a shipping pull request the
+ * list does not name. The open pull request and the merged one are both judged
+ * by this, so the check before the merge and the one after it cannot disagree.
+ *
+ * @param {string|null|undefined} body
+ * @param {number[]} shipping the pull requests merged since the last release
+ *   that belong in the notes
+ * @returns {{kind: 'notes' | 'list' | 'missing', reason: string} | null}
+ */
+export function notesProblem(body, shipping) {
+  if (!extractNotes(body)) return { kind: 'notes', reason: 'has no release notes between its markers' };
+  const recorded = recordedPullRequests(body);
+  if (!recorded) {
+    return { kind: 'list', reason: 'does not record which pull requests its notes were written from' };
+  }
+  const missing = shipping.filter((number) => !recorded.includes(number));
+  if (missing.length) {
+    return {
+      kind: 'missing',
+      reason:
+        `does not list ${missing.map((n) => `#${n}`).join(', ')}, which changed the package ` +
+        'after its notes were written',
+    };
+  }
+  return null;
+}
+
+/**
+ * The pre-merge check on an open release pull request: why it must not merge,
+ * or null when it may. The remedy is the one open to somebody who has not
+ * merged yet.
+ *
+ * @param {string|null|undefined} body
+ * @param {number[]} shipping
+ * @returns {string|null}
+ */
+export function checkReleasePullRequest(body, shipping) {
+  const problem = notesProblem(body, shipping);
+  if (!problem) return null;
+  return (
+    `This release pull request ${problem.reason}. Close it and run ` +
+    '`npm run release -- <bump>` again from an up-to-date main.'
+  );
+}
+
+/**
  * What the workflow should do with a commit that has landed on `main`.
  *
  * Every push to `main` asks this, and nearly every answer is `skip`: the version
@@ -338,32 +385,22 @@ export function planRelease({ version, tags, released, shipping, pullRequests })
     };
   }
 
-  const notes = extractNotes(pr.body);
-  if (!notes) {
+  const problem = notesProblem(pr.body, tagged ? [] : shipping);
+  if (problem?.kind === 'notes') {
     return {
       action: 'refuse',
-      reason: `#${pr.number} has no release notes between its markers; restore them and release again`,
+      reason: `#${pr.number} ${problem.reason}; restore them and release again`,
     };
   }
+  const notes = /** @type {string} */ (extractNotes(pr.body));
   if (tagged) return { action: 'release-only', tag, notes, pr: pr.number };
-
-  const recorded = recordedPullRequests(pr.body);
-  if (!recorded) {
+  if (problem) {
     return {
       action: 'refuse',
       reason:
-        `#${pr.number} does not record which pull requests its notes were written from. ` +
-        'Regenerate the notes: close the pull request and run `npm run release` again.',
-    };
-  }
-  const missing = shipping.filter((number) => !recorded.includes(number));
-  if (missing.length) {
-    return {
-      action: 'refuse',
-      reason:
-        `${missing.map((n) => `#${n}`).join(', ')} changed the package after the notes in ` +
-        `#${pr.number} were written. Regenerate the notes: close the pull request and run ` +
-        '`npm run release` again.',
+        `#${pr.number} ${problem.reason}, so ${version} will not be published. Prepare the ` +
+        'next release with `npm run release -- <bump>` from main, whose notes cover everything ' +
+        `since ${previous ?? 'the beginning'}.`,
     };
   }
   return { action: 'release', tag, notes, pr: pr.number };

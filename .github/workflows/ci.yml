@@ -58,6 +58,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          # Every tag and the history behind them, for the release check below.
+          fetch-depth: 0
       - uses: actions/setup-node@v5
         with:
           node-version: 24
@@ -93,6 +96,19 @@ jobs:
       # all and fail the gate it is meant to enforce.
       - if: github.event_name == 'pull_request'
         run: npm run tasks:gate
+
+      # The release check, on pull requests only and a no-op on any branch that
+      # is not `release/<version>`. It fails a release pull request whose notes
+      # miss a pull request that changed the package - typically one brought in
+      # by updating the branch - while closing it and running `npm run release`
+      # again is still possible. `release.yml` repeats the check after the merge,
+      # when all it can do is refuse to publish. The description is read with
+      # `gh` inside the script, never interpolated here, because it is untrusted.
+      - if: github.event_name == 'pull_request'
+        run: node scripts/release.js check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
 
   test-floor:
     name: Tests on the engines floor (Node 22)

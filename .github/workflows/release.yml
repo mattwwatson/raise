@@ -8,7 +8,9 @@
 # Every other way of reaching that state - a version bumped in an ordinary pull
 # request, a release pull request whose notes were deleted, a version that went
 # backwards, notes written before a shipping pull request merged - FAILS the job
-# instead of publishing, so it is seen rather than quietly skipped.
+# instead of publishing, so it is seen rather than quietly skipped. The last of
+# those is checked first on the open pull request by `release.js check` in
+# ci.yml; here it is the backstop, and that version is not published.
 #
 # A version that is tagged but has no GitHub Release stopped after staging and
 # tagging. A re-run then creates only the Release (`publish` is false and

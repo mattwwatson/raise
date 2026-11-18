@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   NOTES_END,
   NOTES_START,
+  checkReleasePullRequest,
   classify,
   extractNotes,
   isShipped,
@@ -233,7 +234,12 @@ test('a shipping pull request merged after the notes were written is refused, by
   // tagged commit but not in the notes - and no later release could list it.
   const result = plan({ shipping: [1, 7] });
   assert.equal(result.action, 'refuse');
-  assert.match(result.action === 'refuse' ? result.reason : '', /#7 changed the package after/);
+  const reason = result.action === 'refuse' ? result.reason : '';
+  assert.match(reason, /does not list #7/);
+  // By now the pull request is merged and cannot be closed, so the remedy is the next version.
+  assert.match(reason, /0\.2\.0 will not be published/);
+  assert.match(reason, /npm run release -- <bump>` from main/);
+  assert.doesNotMatch(reason, /[Cc]lose/);
 });
 
 test('a line deleted from the notes in review is still released', () => {
@@ -248,6 +254,22 @@ test('notes that do not record which pull requests they came from are refused', 
   const result = plan({ pullRequests: [releasePr({ body })] });
   assert.equal(result.action, 'refuse');
   assert.match(result.action === 'refuse' ? result.reason : '', /does not record/);
+});
+
+test('an open release pull request that lists every shipping pull request may merge', () => {
+  assert.equal(checkReleasePullRequest(releaseBody('- A thing (#1)', [1, 2]), [1, 2]), null);
+});
+
+test('an open release pull request missing a shipping pull request is told to start again', () => {
+  const message = checkReleasePullRequest(releaseBody('- A thing (#1)', [1]), [1, 7]);
+  assert.match(message ?? '', /does not list #7/);
+  assert.match(message ?? '', /Close it and run `npm run release -- <bump>` again/);
+});
+
+test('an open release pull request with no recorded list or no notes fails the check', () => {
+  const unlisted = `${NOTES_START}\n- A thing (#1)\n${NOTES_END}`;
+  assert.match(checkReleasePullRequest(unlisted, []) ?? '', /does not record/);
+  assert.match(checkReleasePullRequest('no markers', []) ?? '', /has no release notes/);
 });
 
 test('a tag with no GitHub Release creates only the Release', () => {

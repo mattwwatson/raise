@@ -5,6 +5,10 @@
  *       prepare a release: a pull request carrying the version bump, whose
  *       description is the release notes, for a person to review and merge
  *
+ *   node scripts/release.js check
+ *       CI's half on a pull request: fail a release pull request whose notes
+ *       miss a shipping pull request, while it can still be closed and redone
+ *
  *   node scripts/release.js ci
  *       the workflow's half, run on every push to `main`: decide whether this
  *       commit is a release, or a release that still needs its GitHub Release,
@@ -28,6 +32,7 @@ import { repoRoot } from './task-files.js';
 import {
   BUMPS,
   RELEASE_BRANCH_PREFIX,
+  checkReleasePullRequest,
   REPO,
   latestTag,
   nextVersion,
@@ -221,10 +226,36 @@ function ci() {
   say(`notes-file=${notesFile}`);
 }
 
+/**
+ * The pre-merge check, run by `ci.yml` on every pull request. The branch and
+ * number come from the environment; the description is read with `gh` and never
+ * passes through a `run:` block.
+ */
+function check() {
+  const branch = process.env.GITHUB_HEAD_REF || '';
+  if (!branch.startsWith(RELEASE_BRANCH_PREFIX)) {
+    console.log(`Not a release pull request: ${branch || 'no branch'}.`);
+    return;
+  }
+  const root = repoRoot();
+  const number = process.env.PR_NUMBER;
+  if (!number) throw new Error('PR_NUMBER is not set');
+  const { body } = JSON.parse(must('gh', ['pr', 'view', number, '--repo', REPO, '--json', 'body']));
+  const previousTag = latestTag(releaseTags(root));
+  const { files } = readPackage(root);
+  const shipping = shippingPullRequests(mergedSince(root, previousTag, 'HEAD'), files).map(
+    (pr) => pr.number,
+  );
+  const problem = checkReleasePullRequest(body, shipping);
+  if (problem) throw new Error(problem);
+  console.log(`#${number} lists every shipping pull request since ${previousTag ?? 'the beginning'}.`);
+}
+
 function main() {
   const [command, ...args] = process.argv.slice(2);
   try {
     if (command === 'ci') return ci();
+    if (command === 'check') return check();
     return prepare([command, ...args].filter(Boolean));
   } catch (error) {
     console.error(error.message);

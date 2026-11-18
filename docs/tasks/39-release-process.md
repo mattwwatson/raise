@@ -203,6 +203,13 @@ from `LICENSE`, which npm always adds. Tag `3a16735` as `v0.1.0`.
   rule the notes use. `planRelease` refuses when any of them is not on the recorded list, naming
   them, and when the list is missing. The check is against the recorded list and not the rendered
   lines, so deleting a line in review still releases.
+- **The same check runs before the merge.** `node scripts/release.js check` is a step in CI's
+  `Lint, tests and typecheck (Node 24)` job, on pull requests only, and does nothing on a branch
+  that is not `release/<version>`. On a release pull request it reads the current description
+  with `gh` and fails through the same `notesProblem` that `planRelease` uses, while the remedy -
+  close it and run `npm run release -- <bump>` again from an up-to-date `main` - is still open.
+  That job checks out with `fetch-depth: 0` so it can see the tags. After the merge the only
+  remedy left is the next version, so that is what the workflow's refusal says.
 - **The workflow skips only when the tag and its GitHub Release both exist.** A tag with no
   Release is a run that stopped after tagging, so the plan is `release-only`: the job creates the
   Release from the notes and does not stage or tag again. A `v0.1.0` GitHub Release was created
@@ -235,3 +242,7 @@ from `LICENSE`, which npm always adds. Tag `3a16735` as `v0.1.0`.
 - **The tag was pushed but `gh release create` failed.** Re-run the job; it creates only the
   Release.
 - **A release run was cancelled by the `concurrency` group.** Re-run it from the Actions tab.
+- **The workflow refused a merged release pull request whose notes miss a shipping pull request,
+  or record no list.** CI's pre-merge check should have stopped it, so this means it was bypassed.
+  That version will not be published. Prepare the next release with `npm run release -- <bump>`
+  from `main`; its notes cover everything since the last tag, the missed pull request included.
