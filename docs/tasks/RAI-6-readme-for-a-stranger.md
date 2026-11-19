@@ -25,8 +25,8 @@ A stranger arrives, reads down, and hits things in the wrong order:
 - they learn it is macOS-only for focusing **188 lines in**, after deciding they want it
 - they are asked to let it merge hooks into `~/.claude/settings.json` and read their
   transcripts at line 215, and told how that is contained at line **473 of 632**
-- every example is one person's machine - `hexbattle`, `moroku-skills`, `money-webapp`,
-  `firstmate`, `HXB-56-residue-never-drains`, `Open Source Planning`
+- every example is one person's machine - private repository names, real ticket keys and
+  branch names, `firstmate`, and planning titles
 - the pi and Codex caveats are real and honest and live in two separate prose sections, so
   there is nowhere to answer *what do I get for the agent I actually use*
 
@@ -138,8 +138,8 @@ main checkout and a worktree of it, and branch names in both of the shapes peopl
 
 - The first screenful says what it is, shows the sample, states macOS-for-focusing, and gives a
   command that works.
-- `grep -nE 'hexbattle|moroku|money-webapp|HXB-|nmmon|no-mistakes-monitor' README.md` returns
-  nothing.
+- A `grep` of `README.md` for the private repository names, `nmmon` and `no-mistakes-monitor`
+  returns nothing.
 - Every internal anchor in the README resolves after the reordering.
 - `npm test`, `npm run lint`, `npm run typecheck` are untouched by this work - it is
   documentation only, so any movement in them means something has gone wrong.

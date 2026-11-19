@@ -36,8 +36,8 @@
  * reason.
  *
  * **No `-t` target is ever a session name.** Names are user data - a bell
- * plugin renames sessions to `hv-sls-86-fb9d 🔔` on this machine, and
- * `-t hv-sls-7` really does prefix-match it. Targets are ids (`$204:@349`,
+ * plugin renames sessions to `hv-pay-86-fb9d 🔔` on this machine, and
+ * `-t hv-pay-7` really does prefix-match it. Targets are ids (`$204:@349`,
  * which cannot mis-split because tmux forbids `:` and `.` in a name), and the
  * one name that reaches a human - the `tmux attach` hint - goes through
  * `shellQuote`.
@@ -127,7 +127,7 @@ export function tmuxCommand(tmuxEnv, args) {
 
 /**
  * A tmux session name is user data - a bell plugin renames sessions to
- * `hv-sls-86-fb9d 🔔` on this machine - and the attach hint is a command a
+ * `hv-pay-86-fb9d 🔔` on this machine - and the attach hint is a command a
  * human will paste. Unquoted that is two arguments, and tmux answers it by
  * prefix-matching some other session.
  *
@@ -274,8 +274,8 @@ export async function listPaneSessions(exec, { tmuxEnv }) {
  * Every client attached to the server.
  *
  * Deliberately not `-t <session>`: we have to weigh clients across several
- * sessions at once, and a `-t` on a *name* prefix-matches - `-t hv-sls-7` really
- * does return the client on `hv-sls-75-4d7a 🔔`.
+ * sessions at once, and a `-t` on a *name* prefix-matches - `-t hv-pay-7` really
+ * does return the client on `hv-pay-75-4d7a 🔔`.
  *
  * @returns {Promise<TmuxClient[]>} empty means nothing is attached
  */

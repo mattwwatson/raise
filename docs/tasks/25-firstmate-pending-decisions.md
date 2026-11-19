@@ -71,10 +71,10 @@ wake-worthy transition, written by the crewmate about itself. Verbs are `working
 `needs-decision`, `blocked`, `resolved`, `paused`, `done`, `failed`. Read live on 19/08/2026:
 
 ```
-needs-decision: [key=eng-1776-followups] Blocker fix + 6-case regression test COMMITTED ...
-resolved: [key=eng-1776-followups] Captain chose option C (clear To, member re-picks) ...
-blocked: [key=eng-1776-swap-review] Everything on run 01M0CGJ0F0D7RK4W114CBZ4BT9 is now ...
-needs-decision: [key=eng-1776-empty-from-conflict] Six findings now fixed and re-verified ...
+needs-decision: [key=srch-1776-followups] Blocker fix + 6-case regression test COMMITTED ...
+resolved: [key=srch-1776-followups] Captain chose option C ...
+blocked: [key=srch-1776-swap-review] Everything on run 01M0CGJ0F0D7RK4W114CBZ4BT9 is now ...
+needs-decision: [key=srch-1776-empty-query-conflict] Six findings now fixed and re-verified ...
 ```
 
 **This is first-party declaration, not inference.** It has the same standing as the no-mistakes
@@ -104,13 +104,13 @@ Per task it gives everything needed:
 
 ```json
 {
-  "id": "eng-1776-transfer-wrong-destination",
+  "id": "srch-1776-stale-results",
   "current_state": { "state": "parked", "source": "status-log", "detail": "...", "freshness": "fresh" },
   "hints": { "pending_decision": true, "blocked_event": false,
              "open_decisions": [ { "key": "...", "verb": "needs-decision", "summary": "..." } ] },
-  "endpoint": { "target": "firstmate:fm-eng-1776-transfer-wrong-destination" },
-  "paths": { "worktree": { "path": "/Users/mattw/.treehouse/money-webapp-09aa4f/1/money-webapp" } },
-  "pr": { "url": "https://bitbucket.org/moroku/money-webapp/pull-requests/318" }
+  "endpoint": { "target": "firstmate:fm-srch-1776-stale-results" },
+  "paths": { "worktree": { "path": "/Users/mattw/.treehouse/search-api-09aa4f/1/search-api" } },
+  "pr": { "url": "https://bitbucket.org/example-team/search-api/pull-requests/318" }
 }
 ```
 
@@ -122,10 +122,10 @@ On 19/08/2026 the two live tasks demonstrated both halves at once:
 
 | Task | Status log | `open_decisions` |
 | --- | --- | --- |
-| `eng-1776-transfer-wrong-destination` | ends on `needs-decision` | one entry, `parked` [^fork] |
-| `sls-115-weekend-rule-and-solver` | carries an unclosed `needs-decision` earlier in the file | **empty**, `working · run-step · validating` |
+| `srch-1776-stale-results` | ends on `needs-decision` | one entry, `parked` [^fork] |
+| `pay-115-retry-schedule` | carries an unclosed `needs-decision` earlier in the file | **empty**, `working · run-step · validating` |
 
-`sls-115` is the case that matters. Something a plain reader would call an open decision has
+`pay-115` is the case that matters. Something a plain reader would call an open decision has
 already been answered, and `fm-crew-state.sh` knows it because the run-step is live and
 supersedes the log line. A Raise that read the file itself would have shown a ruling request
 that no longer exists.
@@ -189,7 +189,7 @@ block. Three mitigations, applied together:
 skipping the secondmate home walk is a small firstmate change and the right place for it. Do not
 respond to the cost by re-implementing the fold in JavaScript: it is roughly forty pure lines,
 but it duplicates somebody else's contract and, more importantly, drops the run-step
-reconciliation that `sls-115` shows is the honest half.
+reconciliation that `pay-115` shows is the honest half.
 
 ---
 
@@ -202,7 +202,7 @@ and the difference matters because it changes what gets built.
 disk writes it **after**:
 
 ```
-needs-decision: [key=eng-1776-followups] Blocker fix + 6-case regression test COMMITTED ...
+needs-decision: [key=srch-1776-followups] Blocker fix + 6-case regression test COMMITTED ...
 ```
 
 In the copy at `~/work/firstmate` (`origin` = `mattwwatson/firstmate`, 115 commits behind
@@ -217,10 +217,10 @@ note stays prose; a malformed slug is rejected rather than rewritten to `default
 
 Run against the same status file, the two folds disagree about the size of the problem:
 
-| Fold | Open decisions on `eng-1776` |
+| Fold | Open decisions on `srch-1776` |
 | --- | --- |
 | our fork | 1 - `default`, the most recent line |
-| `upstream/main` | **4** - `eng-1776-review-gate`, `eng-1776-finally-confirmed`, `eng-1776-paymentview-ticket` (all `needs-decision`) and `eng-1776-swap-review` (`blocked`) |
+| `upstream/main` | **4** - `srch-1776-review-gate`, `srch-1776-finally-confirmed`, `srch-1776-results-view-ticket` (all `needs-decision`) and `srch-1776-swap-review` (`blocked`) |
 
 **So one decision per row is the wrong shape.** Four rulings pending on a single crewmate is the
 ordinary case, not an edge one, and building for one and generalising later would mean the first
@@ -309,9 +309,9 @@ on one and bare on the other is the two disagreeing about the same session.
 - A crewmate with an open decision shows the `decision` attention state, sorts above `parked`,
   and lists every open decision's summary in its expanded panel.
 - A crewmate with four open decisions says four, and shows four. Asserted against a fixture
-  built from the `eng-1776` reading above, which is the case that makes this non-hypothetical.
+  built from the `srch-1776` reading above, which is the case that makes this non-hypothetical.
 - A crewmate whose decision has been superseded by a live run-step shows nothing - the
-  `sls-115` case, asserted directly against a fixture built from the snapshot above.
+  `pay-115` case, asserted directly against a fixture built from the snapshot above.
 - The captain's row carries the count and remains focusable.
 - A decision joining to no live session appears once, on the captain's row, and is not attached
   to any candidate crewmate.

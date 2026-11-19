@@ -36,14 +36,14 @@ is "there is no pull request" - which is false.
 ### The case that produced it
 
 On 26/08/2026 the Bitbucket credential in `~/.raise/config.json` was an Atlassian API token
-minted on the user's **personal** account. It cannot see the `moroku` workspace. Every lookup
+minted on the user's **personal** account. It cannot see the work workspace. Every lookup
 against it had been returning 404 since the feature was switched on:
 
 ```
-moroku/money-webapp#320          HTTP 404
-moroku/money-webapp#319          HTTP 404
-moroku/money-api#402             HTTP 404
-mattw_watson/sls-scheduling#95   HTTP 200   {"state":"OPEN","draft":false}
+example-team/search-api#320     HTTP 404
+example-team/search-api#319     HTTP 404
+example-team/billing-api#402    HTTP 404
+example-user/payments#95        HTTP 200   {"state":"OPEN","draft":false}
 ```
 
 The personal-workspace repository answers; all three work repositories 404. So the forge had

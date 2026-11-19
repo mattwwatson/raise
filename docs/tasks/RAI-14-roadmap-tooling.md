@@ -24,7 +24,8 @@ that has no guard at all:
 That is the failure this item closes. Merging is what transitions a ticket to Done, so the
 repository has to already agree - and nothing checks that it does.
 
-This is a **port**, not a design exercise. `hexbattle` runs the same scheme and has the tooling:
+This is a **port**, not a design exercise. Another of the maintainer's projects runs the same
+scheme and has the tooling:
 `scripts/tasks.ts` (325 lines) and `scripts/check-task-links.ts` (78 lines), zero dependencies,
 wired into that repo's pipeline. What does not survive the port is its structure - top-level
 side effects, disk reads inside the logic, `console.log` woven through the decisions, and no
@@ -70,7 +71,7 @@ All from `AGENTS.md`, all non-negotiable.
 fixed `key: value` shape written by us, so it is hand-parsed rather than pulling in a YAML
 library.
 
-**Pure logic and I/O stay in separate modules.** hexbattle's version reads disk inside its
+**Pure logic and I/O stay in separate modules.** That project's version reads disk inside its
 loader and calls `fetch` inside `validate`, so none of it can be imported without running it.
 Here every command is *pure core - result object - pure renderer*, and one entry script owns
 disk, network, `process.argv` and `process.exitCode`.
@@ -125,11 +126,11 @@ needed is `read:jira-work` and nothing more. **No CI job holds a Jira credential
 
 **Pull requests only**, guarded by `if [ -n "$BITBUCKET_PR_ID" ]`.
 
-This is the one place the port must not follow hexbattle, which guards with
-`[ "$BITBUCKET_BRANCH" != "main" ]`. That works there because hexbattle has no `default:`
+This is the one place the port must not follow that project, which guards with
+`[ "$BITBUCKET_BRANCH" != "main" ]`. That works there because that project has no `default:`
 pipeline. This repo does, deliberately - it is the backstop for a branch with no open pull
 request - and it fires on **every push, including work in progress**. A branch mid-flight
-legitimately says `in-progress`, so hexbattle's guard would paint CI red on every WIP push, and
+legitimately says `in-progress`, so its guard would paint CI red on every WIP push, and
 no-mistakes watches those checks.
 
 A WIP push makes no claim to be mergeable. A pull request does. The gate asks the merge
@@ -220,7 +221,7 @@ reference, a failed gate), `2` only for *could not ask Jira*. Divergence and orp
 - **No priority anywhere.** The board is the roadmap and the repo must not start encoding an
   order. Sorting is by state then ticket number, which is arbitrary rather than ranked.
 - **No writes to Jira.** Read-only, one query, `read:jira-work`.
-- **No new frontmatter fields.** `phase`, `milestone` and `legacy-id` are hexbattle's and do not
+- **No new frontmatter fields.** `phase`, `milestone` and `legacy-id` are that project's and do not
   come across.
 - **No `validate` in CI**, so no pipeline holds a credential.
 

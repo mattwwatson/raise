@@ -47,7 +47,7 @@ already been switched. The failed click changed what a tab shows and brought not
 
 - A click that switches a tab away from a different window still succeeds, and the neutral
   note toast says what moved, e.g. *"Your tmux tab was showing window 0 (zsh). It now shows
-  window 1 (fm-sls-257)."*
+  window 1 (fm-pay-257)."*
 - A click that switches nothing (the tab already showed that window) stays silent, as today.
 - A click that fails after switching puts the tab back on the window it was showing, so a
   failed click changes nothing.

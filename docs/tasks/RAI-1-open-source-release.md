@@ -305,8 +305,8 @@ actually landed and why.
    `settings.json` and read their transcripts. The existing section answers it well; it is
    just too far down the page. The zero-runtime-dependencies fact belongs here as well as in
    Requirements - it is a trust argument, not just a technical one.
-5. **Strip the personal specifics**: `hexbattle`, `moroku-skills`, `money-webapp`, the
-   `bitbucket.org:mattw_watson` clone URL. Replace with neutral repo names.
+5. **Strip the personal specifics**: private repository names and the personal Bitbucket
+   clone URL. Replace with neutral repo names.
 6. Add a **harness support matrix** - which signals work for Claude Code vs pi. Per 0.5, the
    honest line is that pi has no permission prompt and therefore no "waiting for you", and
    that this is pi's design rather than a limitation here. State it flatly. An overclaim in

@@ -269,7 +269,7 @@ predict - two by the build, one by the review - all recorded in place rather tha
 
 ### A deleted working directory names the wrong branch
 
-Found while eyeballing the manual run: a card for `/Users/mattw/work/money-webapp`, a directory
+Found while eyeballing the manual run: a card for `/Users/mattw/work/search-api`, a directory
 that does not exist on this machine, confidently labelled `master`.
 
 `GitBranch.checkoutFor` walks up from whatever it is handed until something answers to `.git`.
@@ -396,10 +396,10 @@ either optional integration, eyeballed in Chrome in both colour schemes:
 WAITING FOR YOU
   raise           RAI-4-first-run-shows-something   Waiting for you   tab   Focus ↗
 NOT REPORTING TO RAISE
-  firstmate       rates page  main    Not tracked  Found on disk, never reported - …
-                  Fixing the interest rate rounding on the summary card          1m
-  2/hexbattle     HXB-67-sea-depth-gradient   Not tracked  …                 2m  pi
-  work/hexbattle  main                        Not tracked  …              3m  codex
+  firstmate       docs page   main    Not tracked  Found on disk, never reported - …
+                  Fixing a broken link on the summary card                       1m
+  2/storefront    SHOP-67-banner-gradient     Not tracked  …                 2m  pi
+  work/storefront main                        Not tracked  …              3m  codex
 ```
 
 All three agents found from their own roots, disambiguation working across a tracked and an

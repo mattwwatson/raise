@@ -115,7 +115,7 @@ publish a build that does not pass them. It adds no dependency.
 
 A full-history audit found **no secret ever committed** - no credential, in any blob, in any of
 152 commits. The exposure is identity rather than security, and it has one sharp edge: **23
-commits carry `mattw@moroku.com`.** All 23 are Bitbucket-generated merge commits, so the work
+commits carry the maintainer's work email address.** All 23 are Bitbucket-generated merge commits, so the work
 email came from the Bitbucket account rather than from local config; local and global
 `user.email` are the personal address.
 
@@ -136,9 +136,8 @@ the commit objects untouched, so the address is still in the data and still serv
 
 ### B.2 Test fixtures, and the line this stops at
 
-Still at HEAD, in `test/` only: `hexbattle` with real `HXB-*` ticket keys and branch names,
-real `bitbucket.org/mattw_watson/hexbattle` pull request URLs, `moroku`, and
-`/Users/mattw/work/hexbattle`.
+Still at HEAD, in `test/` only: a private repository's name with its real ticket keys, branch
+names and pull request URLs, an employer's workspace name, and a local path to that repository.
 
 These are **scrubbed**, and the reason is that `test/` is already anonymised almost everywhere
 else - `/Users/x`, `acme/widgets` - so the residue is inconsistency rather than intent, and
@@ -148,8 +147,14 @@ nothing in a fixture depends on the string being real.
 real machine, and the whole evidential weight of these specs is that they say what was actually
 observed. Replacing a real path with a fake one would make a true statement false, which is the
 rule RAI-3 already settled when it refused to rename `no-mistakes-monitor` out of sample output.
-The cost is that `hexbattle` and `/Users/mattw` remain visible in the specs; that is accepted,
-because neither is a secret and the alternative damages the thing worth publishing.
+The cost was that private project names and `/Users/mattw` remained visible in the specs; that
+was accepted at the time, because neither is a secret and the alternative damages the thing
+worth publishing.
+
+**Reversed 19/11/2026 for private names.** A public repository never names a private one or
+quotes from it, so the specs now use neutral stand-ins (`payments`, `search-api`, `storefront`,
+`example-team`, as in the README) for private repository names, tickets, task names and links.
+Each observation keeps its shape and its numbers; only the names changed.
 
 ### B.3 The push, and what stops being used
 
@@ -238,7 +243,7 @@ Consequences, in the order they have to be resolved:
 - `README.md` install is `npm install -g raise-cli`, and no document names Bitbucket as the
   home of the project.
 - `git log --format='%ae' | sort -u` on the rewritten history returns one address.
-- `grep -rn 'hexbattle\|HXB-\|moroku' test/` returns nothing.
+- A `grep` of `test/` for the private repository names returns nothing.
 - `doctor` and `engines` agree on 22.13.
 - The GitHub workflow runs all five checks, on both Node versions, with the gate on pull
   requests only.

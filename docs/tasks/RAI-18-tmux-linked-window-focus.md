@@ -17,10 +17,10 @@ taken from that running tmux server rather than reasoned about.
 
 ## The symptom
 
-One parent session (`SLS-75`) with four detached workers spawned from it (`SLS-83`, `84`,
+One parent session (`PAY-75`) with four detached workers spawned from it (`PAY-83`, `84`,
 `85`, `86`), each in its own iTerm2 tab. Clicking `Focus ↗` on **any** of the four:
 
-1. raises the **SLS-75** tab, not the worker's;
+1. raises the **PAY-75** tab, not the worker's;
 2. switches what that tab is showing to the worker, and **leaves it there** - going back to
    the 75 tab still shows 86, and the only way to get 75 back is to click 75 in Raise;
 3. leaves the worker's own tab drawing at half width, the remainder filled with `.`, until
@@ -38,8 +38,8 @@ sole content it is, which is what the terminal tab attaches to.
 
 ```
 $ tmux list-panes -a -F '#{pane_id}\t#{session_id}\t#{window_id}\t#{session_windows}\t#{session_name}'
-%356  $191  @349  5  hv-sls-75-4d7a 🔔      <- parent, 5 windows, client /dev/ttys018
-%356  $204  @349  1  hv-sls-86-fb9d 🔔      <- the viewer, client /dev/ttys035 - the tab in front of you
+%356  $191  @349  5  hv-pay-75-4d7a 🔔      <- parent, 5 windows, client /dev/ttys018
+%356  $204  @349  1  hv-pay-86-fb9d 🔔      <- the viewer, client /dev/ttys035 - the tab in front of you
 ```
 
 Both rows are true. `src/focus/tmux.js`'s `sessionForPane` asks the question as though only
@@ -53,12 +53,12 @@ which returns an arbitrary one of them. At the time of the report it returned th
 for all four worker panes:
 
 ```
-%356 -> hv-sls-75-4d7a 🔔      %352 -> hv-sls-75-4d7a 🔔
-%354 -> hv-sls-75-4d7a 🔔      %350 -> hv-sls-75-4d7a 🔔
+%356 -> hv-pay-75-4d7a 🔔      %352 -> hv-pay-75-4d7a 🔔
+%354 -> hv-pay-75-4d7a 🔔      %350 -> hv-pay-75-4d7a 🔔
 ```
 
 **And an hour later, on the same server with the same topology, it returned the viewer
-instead** - `%350 -> hv-sls-85-dfe4 🔔`, `%354 -> hv-sls-84-5d55 🔔`. Nothing about the
+instead** - `%350 -> hv-pay-85-dfe4 🔔`, `%354 -> hv-pay-84-5d55 🔔`. Nothing about the
 sessions changed; what changed was which of them had most recently been active. That is worth
 recording because it is the reason the symptom is **intermittent** rather than constant, which
 is how it was described: sometimes the click lands correctly and sometimes it does not, with
@@ -68,7 +68,7 @@ table and ranks it cannot vary that way.
 The three symptoms follow in order:
 
 1. `clientsForSession` is then asked about the parent, so it hands back `/dev/ttys018` and
-   the terminal adapters raise the SLS-75 tab.
+   the terminal adapters raise the PAY-75 tab.
 2. `selectPane` runs `select-window -t %356`, which is session-ambiguous in exactly the same
    way. tmux picks a session and moves **that** client's current window - persistently. This
    is the symptom that lingers, and the reason the 75 tab keeps showing 86.
@@ -79,7 +79,7 @@ The three symptoms follow in order:
 
 A **second, separable bug** in the same function: the detached hint is built as
 `` `tmux attach -t ${session}` ``, which for these names emits
-`tmux attach -t hv-sls-86-fb9d 🔔` - two shell arguments. Session names are user data; a bell
+`tmux attach -t hv-pay-86-fb9d 🔔` - two shell arguments. Session names are user data; a bell
 plugin on this machine renames them. Fixed here because it is the same code and the same
 lesson.
 
@@ -132,10 +132,10 @@ Every one of these was run against the live tmux server, not inferred.
 | `list-panes -a -F '#{pane_id}…#{session_name}'` | one row **per session** a linked window belongs to |
 | `list-clients -F '…#{session_id}\t#{window_id}'` | `#{window_id}` in client context is the client's **session's** current window - tmux keeps no per-client one, so rule 1 discriminates only *between* candidate sessions, never within one |
 | `select-window -t '$204:@349'` vs `'$191:@349'` | the same window, with the correct per-session context (index 1 vs index 3) |
-| `list-clients -t 'hv-sls-7'` | matches `hv-sls-75-4d7a 🔔` - **a name target prefix-matches**, so `-t` on a name is dropped entirely |
+| `list-clients -t 'hv-pay-7'` | matches `hv-pay-75-4d7a 🔔` - **a name target prefix-matches**, so `-t` on a name is dropped entirely |
 | `list-panes -a` size | 514 bytes / 14 rows here; `MAX_OUTPUT_BYTES` is 1MB, so it would take ~25,000 panes to matter |
 
-Session names carry a space and an emoji (`hv-sls-86-fb9d 🔔`), emitted **last** in the format
+Session names carry a space and an emoji (`hv-pay-86-fb9d 🔔`), emitted **last** in the format
 so a tab inside a name cannot eat a field boundary. After this change no `-t` target is ever a
 name - only `$id` and `@id`, and tmux forbids `:` and `.` in session names, so `$204:@349`
 cannot mis-split.
