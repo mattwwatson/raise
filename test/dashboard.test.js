@@ -1355,6 +1355,128 @@ test('no forge readings at all leaves every row exactly as it was', () => {
   assert.deepEqual(build({ ...input, forgeStates: new Map() }), build(input));
 });
 
+test('a draft is the forge\'s word, and it reaches the row as one', () => {
+  // Issue 30: both forges say OPEN for a draft, and `open` on this page means a
+  // review waiting on somebody. The forge's reading goes through the same gate
+  // as any other - `current` exactly as an `open` reading would be.
+  const url = 'https://github.com/acme/repo/pull/40';
+  const input = {
+    sessions: [session({ cwd: '/Users/x/work/repo' })],
+    runs: [],
+    summaries: new Map([['s1', seen({ url, number: 40 })]]),
+    branches: new Map([['s1', 'feat/x']]),
+    now: 10_000,
+  };
+  const draft = build({ ...input, forgeStates: forgeReadings(url, 'draft', 9000) })[0];
+  assert.equal(draft.pr.state, 'draft');
+  assert.equal(draft.pr.current, true);
+
+  // A pull request's state is a chip, not an attention level: a draft ranks
+  // the row exactly as an open one does, and nothing else on it moves.
+  const open = build({ ...input, forgeStates: forgeReadings(url, 'open', 9000) })[0];
+  assert.deepEqual({ ...draft, pr: null }, { ...open, pr: null });
+
+  // And a draft whose reading has aged out is a past reading like any other.
+  const stale = build({ ...input, forgeStates: forgeReadings(url, 'draft', 0), now: 6 * 60 * 1000 });
+  assert.equal(stale[0].pr.state, 'draft');
+  assert.equal(stale[0].pr.current, false);
+});
+
+test('a draft that has been published reads open once the forge says so', () => {
+  // The same bug pointing the other way: a row stuck on `draft` after the
+  // author published it hides a review that is now waiting on somebody.
+  const url = 'https://github.com/acme/repo/pull/40';
+  const input = {
+    sessions: [session({ cwd: '/Users/x/work/repo' })],
+    runs: [],
+    summaries: new Map([['s1', seen({ url, number: 40 })]]),
+    branches: new Map([['s1', 'feat/x']]),
+  };
+  const before = build({ ...input, forgeStates: forgeReadings(url, 'draft', 9000), now: 10_000 });
+  assert.equal(before[0].pr.state, 'draft');
+  const after = build({ ...input, forgeStates: forgeReadings(url, 'open', 70_000), now: 71_000 });
+  assert.equal(after[0].pr.state, 'open');
+  assert.equal(after[0].pr.current, true);
+});
+
+test('no local source may say draft - a run, the database and a transcript all say open', () => {
+  // Only the forge knows. no-mistakes' `pr_state` carries no draft flag, and a
+  // transcript sighting is whatever word a CLI printed beside a URL, so a
+  // `draft` from any of them is a guess and must not reach the row as one.
+  const live = build({
+    sessions: [session()],
+    runs: [
+      run({
+        active: true,
+        prUrl: 'https://github.com/acme/repo/pull/9',
+        prState: 'draft',
+        prStateObservedAt: 9500,
+      }),
+    ],
+    now: 10_000,
+  });
+  assert.equal(live[0].pr.state, 'open', 'a live run');
+  assert.equal(live[0].pr.current, true);
+
+  const recorded = build({
+    sessions: [session()],
+    runs: [],
+    pullRequests: [
+      {
+        url: 'https://github.com/acme/repo/pull/7',
+        number: 7,
+        state: 'draft',
+        observedAt: 900,
+        branch: 'main',
+        repoPath: '/Users/x/work/repo',
+        current: true,
+      },
+    ],
+    now: 1000,
+  });
+  assert.equal(recorded[0].pr.state, 'open', 'the database');
+
+  const sighted = build({
+    sessions: [session({ cwd: '/Users/x/work/repo' })],
+    runs: [],
+    summaries: new Map([['s1', seen({ state: 'draft' })]]),
+    branches: new Map([['s1', 'feat/x']]),
+    now: 10_000,
+  });
+  assert.equal(sighted[0].pr.state, 'open', 'a transcript sighting');
+
+  // The unattributable card takes its pull request through the same join.
+  const unplaced = build({
+    sessions: [],
+    runs: [
+      run({
+        prUrl: 'https://github.com/acme/repo/pull/9',
+        prState: 'draft',
+        prStateObservedAt: 9500,
+      }),
+    ],
+    now: 10_000,
+  });
+  assert.equal(unplaced[0].pr.state, 'open', 'a run nobody can be tied to');
+
+  // With the forge switched on but holding no reading for this review, the
+  // local word still stands as `open`.
+  const elsewhere = build({
+    sessions: [session()],
+    runs: [
+      run({
+        active: true,
+        prUrl: 'https://github.com/acme/repo/pull/9',
+        prState: 'draft',
+        prStateObservedAt: 9500,
+      }),
+    ],
+    forgeStates: forgeReadings('https://github.com/acme/repo/pull/11', 'draft', 9900),
+    now: 10_000,
+  });
+  assert.equal(elsewhere[0].pr.state, 'open', 'beside a forge reading for another review');
+});
+
 test('a run does not lend its pull request to a session that has moved on', () => {
   // Observed live: a merged run from twenty minutes earlier put its PR on a
   // session sitting in the same repo on `main`, so the row said `main` and

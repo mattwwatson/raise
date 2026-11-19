@@ -860,7 +860,13 @@
       .pr-state.merged {
         color: var(--done);
       }
-      .pr-state.open {
+      /*
+       * A draft wears `open`'s colour on purpose: the word is the whole of the
+       * difference (issue 30). If `draft` needed a colour to be understood, the
+       * word would be the wrong one.
+       */
+      .pr-state.open,
+      .pr-state.draft {
         color: var(--working);
       }
       .pr-state.closed,

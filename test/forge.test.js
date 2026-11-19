@@ -16,21 +16,24 @@ const BB = 'https://bitbucket.org/acme/widgets/pull-requests/41';
 const enabled = (bitbucket = null) => ({ enabled: true, bitbucket, problem: null });
 const CREDENTIAL = { email: 'me@example.com', token: 'shhh' };
 
-/** An `execAsync` that records what it was asked and answers with `state`. */
-const ghRunner = (state, calls = []) => {
+/**
+ * An `execAsync` that records what it was asked and answers with `state`, plus
+ * whatever else `extra` adds to the answer - `isDraft`, for one.
+ */
+const ghRunner = (state, calls = [], extra = {}) => {
   const runner = (command, args, options) => {
     calls.push({ command, args, options });
-    return Promise.resolve(JSON.stringify({ state }));
+    return Promise.resolve(JSON.stringify({ state, ...extra }));
   };
   runner.calls = calls;
   return runner;
 };
 
 /** A `fetch` that records the request and answers with a Bitbucket body. */
-const bbFetch = (state, calls = []) => {
+const bbFetch = (state, calls = [], extra = {}) => {
   const fake = (url, init) => {
     calls.push({ url, init });
-    return Promise.resolve({ ok: true, json: () => Promise.resolve({ state }) });
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ state, ...extra }) });
   };
   fake.calls = calls;
   return fake;
@@ -82,6 +85,29 @@ test('normaliseForgeState folds both vocabularies onto the page words', () => {
   assert.equal(normaliseForgeState(null), null);
 });
 
+test('an open pull request flagged as a draft is draft, and one not flagged is open', () => {
+  // Both forges say OPEN for a draft and carry the difference as a flag beside
+  // it - GitHub's `isDraft`, Bitbucket's `draft`, as in issue 30's own case of
+  // `{ "state": "OPEN", "draft": true }`. The two lookups below hand their flag
+  // to this one function, so each forge's case is asserted there end to end.
+  assert.equal(normaliseForgeState('OPEN', true), 'draft');
+  assert.equal(normaliseForgeState('OPEN', false), 'open');
+});
+
+test('only a flag that is plainly true makes a draft', () => {
+  // A field the forge did not send, or sent as something other than a boolean,
+  // is not evidence of a draft - so it reads as the plain state, as it did
+  // before the flag was asked for.
+  for (const flag of [undefined, null, 'true', 1, {}]) {
+    assert.equal(normaliseForgeState('OPEN', flag), 'open', `${JSON.stringify(flag)}`);
+  }
+  // The flag qualifies an open pull request and nothing else: a merged or a
+  // closed one is that, whatever the flag says.
+  assert.equal(normaliseForgeState('MERGED', true), 'merged');
+  assert.equal(normaliseForgeState('DECLINED', true), 'closed');
+  assert.equal(normaliseForgeState('LOCKED', true), null);
+});
+
 test('a disabled config never runs a command and never makes a request', async () => {
   // The default, and the thing the whole feature is held to: a user who has not
   // configured this cannot tell it exists.
@@ -101,12 +127,28 @@ test('GitHub is asked through gh, by URL, with no working directory of its own',
   await forge.load([GH]);
 
   assert.deepEqual(runner.calls[0].command, 'gh');
-  assert.deepEqual(runner.calls[0].args, ['pr', 'view', GH, '--json', 'state']);
+  assert.deepEqual(runner.calls[0].args, ['pr', 'view', GH, '--json', 'state,isDraft']);
   assert.equal(runner.calls[0].options.cwd, undefined);
   assert.equal(forge.readings.get(pullRequestKey(GH)).state, 'merged');
 });
 
-test('Bitbucket is asked over its API, for one field, with Basic auth', async () => {
+test('GitHub reads a draft as draft and a ready one as open', async () => {
+  const draft = new ForgeState({
+    execAsync: ghRunner('OPEN', [], { isDraft: true }),
+    config: enabled(),
+  });
+  await draft.load([GH]);
+  assert.equal(draft.readings.get(pullRequestKey(GH)).state, 'draft');
+
+  const ready = new ForgeState({
+    execAsync: ghRunner('OPEN', [], { isDraft: false }),
+    config: enabled(),
+  });
+  await ready.load([GH]);
+  assert.equal(ready.readings.get(pullRequestKey(GH)).state, 'open');
+});
+
+test('Bitbucket is asked over its API, for two fields, with Basic auth', async () => {
   const fake = bbFetch('OPEN');
   const forge = new ForgeState({ fetch: fake, config: enabled(CREDENTIAL) });
   await forge.load([BB]);
@@ -114,13 +156,47 @@ test('Bitbucket is asked over its API, for one field, with Basic auth', async ()
   const { url, init } = fake.calls[0];
   assert.equal(
     url,
-    'https://api.bitbucket.org/2.0/repositories/acme/widgets/pullrequests/41?fields=state',
+    // The narrow list gained `draft` and nothing else: the rest of a pull
+    // request record has no business crossing the network for this.
+    'https://api.bitbucket.org/2.0/repositories/acme/widgets/pullrequests/41?fields=state,draft',
   );
   // Basic auth over the account email and the token. App passwords, which
   // needed only the token, were removed on 28/07/2026.
   const decoded = Buffer.from(init.headers.authorization.slice('Basic '.length), 'base64').toString();
   assert.equal(decoded, 'me@example.com:shhh');
   assert.equal(forge.readings.get(pullRequestKey(BB)).state, 'open');
+});
+
+test('Bitbucket reads a draft as draft and a ready one as open', async () => {
+  const draft = new ForgeState({
+    fetch: bbFetch('OPEN', [], { draft: true }),
+    config: enabled(CREDENTIAL),
+  });
+  await draft.load([BB]);
+  assert.equal(draft.readings.get(pullRequestKey(BB)).state, 'draft');
+
+  const ready = new ForgeState({
+    fetch: bbFetch('OPEN', [], { draft: false }),
+    config: enabled(CREDENTIAL),
+  });
+  await ready.load([BB]);
+  assert.equal(ready.readings.get(pullRequestKey(BB)).state, 'open');
+});
+
+test('a draft that is published reads open on the next lookup', async () => {
+  // The same bug pointing the other way: a word stuck on `draft` after the
+  // author published it would hide a review that is now waiting on somebody.
+  // Nothing special makes this work - a draft keeps the ordinary interval, as
+  // an open one does - and this is what says so.
+  let isDraft = true;
+  const runner = () => Promise.resolve(JSON.stringify({ state: 'OPEN', isDraft }));
+  const forge = new ForgeState({ execAsync: runner, config: enabled() });
+  await forge.load([GH], 0);
+  assert.equal(forge.readings.get(pullRequestKey(GH)).state, 'draft');
+
+  isDraft = false;
+  await forge.load([GH], OPEN_REFRESH_MS + 1);
+  assert.equal(forge.readings.get(pullRequestKey(GH)).state, 'open');
 });
 
 test('Bitbucket is not asked at all without a credential', async () => {

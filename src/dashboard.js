@@ -638,12 +638,20 @@ function sameUrl(a, b) {
  * where the forge has nothing current to say and a local source does, the local
  * reading stands.
  *
- * @param {PullRequest|null} pr
+ * **Only the forge may say `draft`, so a local source never does.** no-mistakes'
+ * `pr_state` carries no draft flag, and a transcript sighting is whatever word a
+ * CLI happened to print beside a URL - so a `draft` from either is a guess, and
+ * it is read as `open`, exactly as it was before the forge could say otherwise.
+ * It is done here because this is the one join every row's pull request goes
+ * through.
+ *
+ * @param {PullRequest|null} found what the local sources settled on
  * @param {Map<string, ForgeReading>} forgeStates
  * @param {number} now
  * @returns {PullRequest|null}
  */
-function withForgeState(pr, forgeStates, now) {
+function withForgeState(found, forgeStates, now) {
+  const pr = found?.state === 'draft' ? { ...found, state: 'open' } : found;
   if (!pr || forgeStates.size === 0) return pr;
   const reading = forgeStates.get(pullRequestKey(pr.url));
   if (!reading) return pr;

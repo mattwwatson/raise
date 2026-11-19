@@ -1,8 +1,10 @@
 ---
 issue: 30
-status: backlog
+status: shipped
 size: M
 depends: -
+branch: fm/raise-30-draft-pr-state
+shipped: 2026-11-19
 ---
 # 30 - A draft pull request is shown as open
 
@@ -131,3 +133,30 @@ same bug pointing the other way.
 - The page and `raise status` render the same word for the same row. They are one protocol and
   a state word on one and not the other is the two disagreeing.
 - `npm test`, `npm run lint` and `npm run typecheck` pass.
+
+---
+
+## Implementation notes
+
+**Both open questions were decided as recommended.** `draft` is a fourth word in
+`PullRequest.state` (`'open'|'draft'|'merged'|'closed'`), and nothing in `ATTENTION_ORDER`
+moved - a draft ranks its row exactly as an open pull request does.
+
+- `normaliseForgeState(raw, draft)` takes the forge's flag as a second argument and returns
+  `draft` only for `OPEN` with a flag that is exactly `true`. A missing or oddly typed flag is
+  not evidence of a draft, and a merged or closed pull request is that whatever the flag says.
+- `#lookupGitHub` asks `--json state,isDraft`; `#lookupBitbucket` asks `fields=state,draft`.
+  The Bitbucket list gained that one field and nothing else.
+- A draft keeps the ordinary refresh interval, as an open pull request does, so publishing one
+  is the next lookup answering `open`. Nothing else was needed for question 4.
+- **Question 3 is enforced, not just true by coincidence.** The local sources pass their word
+  through unchanged, and a transcript sighting takes whatever word a CLI printed beside a URL -
+  so `state: draft` in a transcript would have produced `draft` from a source that cannot know.
+  `withForgeState` in `src/dashboard.js`, the one join every row's pull request goes through,
+  reads a local `draft` as `open` before the forge is consulted.
+- The page gives `draft` the same colour as `open`: the word is the whole of the difference.
+- The page and `raise status` already rendered `row.pr.state` verbatim behind the same
+  `current` gate, so neither renderer changed. `test/cli-status.test.js` holds them to that:
+  it runs `raise status` as a real process with a stand-in `gh` on its `PATH`, and the server
+  with the same answer, against one checkout and transcript, and asserts both say `draft` for a
+  draft and `open` for a ready one.

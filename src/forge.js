@@ -66,7 +66,7 @@ const DISABLED = { enabled: false, bitbucket: null, problem: null };
  * source goes through, because a forge answer ages exactly like anybody else's.
  *
  * @typedef {object} ForgeReading
- * @property {'open'|'merged'|'closed'} state in Raise's vocabulary, not the forge's
+ * @property {'open'|'draft'|'merged'|'closed'} state in Raise's vocabulary, not the forge's
  * @property {number} observedAt epoch ms
  */
 
@@ -151,17 +151,27 @@ export function parseForgeUrl(url) {
  *
  * Neither forge speaks Raise's vocabulary: GitHub says OPEN, CLOSED or MERGED,
  * and Bitbucket says OPEN, MERGED, DECLINED or SUPERSEDED. Both fold onto the
- * three words the page already renders. A word neither of them is documented to
+ * words the page already renders. A word neither of them is documented to
  * produce returns null and the reading is discarded, rather than being passed
  * through to a page that would render it as a state chip nobody can interpret.
  *
+ * **A draft is `draft`, not `open`, although both forges say OPEN for it.** They
+ * carry it as a flag beside the state - GitHub's `isDraft`, Bitbucket's `draft`
+ * - and `open` on this page means a review waiting on somebody, where a draft is
+ * waiting on its author. So the flag becomes a fourth word rather than a second
+ * field: a renderer that forgot a second field would show `open` again, which is
+ * the bug this exists to fix. Only `true` counts, because a flag we cannot read
+ * is not evidence of a draft. Only the forge can say it - see `withForgeState`
+ * in `dashboard.js`, which keeps the local sources to `open`.
+ *
  * @param {string|null|undefined} raw
- * @returns {'open'|'merged'|'closed'|null}
+ * @param {unknown} [draft] the forge's draft flag, as it arrived
+ * @returns {'open'|'draft'|'merged'|'closed'|null}
  */
-export function normaliseForgeState(raw) {
+export function normaliseForgeState(raw, draft) {
   switch (String(raw || '').toUpperCase()) {
     case 'OPEN':
-      return 'open';
+      return draft === true ? 'draft' : 'open';
     case 'MERGED':
       return 'merged';
     // A declined Bitbucket pull request and a superseded one are both closed
@@ -355,7 +365,8 @@ export class ForgeState {
         // ask. A closed one can be reopened, so it keeps the ordinary interval -
         // showing `closed` over a reopened review would be exactly the quiet
         // staleness this feature exists to remove, and one request a minute for
-        // a rare case is not worth being clever about.
+        // a rare case is not worth being clever about. A draft keeps it too:
+        // publishing one is the next lookup answering `open`, and nothing else.
         if (state === 'merged') this.#nextAskAt.set(key, Number.POSITIVE_INFINITY);
       })
       .catch(() => {
@@ -389,7 +400,7 @@ export class ForgeState {
   /**
    * @param {ForgeTarget} target
    * @param {ForgeConfig} config
-   * @returns {Promise<'open'|'merged'|'closed'|null>}
+   * @returns {Promise<'open'|'draft'|'merged'|'closed'|null>}
    */
   async #lookup(target, config) {
     if (target.forge === 'github') return this.#lookupGitHub(target);
@@ -412,20 +423,22 @@ export class ForgeState {
     if (!this.#execAsync) return null;
     const out = await this.#execAsync(
       'gh',
-      ['pr', 'view', target.url, '--json', 'state'],
+      ['pr', 'view', target.url, '--json', 'state,isDraft'],
       { timeoutMs: LOOKUP_TIMEOUT_MS },
     );
-    return normaliseForgeState(JSON.parse(out)?.state);
+    const body = JSON.parse(out);
+    return normaliseForgeState(body?.state, body?.isDraft);
   }
 
   /**
    * Bitbucket has no `gh`, so this is the REST API with an API token.
    *
    * Basic auth over the Atlassian account email and the token: app passwords,
-   * which needed only the one value, were removed on 28/07/2026. `fields=state`
-   * asks for the one field we read - a pull request record is otherwise several
+   * which needed only the one value, were removed on 28/07/2026. `fields=state,draft`
+   * asks for the two fields we read - a pull request record is otherwise several
    * kilobytes of description, participants and diff links, none of which has any
-   * business crossing the network for this.
+   * business crossing the network for this. `draft` joined `state` for issue 30
+   * and is the only field that has: widen it only for something the page reads.
    *
    * The scope this needs is `read:pullrequest:bitbucket` and nothing else, which
    * Atlassian documents as *not* implying `read:repository:bitbucket` - so a
@@ -439,7 +452,7 @@ export class ForgeState {
     if (!this.#fetch || !credential) return null;
     const endpoint =
       `https://api.bitbucket.org/2.0/repositories/${encodeURIComponent(target.workspace)}` +
-      `/${encodeURIComponent(target.repo)}/pullrequests/${target.number}?fields=state`;
+      `/${encodeURIComponent(target.repo)}/pullrequests/${target.number}?fields=state,draft`;
     const auth = Buffer.from(`${credential.email}:${credential.token}`).toString('base64');
     const response = await this.#fetch(endpoint, {
       headers: { authorization: `Basic ${auth}`, accept: 'application/json' },
@@ -450,6 +463,6 @@ export class ForgeState {
     // telling the user about on a row - the backoff is what stops it repeating.
     if (!response.ok) return null;
     const body = await response.json();
-    return normaliseForgeState(body?.state);
+    return normaliseForgeState(body?.state, body?.draft);
   }
 }

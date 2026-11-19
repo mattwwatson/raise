@@ -267,8 +267,9 @@ transcript, so a plain `gh pr create` still gets a link.
 [pull request state](#pull-request-state-from-the-forge) makes Raise ask GitHub or Bitbucket
 directly, which is the one source that cannot be out of date - so a merged pull request stops
 saying `OPEN` within the minute, and a review nobody is watching gets a real state rather than
-a tooltip. It is off until you configure it, and it is one of only two things in Raise that
-make an outbound request.
+a tooltip. It is also the only source that knows a pull request is a draft, so with it on a
+draft says `DRAFT` rather than `OPEN` - waiting on its author, not on a reviewer. It is off until
+you configure it, and it is one of only two things in Raise that make an outbound request.
 
 **The branch is always shown**, next to the repo name, read straight from `.git/HEAD` - so it
 is right for worktrees and for sessions that have never run the pipeline. It is also what ties
