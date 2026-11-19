@@ -233,6 +233,67 @@ export function isPipelineWorktree(cwd, nmHome) {
   return cwd === nmHome || cwd.startsWith(`${nmHome}/`);
 }
 
+/**
+ * The fixed text Firstmate opens its supervision session's first prompt with.
+ *
+ * That session is a headless `claude -p --safe-mode` run Firstmate starts in its
+ * own home to watch its workers between the captain's turns. Safe mode loads no
+ * hooks, so it never reports, and it writes an ordinary transcript - so without
+ * this it is a `Not tracked` row for as long as Firstmate supervises, advising a
+ * restart that changes nothing. It is an agent of Firstmate's, the same kind of
+ * thing as a no-mistakes pipeline agent, and is left out for the same reason.
+ *
+ * **Why the prompt and not the path or the entrypoint.** `isPipelineWorktree`
+ * cannot work here: the supervision session runs in the same directory as the
+ * captain's own Firstmate session, which is a session a person has open and must
+ * keep its row. And its records' `"entrypoint": "sdk-cli"` is written by every
+ * headless or SDK run, some of which are sessions somebody does want to see. The
+ * prefix is the one thing only this session carries.
+ *
+ * It is Firstmate's text, not ours - `MAIN_DIALOG_MIRROR_HEADER` in its
+ * `.pi/extensions/lib/fm-branch-dispatch.ts` - so `test/untracked.test.js` pins
+ * it. If Firstmate rewords it, the row comes back; the pinned test is where to
+ * look, and changing it is a deliberate act rather than a silent drift.
+ */
+export const FIRSTMATE_SUPERVISION_PROMPT = 'MAIN DIALOG MIRROR';
+
+/**
+ * The text of the first prompt a person (or a harness) typed into a Claude Code
+ * transcript, or `null` if the records hold none.
+ *
+ * Skips `isMeta` records, which Claude Code writes as `user` records around
+ * slash commands and caveats, and records whose content is only tool results.
+ * The prompt is a string on a headless run and a list of blocks on some
+ * interactive ones; the first text block is the prompt.
+ *
+ * @param {{type?: unknown, isMeta?: unknown,
+ *          message?: {role?: unknown, content?: unknown}}[]} records raw JSONL
+ *   records, straight off the head of the file
+ * @returns {string|null}
+ */
+export function firstPrompt(records) {
+  for (const record of records) {
+    if (record?.type !== 'user' || record.isMeta || record.message?.role !== 'user') continue;
+    const content = record.message.content;
+    if (typeof content === 'string') return content;
+    if (!Array.isArray(content)) continue;
+    const text = content.find((block) => block?.type === 'text' && typeof block.text === 'string');
+    if (text) return text.text;
+  }
+  return null;
+}
+
+/**
+ * Whether a first prompt is the one Firstmate starts its supervision session
+ * with. See `FIRSTMATE_SUPERVISION_PROMPT`.
+ *
+ * @param {string|null} prompt
+ * @returns {boolean}
+ */
+export function isFirstmateSupervisionPrompt(prompt) {
+  return typeof prompt === 'string' && prompt.startsWith(FIRSTMATE_SUPERVISION_PROMPT);
+}
+
 export class UntrackedScan {
   #files;
   #roots;
@@ -255,6 +316,14 @@ export class UntrackedScan {
    * @type {Map<string, string>}
    */
   #cwds = new Map();
+  /**
+   * Whether each Claude Code transcript is Firstmate's supervision session, by
+   * path. A first prompt, once written, never changes, so either answer is good
+   * forever - but only once there is one: see `#isFirstmateSupervision`.
+   *
+   * @type {Map<string, boolean>}
+   */
+  #supervision = new Map();
 
   /**
    * @param {{files?: UntrackedFiles, roots?: {dir: string, agent: AgentKind, depth: number}[],
@@ -318,6 +387,11 @@ export class UntrackedScan {
         const cwd = this.#cwdFor(path);
         if (!cwd) continue;
         if (isPipelineWorktree(cwd, this.#nmHome)) continue;
+        // Claude Code only, because the supervision session is a `claude -p`
+        // run, and pi and Codex keep their prompts in records of their own
+        // shape - reading their heads for a prefix they never carry would be a
+        // read for nothing.
+        if (root.agent === 'claude' && this.#isFirstmateSupervision(path)) continue;
         found.push({
           key: path,
           transcriptPath: path,
@@ -330,7 +404,48 @@ export class UntrackedScan {
     // Forget directories we no longer see, so a monitor left running for a week
     // does not hold a cwd for every session that has ever existed.
     for (const path of this.#cwds.keys()) if (!seen.has(path)) this.#cwds.delete(path);
+    for (const path of this.#supervision.keys()) {
+      if (!seen.has(path)) this.#supervision.delete(path);
+    }
     return found;
+  }
+
+  /**
+   * Whether one Claude Code transcript is Firstmate's supervision session, from
+   * its first prompt, read once and remembered.
+   *
+   * The head, not the tail: the first prompt is near the top of the file and the
+   * tail of a session that has been supervising for an hour is somewhere else
+   * entirely. Measured on a live supervision transcript it was the fourth record,
+   * about 9KB in after an 8.7KB queue record repeating it, and Firstmate bounds
+   * the mirror it carries at 16,000 characters, so `HEAD_BYTES` holds it.
+   *
+   * The answer is remembered once it cannot change: when the head held a first
+   * prompt, or when the file is already longer than the head, so the head is
+   * fixed and a prompt beyond it will never be read. A file shorter than that
+   * with no prompt yet is still being written and is asked again on the next
+   * scan. Anything unreadable is answered `false`, which keeps the row: a
+   * session that cannot be placed is shown rather than hidden, the direction
+   * `isDisplayable` fails in for the same reason.
+   *
+   * @param {string} path
+   * @returns {boolean}
+   */
+  #isFirstmateSupervision(path) {
+    const known = this.#supervision.get(path);
+    if (known !== undefined) return known;
+    let head;
+    try {
+      head = this.#files.readHead(path, HEAD_BYTES);
+    } catch {
+      return false;
+    }
+    const prompt = firstPrompt(parseTranscriptTail(head, false));
+    const answer = isFirstmateSupervisionPrompt(prompt);
+    if (prompt !== null || Buffer.byteLength(head) >= HEAD_BYTES) {
+      this.#supervision.set(path, answer);
+    }
+    return answer;
   }
 
   /**
