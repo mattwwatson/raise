@@ -18,6 +18,8 @@ import { openSync, readSync, closeSync, statSync } from 'node:fs';
 
 import {
   TAIL_BYTES,
+  OPENING_BYTES,
+  firstPrompt,
   parseTranscriptTail,
   summariseTranscript,
   recentEvents,
@@ -44,6 +46,7 @@ const PARSERS = {
  * @typedef {object} TranscriptFile
  * @property {(path: string) => {size: number, mtimeMs: number}} stat
  * @property {(path: string, bytes: number) => {text: string, partial: boolean}} readTail
+ * @property {(path: string, bytes: number) => string} readHead
  */
 
 /** @type {TranscriptFile} */
@@ -61,6 +64,16 @@ export const defaultFileAccess = {
       const buffer = Buffer.alloc(length);
       readSync(fd, buffer, 0, length, start);
       return { text: buffer.toString('utf8'), partial: start > 0 };
+    } finally {
+      closeSync(fd);
+    }
+  },
+  readHead(path, bytes) {
+    const fd = openSync(path, 'r');
+    try {
+      const buffer = Buffer.alloc(bytes);
+      const read = readSync(fd, buffer, 0, bytes, 0);
+      return buffer.subarray(0, read).toString('utf8');
     } finally {
       closeSync(fd);
     }
@@ -94,9 +107,26 @@ export const defaultFileAccess = {
  * @property {import('./transcript.js').TranscriptEvent[]} [events]
  */
 
+/**
+ * A first prompt that is settled, and the agent whose parser settled it.
+ *
+ * @typedef {object} Opening
+ * @property {import('./registry.js').AgentKind} agent
+ * @property {string|null} prompt
+ */
+
 export class TranscriptReader {
   /** @type {Map<string, CacheEntry>} */
   #cache = new Map();
+  /**
+   * First prompts, kept apart from `#cache` because they are never invalidated
+   * by the file moving. A transcript is only ever appended to, so once its first
+   * prompt has been read it is that prompt for the life of the file, and the
+   * head is read at most once per session rather than on every change.
+   *
+   * @type {Map<string, Opening>}
+   */
+  #openings = new Map();
   #files;
 
   /** @param {{files?: TranscriptFile}} [deps] */
@@ -179,6 +209,7 @@ export class TranscriptReader {
       // Gone, or never there. Drop any stale entry so a recreated transcript
       // is read fresh rather than answered from a cache about a dead file.
       this.#cache.delete(path);
+      this.#openings.delete(path);
       return null;
     }
 
@@ -206,7 +237,10 @@ export class TranscriptReader {
       const { text, partial } = this.#files.readTail(path, TAIL_BYTES);
       const parse = PARSERS[agent] || parseTranscriptTail;
       const records = parse(text, partial);
-      entry.summary = summariseTranscript(records, want);
+      entry.summary = {
+        ...summariseTranscript(records, want),
+        firstPrompt: this.#firstPrompt(path, agent, info.size, records, partial),
+      };
       if (withEvents) entry.events = recentEvents(records, limit);
     } catch {
       // An unreadable transcript claims nothing rather than asserting an empty
@@ -218,6 +252,48 @@ export class TranscriptReader {
   }
 
   /**
+   * The start of a transcript's first prompt, read from the head of the file.
+   *
+   * A tail that holds the whole file already has the answer, so the head is
+   * only read once the file has outgrown the tail. An answer is settled - kept
+   * for good - when a prompt was found, or when the head window was full and
+   * held none, because a file only grows at the end and a longer one cannot
+   * change what its first 64KB say. A short file with no prompt yet is asked
+   * again when it next moves: the prompt has simply not been typed.
+   *
+   * A head we could not read is not settled either, and says nothing.
+   *
+   * @param {string} path
+   * @param {import('./registry.js').AgentKind} agent
+   * @param {number} size
+   * @param {object[]} records the tail just parsed
+   * @param {boolean} partial whether that tail began mid-file
+   * @returns {string|null}
+   */
+  #firstPrompt(path, agent, size, records, partial) {
+    const known = this.#openings.get(path);
+    if (known && known.agent === agent) return known.prompt;
+    if (!partial) {
+      const prompt = firstPrompt(records);
+      if (prompt !== null) this.#openings.set(path, { agent, prompt });
+      return prompt;
+    }
+    let prompt;
+    try {
+      const parse = PARSERS[agent] || parseTranscriptTail;
+      // `partialStart: false` - the head begins on a line boundary. A record cut
+      // by the end of the window fails to parse and is skipped, and nothing
+      // after it is in the window, so a first prompt too long to fit is reported
+      // as unknown rather than replaced by the prompt after it.
+      prompt = firstPrompt(parse(this.#files.readHead(path, OPENING_BYTES), false));
+    } catch {
+      return null;
+    }
+    if (prompt !== null || size > OPENING_BYTES) this.#openings.set(path, { agent, prompt });
+    return prompt;
+  }
+
+  /**
    * Forget transcripts for sessions that have gone, so a long-lived server does
    * not accumulate an entry per session it has ever seen.
    *
@@ -226,6 +302,9 @@ export class TranscriptReader {
   prune(livePaths) {
     for (const path of this.#cache.keys()) {
       if (!livePaths.has(path)) this.#cache.delete(path);
+    }
+    for (const path of this.#openings.keys()) {
+      if (!livePaths.has(path)) this.#openings.delete(path);
     }
   }
 }

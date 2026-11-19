@@ -14,8 +14,10 @@ import {
   matchRunForAgentCwd,
   isIdleNudge,
   blockReason,
+  FIRSTMATE_DOORBELL,
+  sessionSummary,
 } from '../src/dashboard.js';
-import { pullRequestFromRecords } from '../src/transcript.js';
+import { pullRequestFromRecords, parseTranscriptTail, firstPrompt } from '../src/transcript.js';
 import { parseSnapshot } from '../src/firstmate-decisions.js';
 import {
   APX_412,
@@ -3692,4 +3694,125 @@ test('the tab title count and the rows behind it come off one set', () => {
   const quiet = buildRows({ sessions: [session()], branches: new Map(), runs: [] });
   assert.equal(quiet[0].wantsYou, false);
   assert.equal(summarise(quiet).wantsYou, 0);
+});
+
+// ------------------------------------------- a Firstmate worker's summary line
+
+/**
+ * The first prompt record of a real Firstmate worker's transcript, as Claude
+ * Code wrote it on 19/11/2026, with the home directory made generic.
+ */
+const DOORBELL_RECORD = {
+  parentUuid: '64fa8957-5a79-49af-96e0-5daa703d2ad5',
+  isSidechain: false,
+  type: 'user',
+  message: {
+    role: 'user',
+    content:
+      ": Firstmate operational input waiting: read '/Users/x/firstmate/state/operational-inbox/" +
+      "1795082148-f4503cccd0e9f518.msg' and handle its contents as Firstmate operational input.",
+  },
+  uuid: '830fb70d-a977-41d6-8272-b87e2120a08f',
+  timestamp: '2026-11-19T09:55:51.377Z',
+  permissionMode: 'bypassPermissions',
+  promptSource: 'typed',
+};
+
+/** The title Claude Code generated from that prompt, on every worker alike. */
+const DOORBELL_TITLE = 'Firstmate operational inbox message';
+
+const worker = (over = {}) => ({
+  title: DOORBELL_TITLE,
+  mode: null,
+  activity: null,
+  lavishFile: null,
+  firstPrompt: firstPrompt([DOORBELL_RECORD]),
+  ...over,
+});
+
+test("Firstmate's doorbell is the prefix a real worker's first prompt starts with", () => {
+  // Pinned on purpose. The doorbell is Firstmate's text, not ours; if it ever
+  // changes, this fails here rather than every worker quietly going back to the
+  // one generated title they all shared. The leading `: ` is Firstmate's own.
+  assert.equal(FIRSTMATE_DOORBELL, ': Firstmate operational input waiting:');
+  const records = parseTranscriptTail(JSON.stringify(DOORBELL_RECORD), false);
+  assert.ok(firstPrompt(records)?.startsWith(FIRSTMATE_DOORBELL));
+});
+
+test('a Firstmate worker started with the doorbell is named for its task', () => {
+  const rows = buildRows({
+    sessions: [session({ sessionId: 'crew', cwd: '/Users/x/trees/1/search-api' })],
+    branches: new Map([['crew', 'fm/search-api-12-retry-budget']]),
+    runs: [],
+    summaries: new Map([['crew', worker()]]),
+    decisions: [
+      decisionTask({
+        id: 'search-api-12-retry-budget',
+        window: 'fm-search-api-12-retry-budget',
+        worktree: '/Users/x/trees/1/search-api',
+        decisions: [],
+      }),
+    ],
+    windowNames: new Map([['crew', 'fm-search-api-12-retry-budget']]),
+  });
+  assert.equal(rows[0].summary, 'search-api-12-retry-budget');
+});
+
+test('the task id stands in even before Claude Code has written a title', () => {
+  assert.equal(sessionSummary(worker({ title: null }), 'search-api-12-retry-budget'), 'search-api-12-retry-budget');
+});
+
+test('a session whose first prompt was anything else keeps its generated title', () => {
+  // The worktree join places a task on anybody sitting in the checkout, and a
+  // worker given its brief as the first prompt has a title that says something.
+  // Either way the title was prompted by words worth reading, so it stays.
+  const rows = buildRows({
+    sessions: [session({ sessionId: 'crew', cwd: '/Users/x/trees/1/search-api' })],
+    branches: new Map(),
+    runs: [],
+    summaries: new Map([
+      ['crew', worker({ title: 'Retry budget for search', firstPrompt: 'Add a retry budget' })],
+    ]),
+    decisions: [decisionTask({ id: 'search-api-12-retry-budget', worktree: '/Users/x/trees/1/search-api' })],
+  });
+  assert.equal(rows[0].summary, 'Retry budget for search');
+  // Recognised by the prompt, never the title: the same words as a title are
+  // not evidence of the doorbell.
+  assert.equal(sessionSummary(worker({ firstPrompt: null }), 'search-api-12-retry-budget'), DOORBELL_TITLE);
+});
+
+test('a doorbell worker with no fleet task placed on it keeps its title', () => {
+  // No task to name it for - none matched, or two sessions claim the one task -
+  // and a name we cannot place belongs to nobody. The title is wrong-ish but it
+  // is the session's own, not an invented one.
+  const unmatched = buildRows({
+    sessions: [session({ sessionId: 'crew', cwd: '/Users/x/trees/1/search-api' })],
+    branches: new Map(),
+    runs: [],
+    summaries: new Map([['crew', worker()]]),
+    decisions: [decisionTask({ id: 'other-task', window: 'fm-other', worktree: '/Users/x/trees/9/other' })],
+  });
+  assert.equal(unmatched[0].summary, DOORBELL_TITLE);
+
+  const shared = buildRows({
+    sessions: [
+      session({ sessionId: 'a', cwd: '/Users/x/trees/1/search-api' }),
+      session({ sessionId: 'b', cwd: '/Users/x/trees/1/search-api' }),
+    ],
+    branches: new Map(),
+    runs: [],
+    summaries: new Map([
+      ['a', worker()],
+      ['b', worker()],
+    ]),
+    decisions: [
+      decisionTask({
+        id: 'search-api-12-retry-budget',
+        window: null,
+        worktree: '/Users/x/trees/1/search-api',
+        decisions: [],
+      }),
+    ],
+  });
+  assert.deepEqual(shared.map((r) => r.summary), [DOORBELL_TITLE, DOORBELL_TITLE]);
 });

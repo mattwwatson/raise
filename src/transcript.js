@@ -49,6 +49,11 @@
  *   is when this session last did anything at all
  * @property {TranscriptPullRequest|null} pullRequest a pull request this
  *   session was seen to open or talk about
+ * @property {string|null} firstPrompt the start of the first thing a person -
+ *   or a tool typing for one - said to the session, at most
+ *   `FIRST_PROMPT_CHARS` long. Null when it is not known, which is not the same
+ *   as there being none. `summariseTranscript` cannot know it from a tail, so
+ *   `TranscriptReader` fills it from the head of the file
  */
 
 /**
@@ -90,6 +95,27 @@
  * that re-appending is what changed.
  */
 export const TAIL_BYTES = 128 * 1024;
+
+/**
+ * How much of the start of a transcript to read for its first prompt.
+ *
+ * Claude Code writes a run of bookkeeping records - mode, permission mode,
+ * file-history snapshots, attachments listing skills and tools - before the
+ * first prompt, and measured across five Firstmate worker transcripts on
+ * 19/11/2026 the prompt began between 22.8KB and 22.9KB in. 64KB is nearly three
+ * times that. A first prompt that does not fit is not known, rather than
+ * guessed at from whatever record comes next.
+ */
+export const OPENING_BYTES = 64 * 1024;
+
+/**
+ * How much of the first prompt to keep.
+ *
+ * It is only ever asked whether it starts with something, so carrying a pasted
+ * brief of tens of kilobytes around for every session would be memory spent on
+ * nothing.
+ */
+export const FIRST_PROMPT_CHARS = 200;
 
 /**
  * Parse the tail of a JSONL transcript.
@@ -350,6 +376,26 @@ function humanPrompt(record) {
   return trimmed;
 }
 
+/**
+ * The start of the first prompt in a run of records, or null if none of them is
+ * one.
+ *
+ * Only meaningful for records read from the start of the file: anywhere else the
+ * first prompt in the window is just the earliest one that happened to survive.
+ * Uses the same notion of a person speaking that the expando does, so a slash
+ * command's caveat block or injected skill text is never mistaken for it.
+ *
+ * @param {object[]} records
+ * @returns {string|null}
+ */
+export function firstPrompt(records) {
+  for (const record of records) {
+    const prompt = humanPrompt(record);
+    if (prompt) return prompt.slice(0, FIRST_PROMPT_CHARS);
+  }
+  return null;
+}
+
 /** @param {string} text */
 function clip(text) {
   const collapsed = String(text).replace(/\s+/g, ' ').trim();
@@ -575,6 +621,8 @@ export function summariseTranscript(records, branch = null) {
     lavishFile,
     lastActivityAt: lastActivityAt(records),
     pullRequest: pullRequestFromRecords(records, branch),
+    // A tail cannot say what came first; the reader fills this from the head.
+    firstPrompt: null,
   };
 }
 
@@ -587,4 +635,5 @@ export const EMPTY_SUMMARY = Object.freeze({
   lavishFile: null,
   lastActivityAt: null,
   pullRequest: null,
+  firstPrompt: null,
 });

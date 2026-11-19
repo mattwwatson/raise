@@ -495,6 +495,12 @@ naming the session. Having firstmate's source open is not enough to earn it, a w
 other tool spawned gets nothing, and on a machine without firstmate nothing is looked for at
 all. `raise status` prints the same word.
 
+A crewmate's line under the repo name is normally Claude Code's own title for the session, as on
+every other row. Firstmate starts each crewmate with the same pointer to a file rather than with
+its brief, so Claude Code names every one of them alike; where a session's first prompt is that
+pointer, the line shows the task id from firstmate's fleet snapshot instead - for example
+`search-api-12-retry-budget`. A crewmate whose first prompt was anything else keeps its title.
+
 The dot in the header is **positive evidence, not the absence of an error**. The server sends
 a `ping` event every 20 seconds; if nothing arrives for 50 the dot goes red, the header reads
 `no response for 2m`, and the whole page dims, because everything on it is now a snapshot of

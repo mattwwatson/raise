@@ -144,7 +144,7 @@ See the header of `src/untracked.js`.
 | `src/nm-state.js` | reads the no-mistakes database, with schema probe and fallback |
 | `src/registry.js` | live agent sessions, fed by hooks |
 | `src/transcript.js` | what a session is doing, parsed from its transcript (pure) |
-| `src/transcript-reader.js` | the tail read behind that, cached on mtime, branch and agent |
+| `src/transcript-reader.js` | the tail read behind that, cached on mtime, branch and agent, and the first prompt, read once from the head |
 | `src/git-branch.js` | the branch a checkout is on, and the checkout a worktree belongs to, read from `.git` |
 | `src/lavish.js` | resolving a Lavish artifact to the page waiting on you |
 | `src/forge.js` | asking GitHub or Bitbucket whether a pull request is still open |
@@ -298,6 +298,7 @@ stratified on purpose, so read the whole file rather than one section.
 | `lastActivityAt` is a whitelist of `assistant` and `user` - the `away_summary` regression | `src/transcript.js` |
 | the name survives the 128KB tail only because Claude Code re-appends it | `src/transcript.js` (`TAIL_BYTES`) |
 | the tail read is cached on mtime, branch and agent | `src/transcript-reader.js` |
+| the first prompt is read once from a 64KB head window, and the answer is kept per path | `src/transcript-reader.js` (`#firstPrompt`) |
 | both agents' session names normalise onto `custom-title` | `src/pi-transcript.js` |
 | a recorded block is disbelieved once the transcript runs past it | `src/dashboard.js` (`blockDisproved`) |
 | `PostToolUse` / `PostToolBatch` rejected - the one-line change and why not | `src/hooks.js` (`HOOK_EVENTS`) |
@@ -357,6 +358,7 @@ stratified on purpose, so read the whole file rather than one section.
 | the resume link is an import and is not used; raising the app is the whole behaviour | `src/focus/claude-desktop.js` |
 | a firstmate crewmate is the `fm-` window; the captain is the lock holding its pid | `src/firstmate.js` |
 | the pane table is keyed by socket path, resolved once per pane, never awaited | `src/firstmate.js` |
+| a Firstmate worker started with the doorbell takes its task id as its summary, recognised from the first prompt and never the title | `src/dashboard.js` (`sessionSummary`, `FIRSTMATE_DOORBELL`) |
 | a firstmate decision is read from the fleet snapshot, never folded here and never matched in prose | `src/firstmate-decisions.js` |
 | the snapshot's own reconciliation is the half that matters, so the schema is checked exactly | `src/firstmate-decisions.js` |
 | an unreadable snapshot keeps the last answer; a snapshot with no tasks replaces it | `src/firstmate-decisions.js` (`parseSnapshot`) |
