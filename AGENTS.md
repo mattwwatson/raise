@@ -352,7 +352,7 @@ stratified on purpose, so read the whole file rather than one section.
 | a cache stamped in the future is discarded by the read, so both callers get the rule | `src/update-check.js` (`readUpdateCache`) |
 | a session nothing reported gets a row that refuses to say what it is doing | `src/untracked.js` |
 | the four states worth telling apart write byte-identical files | `src/untracked.js`, `docs/tasks/RAI-4-first-run-shows-something.md` |
-| the six bounds on the scan: window, tombstones, superseding, no id, no run, no pipeline agents | `src/untracked.js` |
+| the seven bounds on the scan: window, tombstones, superseding, no id, no run, no pipeline agents, no Firstmate supervision session | `src/untracked.js`, `docs/tasks/60-supervision-session-row.md` |
 | thirty-second interval, cwd read tail-first, only a positive answer cached | `src/untracked.js` |
 | Claude Desktop is identified by paths only it can occupy | `src/process-tree.js` (`DESKTOP_APP`) |
 | the resume link is an import and is not used; raising the app is the whole behaviour | `src/focus/claude-desktop.js` |

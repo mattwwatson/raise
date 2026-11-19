@@ -15,7 +15,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -240,6 +240,57 @@ test('doctor treats a machine without no-mistakes as a setup, not a failure', as
     // And it says what that costs, since a user with no pipeline rows has no
     // other way to tell an absent integration from a broken one.
     assert.match(stdout, /no pipeline rows/);
+  } finally {
+    cleanup();
+  }
+});
+
+test("the page and `raise status` agree on leaving out Firstmate's supervision session", async () => {
+  // Issue 60. Both renderers build their untracked rows from the same scan, so
+  // the supervision session is left out of both or of neither - and a row on one
+  // that is missing from the other is the two disagreeing about one session.
+  // Beside it sit the captain's own session in the same directory and another
+  // headless run, which must stay on both.
+  const { dir, cleanup } = scratch();
+  try {
+    const home = join(dir, 'firstmate');
+    const project = join(dir, 'projects', '-firstmate');
+    mkdirSync(home, { recursive: true });
+    mkdirSync(project, { recursive: true });
+    const transcript = (title, prompt, entrypoint) =>
+      [
+        { type: 'ai-title', aiTitle: title },
+        { type: 'user', cwd: home, entrypoint, timestamp: new Date().toISOString(), message: { role: 'user', content: prompt } },
+        { type: 'assistant', cwd: home, entrypoint, timestamp: new Date().toISOString(), message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] } },
+      ]
+        .map((r) => JSON.stringify(r))
+        .join('\n');
+    writeFileSync(
+      join(project, 'supervision.jsonl'),
+      transcript('supervising the fleet', 'MAIN DIALOG MIRROR (read-only context: ...):\n\nFIRSTMATE SUPERVISION WAKE: x', 'sdk-cli'),
+    );
+    writeFileSync(
+      join(project, 'away.jsonl'),
+      transcript('supervising while away', 'FIRSTMATE SUPERVISION WAKE: x', 'sdk-cli'),
+    );
+    writeFileSync(join(project, 'captain.jsonl'), transcript('captain at the helm', 'Pick up the next item', 'cli'));
+    writeFileSync(join(project, 'headless.jsonl'), transcript('a scripted check', 'Summarise the build', 'sdk-cli'));
+
+    const expected = ['a scripted check', 'captain at the helm'];
+
+    // NM_HOME is moved off the scratch directory, or every transcript in it
+    // would be taken for a no-mistakes pipeline agent and left out for that.
+    const { code, stdout } = await cli(['status'], dir, { NM_HOME: join(dir, 'no-mistakes') });
+    assert.equal(code, 0, stdout);
+    for (const title of expected) assert.ok(stdout.includes(title), `missing ${title}:\n${stdout}`);
+    assert.ok(!stdout.includes('supervising'), `a supervision session is listed:\n${stdout}`);
+
+    const port = await freePort();
+    await withMonitor(dir, port, async () => {
+      const body = await (await fetch(`http://127.0.0.1:${port}/state?t=test-token`)).json();
+      assert.deepEqual(body.rows.map((r) => r.summary).sort(), expected);
+      assert.ok(body.rows.every((r) => r.kind === 'untracked'));
+    });
   } finally {
     cleanup();
   }
