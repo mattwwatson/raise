@@ -1,5 +1,5 @@
 /**
- * `raise status` and the page saying the same word about one pull request.
+ * `raise status` and the page saying the same thing about one row.
  *
  * The two renderers are one protocol: both print `row.pr.state` from the same
  * `buildRows`, gated on the same `PullRequest.current`. A state word on one and
@@ -11,6 +11,10 @@
  * The case is issue 30's: a draft, which both forges report as OPEN plus a flag,
  * and which used to read `open` - a review waiting on somebody - when it is
  * waiting on its own author.
+ *
+ * The second case is issue 58's: a Firstmate worker started with the doorbell,
+ * whose summary line both renderers must take from the fleet snapshot's task id
+ * rather than from the title Claude Code gave every worker alike.
  */
 
 import { test } from 'node:test';
@@ -178,3 +182,123 @@ for (const [answer, word] of [
     }
   });
 }
+
+// ------------------------------------------- a Firstmate worker's summary line
+
+const TASK_ID = 'search-api-12-retry-budget';
+const DOORBELL_TITLE = 'Firstmate operational inbox message';
+
+/**
+ * A first mate holding its lock, a fleet snapshot naming one task, and a worker
+ * in that task's worktree whose transcript opens with Firstmate's doorbell.
+ *
+ * The worker is placed by worktree rather than by tmux window, so neither
+ * renderer needs a tmux server to find it. The snapshot is a script printing
+ * firstmate's own JSON, run by `raise status` and answered by the stand-in
+ * runner for the page.
+ */
+function fleet(dir) {
+  const fmHome = join(dir, 'firstmate');
+  mkdirSync(join(fmHome, 'state'), { recursive: true });
+  mkdirSync(join(fmHome, 'bin'), { recursive: true });
+  // The captain is the session whose own pid is in the lock.
+  writeFileSync(join(fmHome, 'state', '.lock'), `${process.pid}\n`);
+
+  const worktree = join(dir, 'trees', '1', 'search-api');
+  mkdirSync(worktree, { recursive: true });
+
+  const snapshot = JSON.stringify({
+    schema: 'fm-fleet-snapshot.v1',
+    tasks: [
+      {
+        id: TASK_ID,
+        endpoint: { target: `firstmate:fm-${TASK_ID}` },
+        paths: { worktree: { path: worktree } },
+        hints: { open_decisions: [] },
+      },
+    ],
+  });
+  writeFileSync(join(dir, 'snapshot.json'), snapshot);
+  writeFileSync(
+    join(fmHome, 'bin', 'fm-fleet-snapshot.sh'),
+    `#!/bin/sh\ncat '${join(dir, 'snapshot.json')}'\n`,
+    { mode: 0o755 },
+  );
+
+  const transcript = join(dir, 'worker.jsonl');
+  const records = [
+    { type: 'mode', mode: 'normal' },
+    {
+      type: 'user',
+      message: {
+        role: 'user',
+        content: `: Firstmate operational input waiting: read '${fmHome}/state/operational-inbox/1-a.msg' and handle its contents as Firstmate operational input.`,
+      },
+    },
+    { type: 'ai-title', aiTitle: DOORBELL_TITLE },
+  ];
+  writeFileSync(transcript, `${records.map((r) => JSON.stringify(r)).join('\n')}\n`);
+
+  const sessions = [
+    { session_id: 'captain', hook_event_name: 'SessionStart', cwd: fmHome, host: { pid: process.pid } },
+    {
+      session_id: 'worker',
+      hook_event_name: 'SessionStart',
+      cwd: worktree,
+      transcript_path: transcript,
+      host: { pid: process.pid },
+    },
+  ];
+  return { snapshot, sessions };
+}
+
+test("raise status and the page both name a doorbell-started Firstmate worker for its task", async () => {
+  const { dir, cleanup } = scratch();
+  const previousHome = process.env.RAISE_HOME;
+  let monitor = null;
+  try {
+    const { snapshot, sessions } = fleet(dir);
+    const registry = new SessionRegistry({ dir: join(dir, 'sessions') });
+    for (const payload of sessions) registry.record(payload);
+
+    const env = { ...process.env, RAISE_HOME: dir, NM_HOME: dir };
+    for (const name of AGENT_HOMES) env[name] = dir;
+    delete env.RAISE_PORT;
+    const { stdout } = await execFileAsync(process.execPath, [CLI, 'status'], { env });
+    assert.ok(stdout.includes(TASK_ID), `raise status does not name the task:\n${stdout}`);
+    assert.ok(!stdout.includes(DOORBELL_TITLE), `raise status still shows the doorbell title:\n${stdout}`);
+
+    process.env.RAISE_HOME = dir;
+    const port = await freePort();
+    monitor = createMonitorServer({
+      port,
+      token: 'test-token',
+      dbPath: join(dir, 'no-such.sqlite'),
+      sessionsPath: join(dir, 'page-sessions'),
+      exec: () => assert.fail('no blocking commands from the server'),
+      execAsync: async (command) => (command === 'bash' ? snapshot : ''),
+      fetch: () => assert.fail('no outbound requests from the server'),
+    });
+    await monitor.start();
+    for (const payload of sessions) {
+      await fetch(`http://127.0.0.1:${port}/event`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-raise-token': 'test-token' },
+        body: JSON.stringify(payload),
+      });
+    }
+    // Asking is what schedules the snapshot, so the answer lands a tick later.
+    await (await fetch(`http://127.0.0.1:${port}/state?t=test-token`)).json();
+    for (let i = 0; i < 10; i += 1) await nextTick();
+    const body = await (await fetch(`http://127.0.0.1:${port}/state?t=test-token`)).json();
+    const row = body.rows.find((r) => r.sessionId === 'worker');
+    // The page renders `row.summary` as the line under the name, exactly as
+    // `raise status` does - see `public/index.html`.
+    assert.equal(row?.summary, TASK_ID, 'the page');
+  } finally {
+    await monitor?.stop();
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
+    cleanup();
+  }
+});

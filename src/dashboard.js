@@ -48,8 +48,9 @@
  * place of the other.** They describe two things happening at once - you talk
  * to a session while no-mistakes works for it - and the step used to win,
  * erasing what you were working on the moment a pipeline started. `Row.summary`
- * is always the session's own title; `Row.pipeline` is what no-mistakes is
- * doing. See the `Row` typedef.
+ * is always the session's own line - its title, or for a Firstmate worker
+ * started with a doorbell its task id, see `sessionSummary`; `Row.pipeline` is
+ * what no-mistakes is doing. See the `Row` typedef.
  */
 
 import { basename } from 'node:path';
@@ -169,8 +170,10 @@ import { pullRequestKey } from './forge.js';
  * @property {Run|null} run
  * @property {number|null} updatedAt
  * @property {string|null} summary what the session is working on, in Claude's
- *   own words. Never the pipeline step: the two run at once, so the step has
- *   `pipeline` below rather than taking this
+ *   own words - or, for a Firstmate worker whose own words are only the
+ *   doorbell it was started with, firstmate's task id; see `sessionSummary`.
+ *   Never the pipeline step: the two run at once, so the step has `pipeline`
+ *   below rather than taking this
  * @property {Pipeline|null} pipeline what no-mistakes is doing for this row,
  *   which is a different question from what the session is doing
  * @property {boolean} attributable whether this row is a session, or something
@@ -944,6 +947,53 @@ function effectiveSessionState(session, summary, pipelineRunning = false) {
 }
 
 /**
+ * The words Firstmate starts every worker with, up to the record path.
+ *
+ * Firstmate no longer sends a worker its brief as the first prompt. It types a
+ * pointer to a file holding the brief - `: Firstmate operational input waiting:
+ * read '<home>/state/operational-inbox/<id>.msg' and handle its contents as
+ * Firstmate operational input.` - and Claude Code names the session from that
+ * first prompt and never renames it. So every worker's title came out as some
+ * wording of "Firstmate operational inbox message", and with several running
+ * the summary line said the same thing on every row.
+ *
+ * **The prompt is matched rather than the title, because only one of them is
+ * Firstmate's own text.** The title is written by a model, so its wording varies
+ * from session to session; the doorbell is fixed text in Firstmate's
+ * `bin/fm-operational-input.sh` (`FM_OPERATIONAL_DOORBELL_PREFIX`). The leading
+ * `: ` is part of it, and is exactly what lands in the transcript.
+ *
+ * Pinned by a test against the wording a real worker's transcript carries. If
+ * Firstmate ever changes it, every worker quietly goes back to showing its
+ * generated title - wrong, but no worse than before - and that test is the
+ * place to notice it.
+ */
+export const FIRSTMATE_DOORBELL = ': Firstmate operational input waiting:';
+
+/**
+ * The line a session's card carries under its name.
+ *
+ * Claude Code's own title, except for a Firstmate worker whose first prompt was
+ * the doorbell: that title only ever describes the doorbell, so the row shows
+ * the id firstmate gave the task (`raise-30-draft-pr-state`) instead. The id
+ * comes off the fleet snapshot this file already joins against, never out of
+ * the brief, whose format belongs to Firstmate.
+ *
+ * Both halves are required. A session whose first prompt was anything else
+ * keeps its title, however it reads, because a title a person or a brief
+ * prompted says something; and a worker with no task placed on it keeps its
+ * title too, because a name we cannot place belongs to nobody.
+ *
+ * @param {import('./transcript.js').TranscriptSummary|null} summary
+ * @param {string|null} taskId the firstmate task placed on this session
+ * @returns {string|null}
+ */
+export function sessionSummary(summary, taskId) {
+  if (taskId && summary?.firstPrompt?.startsWith(FIRSTMATE_DOORBELL)) return taskId;
+  return summary?.title || null;
+}
+
+/**
  * The terminal statuses that mean nothing is waiting on you.
  *
  * `completed` is a run that passed and `cancelled` is one you stopped, so in
@@ -1268,6 +1318,13 @@ export function buildRows({
   }
   /** @type {Map<string, Decision[]>} */
   const sessionDecisions = new Map();
+  /**
+   * The task placed on each session, under the same rules that place its
+   * decisions, so a row is never named for a task it could not be given.
+   *
+   * @type {Map<string, string>}
+   */
+  const sessionTasks = new Map();
   /** @type {Set<string>} */
   const placedTasks = new Set();
   for (const { task, window, worktree } of taskClaims.values()) {
@@ -1277,6 +1334,7 @@ export function buildRows({
     // once, dropped never.
     if (claimants.length !== 1) continue;
     placedTasks.add(task.id);
+    sessionTasks.set(claimants[0], task.id);
     if (task.decisions.length > 0) sessionDecisions.set(claimants[0], task.decisions);
   }
   const unplacedDecisions = decisions
@@ -1471,7 +1529,7 @@ export function buildRows({
       // talk to a session while no-mistakes runs for it, so the moment the
       // pipeline started you lost sight of what you had been doing. The
       // pipeline gets `pipeline` below and a line of its own.
-      summary: summary?.title || null,
+      summary: sessionSummary(summary, sessionTasks.get(session.sessionId) || null),
       pipeline: pipelineFor(run, agent),
       // A session card is always attributable - it *is* the attribution.
       attributable: true,
