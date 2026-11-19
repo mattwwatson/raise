@@ -71,29 +71,29 @@ function files(initial = {}) {
 /** The live tmux server this machine runs, as read off it on 07/08/2026. */
 const PANES = [
   '%0\tFirst Mate',
-  '%358\tfm-sls-87-push-subscription-ownership',
-  '%359\tfm-sls-89-deploy-unpinned-install',
-  '%330\thandoff-sls-75-4d7a',
+  '%358\tfm-pay-87-retry-backoff',
+  '%359\tfm-pay-89-pin-deploy-tool',
+  '%330\thandoff-pay-75-4d7a',
   '%323\tzsh',
 ].join('\n');
 
 test('a window name firstmate pinned is crew, and one that merely starts alike is not', () => {
-  assert.equal(isCrewWindowName('fm-sls-89-deploy-unpinned-install'), true);
+  assert.equal(isCrewWindowName('fm-pay-89-pin-deploy-tool'), true);
   // The prefix on its own is a window somebody called that, not `fm-<id>`.
   assert.equal(isCrewWindowName('fm-'), false);
   assert.equal(isCrewWindowName(''), false);
   assert.equal(isCrewWindowName(null), false);
   // The two names this whole item exists to keep apart.
-  assert.equal(isCrewWindowName('handoff-sls-75-4d7a'), false);
+  assert.equal(isCrewWindowName('handoff-pay-75-4d7a'), false);
   assert.equal(isCrewWindowName('First Mate'), false);
 });
 
 test('a linked window is emitted once per session and reads the same every time', () => {
   // tmux lists a window linked into two sessions twice, and a window name is a
   // property of the window rather than of whoever is looking at it.
-  const names = parsePaneWindowNames('%330\thandoff-sls-75-4d7a\n%330\thandoff-sls-75-4d7a\n');
+  const names = parsePaneWindowNames('%330\thandoff-pay-75-4d7a\n%330\thandoff-pay-75-4d7a\n');
   assert.equal(names.size, 1);
-  assert.equal(names.get('%330'), 'handoff-sls-75-4d7a');
+  assert.equal(names.get('%330'), 'handoff-pay-75-4d7a');
 });
 
 test('a window name containing a tab keeps all of it', () => {

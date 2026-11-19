@@ -21,7 +21,7 @@ Caught live, two at once:
 
 ```
 work/firstmate     state=blocked  for=5s     type=idle_prompt  "Claude is waiting for your input"
-1/sls-scheduling   state=blocked  for=749s   type=idle_prompt  "Claude is waiting for your input"
+1/payments         state=blocked  for=749s   type=idle_prompt  "Claude is waiting for your input"
 ```
 
 Both are `idle_prompt` - Claude Code's **idle nudge**, fired after sixty seconds of quiet - and

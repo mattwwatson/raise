@@ -1149,8 +1149,8 @@ test('a firstmate crewmate is marked on the page, and its neighbours are not', a
 
     const panes = [
       '%0\tFirst Mate',
-      '%358\tfm-sls-87-push-subscription-ownership',
-      '%330\thandoff-sls-75-4d7a',
+      '%358\tfm-pay-87-retry-backoff',
+      '%330\thandoff-pay-75-4d7a',
     ].join('\n');
 
     const port = await freePort();

@@ -37,8 +37,8 @@ the moment either constant moved.
 Two rulings showed on the board. Asked directly, firstmate said:
 
 ```
-sls-129-agents-md-size      state=working  source=run-step   open_decisions=0
-sls-135-help-ask-on-patrol  state=parked   source=run-step   open_decisions=1
+pay-129-agents-md-size      state=working  source=run-step   open_decisions=0
+pay-135-refund-reminder     state=parked   source=run-step   open_decisions=1
 ```
 
 The board showed **both** as waiting, and `2` on the captain's row. The crewmate had resumed and

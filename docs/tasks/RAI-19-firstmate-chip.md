@@ -56,9 +56,9 @@ Read live, with two crewmates running:
 
 ```
 firstmate | win 0 | name=[First Mate]                             <- the captain
-firstmate | win 1 | name=[fm-sls-87-push-subscription-ownership]  <- crew
-firstmate | win 2 | name=[fm-sls-89-deploy-unpinned-install]      <- crew
-handoff   | win 1 | name=[handoff-sls-75-4d7a]                    <- not crew
+firstmate | win 1 | name=[fm-pay-87-retry-backoff]  <- crew
+firstmate | win 2 | name=[fm-pay-89-pin-deploy-tool]      <- crew
+handoff   | win 1 | name=[handoff-pay-75-4d7a]                    <- not crew
 ```
 
 Three things, one field. Note the container **session** name is not the signal: the captain and
@@ -72,7 +72,7 @@ The captain's window name is **not** equally trustworthy. Read from the live ser
 
 | Window | `automatic-rename` | `allow-rename` |
 | --- | --- | --- |
-| crew (`fm-sls-87-…`) | off | **off** |
+| crew (`fm-pay-87-…`) | off | **off** |
 | captain (`First Mate`) | off | *on* |
 
 `allow-rename` is what stops the program inside the pane retitling the window by escape
@@ -120,7 +120,7 @@ secondmates apart would mean reading `state/<id>.meta`, a much larger commitment
 private layout than a window name and a pid file, for a distinction nobody has wanted.
 
 **Titles do not change.** A crewmate already gets a readable pseudo-title
-(`sls-89-pin-deploy-tool-install`) and a manual `/rename` already reaches the card, so it is
+(`pay-89-pin-deploy-tool`) and a manual `/rename` already reaches the card, so it is
 already consistent with every other session. This ticket adds a chip and touches nothing else.
 
 ---
@@ -191,5 +191,5 @@ absence guard so `tmux` joins `no-mistakes` and `lavish-axi` as a command that m
 session with no pane. 633 tests, lint and typecheck green.
 
 Verified against the live installation this was written on: `%360 fm-rai-19-firstmate-chip` chips,
-`%330 handoff-sls-75-4d7a` does not, and the captain's `First Mate` window - whose `allow-rename`
+`%330 handoff-pay-75-4d7a` does not, and the captain's `First Mate` window - whose `allow-rename`
 really is on - is identified by its lock rather than its name.

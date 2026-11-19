@@ -22,8 +22,8 @@ card is not blank and it is not stale; it is confidently wrong about who is hold
 
 ### The case that produced it
 
-On 26/08/2026, `2/money-webapp` carried
-[money-webapp#319](https://bitbucket.org/moroku/money-webapp/pull-requests/319). Bitbucket's
+On 26/08/2026, `2/search-api` carried
+[search-api#319](https://bitbucket.org/example-team/search-api/pull-requests/319). Bitbucket's
 own answer for it:
 
 ```json
@@ -31,7 +31,7 @@ own answer for it:
 ```
 
 Raise had it as `open`. The sibling row's
-[#320](https://bitbucket.org/moroku/money-webapp/pull-requests/320) is `"state": "OPEN",
+[#320](https://bitbucket.org/example-team/search-api/pull-requests/320) is `"state": "OPEN",
 "draft": false` and is genuinely awaiting a reviewer's approval. The two rows read identically
 and mean different things.
 

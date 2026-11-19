@@ -41,14 +41,15 @@ the range of terminals Raise supports without saying so:
 | --- | --- | --- |
 | A Firstmate session, so its task label shows | Firstmate (the upstream home) | Herdr |
 | A worker with a no-mistakes pipeline running, so its `NO-MISTAKES` line shows | raise | Ghostty |
-| A session doing ordinary work | hexbattle | iTerm2, inside tmux |
-| **The one that stops and waits for an answer** | sls-scheduling | Herdr or Ghostty - pick whichever focus looks clearest on screen |
+| A session doing ordinary work | another of the maintainer's projects | iTerm2, inside tmux |
+| **The one that stops and waits for an answer** | a third project | Herdr or Ghostty - pick whichever focus looks clearest on screen |
 
 Which session does what can be swapped while rehearsing; the requirement is that the four
 terminals and both optional signals (Firstmate, no-mistakes) appear.
 
-**Not in shot, ever:** basicaccounting, cto-plan, any Moroku or client repo, and anything
-outside these four repos.
+**Not in shot, ever:** any work or client repository, any project whose content is not safe
+to publish, and anything outside these four repositories. Which private projects appear is
+decided outside this repository.
 
 ## The loop, beat by beat
 
@@ -71,8 +72,8 @@ outside these four repos.
 - **Everything visible is publishable.** Row titles show branch names, and the expanded panel
   shows conversation text. Every prompt, branch name, file name and terminal line in shot must
   be safe to publish:
-  - sls-scheduling: give its session a task on code. Nothing about the club's members (names,
-    phone numbers, emails) may appear anywhere on screen.
+  - The private projects in shot: give their sessions tasks on code, not data. Nothing about a
+    real person (names, phone numbers, emails) may appear anywhere on screen.
   - No tokens, no account names, no client names, no notifications from other apps. Turn on Do
     Not Disturb and hide the menu-bar items that show personal details.
 

@@ -243,10 +243,10 @@ test('parseClients reads the session and displayed window, not just the tty', ()
 
 test('parsePaneSessions reports every session a linked window belongs to', () => {
   assert.deepEqual(
-    parsePaneSessions(['%356\t$191\t@349\t5\thv-sls-75', '%356\t$204\t@349\t1\thv-sls-86'].join('\n')),
+    parsePaneSessions(['%356\t$191\t@349\t5\thv-pay-75', '%356\t$204\t@349\t1\thv-pay-86'].join('\n')),
     [
-      { paneId: '%356', sessionId: '$191', windowId: '@349', windowCount: 5, sessionName: 'hv-sls-75' },
-      { paneId: '%356', sessionId: '$204', windowId: '@349', windowCount: 1, sessionName: 'hv-sls-86' },
+      { paneId: '%356', sessionId: '$191', windowId: '@349', windowCount: 5, sessionName: 'hv-pay-75' },
+      { paneId: '%356', sessionId: '$204', windowId: '@349', windowCount: 1, sessionName: 'hv-pay-86' },
     ],
   );
 });
@@ -357,15 +357,15 @@ test('resolveTmuxTarget reports a detached session with an attach hint', async (
 });
 
 test('the attach hint stays pasteable when the session name has a space in it', async () => {
-  // A bell plugin renames sessions to `hv-sls-86-fb9d 🔔` on this machine.
+  // A bell plugin renames sessions to `hv-pay-86-fb9d 🔔` on this machine.
   // Unquoted that is two arguments, and tmux answers it by prefix-matching
   // some other session entirely.
   const exec = fakeExec({
-    'list-panes': '%356\t$204\t@349\t1\thv-sls-86-fb9d 🔔',
+    'list-panes': '%356\t$204\t@349\t1\thv-pay-86-fb9d 🔔',
     'list-clients': '',
   });
   const result = await resolveTmuxTarget(exec, { pane: '%356', tmuxEnv: null });
-  assert.equal(result.hint, "tmux attach -t 'hv-sls-86-fb9d 🔔'");
+  assert.equal(result.hint, "tmux attach -t 'hv-pay-86-fb9d 🔔'");
 });
 
 test('a detached pane in two sessions names the one dedicated to it', async () => {
@@ -533,9 +533,9 @@ test('focusSession raises the viewer session, not the parent a linked window als
   // last active, so the fixture below is the ranking, not tmux's mood.
   const exec = fakeExec({
     'list-panes': [
-      '%356\t$191\t@349\t5\thv-sls-75-4d7a 🔔',
-      '%356\t$204\t@349\t1\thv-sls-86-fb9d 🔔',
-      '%350\t$191\t@343\t5\thv-sls-75-4d7a 🔔',
+      '%356\t$191\t@349\t5\thv-pay-75-4d7a 🔔',
+      '%356\t$204\t@349\t1\thv-pay-86-fb9d 🔔',
+      '%350\t$191\t@343\t5\thv-pay-75-4d7a 🔔',
     ].join('\n'),
     'list-clients': ['/dev/ttys018\t0\t$191\t@343', '/dev/ttys035\t0\t$204\t@349'].join('\n'),
     'select-window': '',
@@ -561,7 +561,7 @@ test('focusSession raises the viewer session, not the parent a linked window als
 
   assert.equal(result.ok, true);
   assert.deepEqual(focused, [{ sessionUuid: null, tty: '/dev/ttys035' }]);
-  assert.equal(result.tmuxSession, 'hv-sls-86-fb9d 🔔');
+  assert.equal(result.tmuxSession, 'hv-pay-86-fb9d 🔔');
   // Aimed at one session by id, so nothing else moves. Run even though ttys035
   // already displays @349: tmux makes that a no-op, and a flag to skip it would
   // be state to keep true.
