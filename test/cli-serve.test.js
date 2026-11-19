@@ -269,6 +269,10 @@ test("the page and `raise status` agree on leaving out Firstmate's supervision s
       join(project, 'supervision.jsonl'),
       transcript('supervising the fleet', 'MAIN DIALOG MIRROR (read-only context: ...):\n\nFIRSTMATE SUPERVISION WAKE: x', 'sdk-cli'),
     );
+    writeFileSync(
+      join(project, 'away.jsonl'),
+      transcript('supervising while away', 'FIRSTMATE SUPERVISION WAKE: x', 'sdk-cli'),
+    );
     writeFileSync(join(project, 'captain.jsonl'), transcript('captain at the helm', 'Pick up the next item', 'cli'));
     writeFileSync(join(project, 'headless.jsonl'), transcript('a scripted check', 'Summarise the build', 'sdk-cli'));
 
@@ -279,7 +283,7 @@ test("the page and `raise status` agree on leaving out Firstmate's supervision s
     const { code, stdout } = await cli(['status'], dir, { NM_HOME: join(dir, 'no-mistakes') });
     assert.equal(code, 0, stdout);
     for (const title of expected) assert.ok(stdout.includes(title), `missing ${title}:\n${stdout}`);
-    assert.ok(!stdout.includes('supervising the fleet'), `the supervision session is listed:\n${stdout}`);
+    assert.ok(!stdout.includes('supervising'), `a supervision session is listed:\n${stdout}`);
 
     const port = await freePort();
     await withMonitor(dir, port, async () => {

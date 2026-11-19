@@ -234,7 +234,7 @@ export function isPipelineWorktree(cwd, nmHome) {
 }
 
 /**
- * The fixed text Firstmate opens its supervision session's first prompt with.
+ * The fixed texts Firstmate opens its supervision session's prompts with.
  *
  * That session is a headless `claude -p --safe-mode` run Firstmate starts in its
  * own home to watch its workers between the captain's turns. Safe mode loads no
@@ -250,12 +250,23 @@ export function isPipelineWorktree(cwd, nmHome) {
  * headless or SDK run, some of which are sessions somebody does want to see. The
  * prefix is the one thing only this session carries.
  *
- * It is Firstmate's text, not ours - `MAIN_DIALOG_MIRROR_HEADER` in its
- * `.pi/extensions/lib/fm-branch-dispatch.ts` - so `test/untracked.test.js` pins
- * it. If Firstmate rewords it, the row comes back; the pinned test is where to
+ * **Two prefixes, because one Firstmate function writes either.** Every wake
+ * prompt comes from `branchWakePrompt` in Firstmate's
+ * `.pi/extensions/lib/fm-branch-dispatch.ts`. It opens with the dialog mirror's
+ * header, `MAIN_DIALOG_MIRROR_HEADER`, only when there is a mirror to carry - an
+ * attended wake on which something new was said. Otherwise, on an away wake or
+ * when nothing new was said, the prompt opens `FIRSTMATE SUPERVISION WAKE: `. A
+ * session's first wake can be either, so matching only the first would leave
+ * the row on the page for exactly the sessions that started without a mirror.
+ *
+ * Both are Firstmate's text, not ours, so `test/untracked.test.js` pins them. If
+ * Firstmate rewords either, the row comes back; the pinned test is where to
  * look, and changing it is a deliberate act rather than a silent drift.
  */
-export const FIRSTMATE_SUPERVISION_PROMPT = 'MAIN DIALOG MIRROR';
+export const FIRSTMATE_SUPERVISION_PROMPTS = Object.freeze([
+  'MAIN DIALOG MIRROR',
+  'FIRSTMATE SUPERVISION WAKE:',
+]);
 
 /**
  * The text of the first prompt a person (or a harness) typed into a Claude Code
@@ -284,14 +295,15 @@ export function firstPrompt(records) {
 }
 
 /**
- * Whether a first prompt is the one Firstmate starts its supervision session
- * with. See `FIRSTMATE_SUPERVISION_PROMPT`.
+ * Whether a first prompt is one Firstmate starts its supervision session
+ * with. See `FIRSTMATE_SUPERVISION_PROMPTS`.
  *
  * @param {string|null} prompt
  * @returns {boolean}
  */
 export function isFirstmateSupervisionPrompt(prompt) {
-  return typeof prompt === 'string' && prompt.startsWith(FIRSTMATE_SUPERVISION_PROMPT);
+  if (typeof prompt !== 'string') return false;
+  return FIRSTMATE_SUPERVISION_PROMPTS.some((prefix) => prompt.startsWith(prefix));
 }
 
 export class UntrackedScan {

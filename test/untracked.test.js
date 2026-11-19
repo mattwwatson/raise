@@ -7,7 +7,7 @@ import {
   isPipelineWorktree,
   firstPrompt,
   isFirstmateSupervisionPrompt,
-  FIRSTMATE_SUPERVISION_PROMPT,
+  FIRSTMATE_SUPERVISION_PROMPTS,
   HEAD_BYTES,
   UNTRACKED_WINDOW_MS,
   SCAN_INTERVAL_MS,
@@ -459,20 +459,31 @@ const headlessTranscript = (cwd, prompt, entrypoint = 'sdk-cli') =>
 
 const supervisionPrompt = `${MIRROR_HEADER}\n[captain] merge it when green\n\nFIRSTMATE SUPERVISION WAKE: one status line`;
 
-test('the supervision prefix is pinned to the text Firstmate writes', () => {
-  // Firstmate's text, not ours: `MAIN_DIALOG_MIRROR_HEADER` in its
-  // `.pi/extensions/lib/fm-branch-dispatch.ts`. If this fails because Firstmate
-  // reworded its header, the supervision session's row is back on the page, and
-  // the fix is to follow the new wording here and in `untracked.js` together.
-  assert.equal(FIRSTMATE_SUPERVISION_PROMPT, 'MAIN DIALOG MIRROR');
-  assert.ok(MIRROR_HEADER.startsWith(FIRSTMATE_SUPERVISION_PROMPT));
+/** The same wake with no mirror to carry: away, or nothing new was said. */
+const wakeOnlyPrompt = 'FIRSTMATE SUPERVISION WAKE: one status line\n\nHandle this per your operating procedure';
+
+test('the supervision prefixes are pinned to the text Firstmate writes', () => {
+  // Firstmate's text, not ours. Both come from `branchWakePrompt` in its
+  // `.pi/extensions/lib/fm-branch-dispatch.ts`: the mirror header
+  // (`MAIN_DIALOG_MIRROR_HEADER`) when the wake carries a mirror, and the wake
+  // line on its own when it does not. If this fails because Firstmate reworded
+  // either, the supervision session's row is back on the page, and the fix is to
+  // follow the new wording here and in `untracked.js` together.
+  assert.deepEqual(FIRSTMATE_SUPERVISION_PROMPTS, ['MAIN DIALOG MIRROR', 'FIRSTMATE SUPERVISION WAKE:']);
+  assert.ok(MIRROR_HEADER.startsWith(FIRSTMATE_SUPERVISION_PROMPTS[0]));
   assert.equal(isFirstmateSupervisionPrompt(supervisionPrompt), true);
+  assert.equal(isFirstmateSupervisionPrompt(wakeOnlyPrompt), true);
 });
 
 test("Firstmate's supervision session is left out of the untracked rows", () => {
   const { scanner } = scan({
     '/home/.claude/projects/-home-firstmate/sup.jsonl': {
       text: headlessTranscript('/home/firstmate', supervisionPrompt),
+      mtimeMs: NOW - 1000,
+    },
+    // A session whose first wake carried no mirror opens with the wake line.
+    '/home/.claude/projects/-home-firstmate/away.jsonl': {
+      text: headlessTranscript('/home/firstmate', wakeOnlyPrompt),
       mtimeMs: NOW - 1000,
     },
   });
@@ -494,7 +505,7 @@ test('a headless run with any other first prompt still appears', () => {
 test('the prefix only counts at the start of the first prompt', () => {
   // The captain's own Firstmate session can quote the header - this very issue
   // did - and a session that quotes it is still a session a person has open.
-  const quoted = `Why does ${FIRSTMATE_SUPERVISION_PROMPT} show up on the page?`;
+  const quoted = `Why does ${FIRSTMATE_SUPERVISION_PROMPTS[0]} show up on the page?`;
   const later = jsonl(
     { type: 'user', cwd: '/a/repo', message: { role: 'user', content: 'hello' } },
     { type: 'user', cwd: '/a/repo', message: { role: 'user', content: supervisionPrompt } },
