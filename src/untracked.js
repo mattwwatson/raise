@@ -80,11 +80,12 @@ export const SCAN_INTERVAL_MS = 30000;
 
 /**
  * How much of the head of a transcript to read when the tail did not name a
- * working directory.
+ * working directory, and to find a Claude Code transcript's first prompt.
  *
  * Codex writes its `cwd` once, in the `session_meta` on line 1, and that line
  * measured 18.6KB because it carries the base instructions. 64KB is three and a
- * half times that. pi's equivalent line is about 160 bytes.
+ * half times that. pi's equivalent line is about 160 bytes. The first-prompt
+ * measurement is at `#isFirstmateSupervision`.
  */
 export const HEAD_BYTES = 64 * 1024;
 
