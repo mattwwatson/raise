@@ -249,8 +249,8 @@ recipe destroyed a credential), and a terminal name is not a secret, so the reas
 the file, or writes the one running supported terminal, and refuses with several or none
 running. An unknown name is refused. The choice is the pure `chooseNewTabTerminal` in
 `src/focus/new-tab.js`, tested directly, because which terminals are running is the machine's
-answer and the CLI tests must not depend on it. An argument to any other `enable` or `disable`
-is now refused too, rather than ignored, because an ignored word is a typo that succeeded.
+answer and the CLI tests must not depend on it. Every other `enable` and `disable` ignores any
+further argument, as it did before.
 
 **Terminal.app opens a new window, not a tab.** This is the one place the build differs from
 *Where: a new tab in the front window*, and it is forced: Terminal.app's dictionary has no way
@@ -313,9 +313,11 @@ server also runs, opens in a tab on the first click, and the next click gets the
 refusal rather than raising that tab, because `hc attach t6` does not say which server's `t6`
 it is. That is the existing two-server rule, unchanged, and better than a new tab per click.
 
-**Step 3 is skipped, not reordered.** `showInHerdrApp` gained `borrow: false`, which stops at
-`pane.focus`. With the setting on, the app's own pane for the terminal still wins, and the
-focused pane is never borrowed.
+**Step 3 waits for the tab, rather than being skipped.** `showInHerdrApp` gained
+`borrow: false`, which stops at `pane.focus`. With the setting on, the app's own pane for the
+terminal still wins, and the focused pane is borrowed only when the tab fails to open - so a
+failed tab gives the same answer as the setting off, rather than a refusal where the app would
+have shown it.
 
 **Read at click time.** `server.js` and `raise focus` read the setting with
 `newTabFrom(readUserConfig())` on every click, so `focus/` takes it as a parameter and stays

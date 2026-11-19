@@ -818,9 +818,9 @@ name.
 
 The tab opens in the terminal's front window, or in a new window if it has none, and a terminal
 that is not running is started - you named it. **Terminal.app opens a new window rather than a
-tab**, so if you would rather have a new tab, use iTerm2 or Ghostty. Its scripting dictionary has no way to make a tab, short of sending it Cmd-T through
-System Events, which needs the Accessibility permission and lands in whichever window is in
-front. A new tmux client resizes the session to its own tab, which is tmux's default
+tab**, so if you would rather have a new tab, use iTerm2 or Ghostty. Its scripting dictionary
+has no way to make a tab, short of sending it Cmd-T through System Events, which needs the
+Accessibility permission and lands in whichever window is in front. A new tmux client resizes the session to its own tab, which is tmux's default
 (`window-size latest`).
 
 It is a fallback, after everything that already shows the session:
