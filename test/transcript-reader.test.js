@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { TranscriptReader } from '../src/transcript-reader.js';
+import { OPENING_BYTES, TAIL_BYTES } from '../src/transcript.js';
 
 /**
  * A fake filesystem that counts reads, so the cache can be asserted on directly
@@ -29,6 +30,9 @@ function fakeFiles(initial = {}) {
         if (!file) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
         reads.count += 1;
         return { text: file.text, partial: false };
+      },
+      readHead() {
+        throw new Error('a tail holding the whole file never needs the head');
       },
     },
   };
@@ -231,4 +235,93 @@ test('a Codex rollout is read with its own parser and no other', () => {
   // is the silent wrong answer the agent key on the cache exists to prevent.
   assert.equal(reader.read('/codex.jsonl', null, 'claude').activity, null);
   assert.equal(reader.read('/codex.jsonl', null, 'pi').activity, null);
+});
+
+// ------------------------------------------------------------- first prompt
+
+/**
+ * A transcript too long for its tail to reach the start, described by its head
+ * and its tail rather than by bytes, with every head read counted.
+ */
+function longFile({ head, tail = '', size = TAIL_BYTES * 4 }) {
+  const state = { head, tail, size, mtimeMs: 100, heads: 0 };
+  return {
+    state,
+    access: {
+      stat: () => ({ size: state.size, mtimeMs: state.mtimeMs }),
+      readTail: () => ({ text: `cut-in-half\n${state.tail}`, partial: true }),
+      readHead: (_path, bytes) => {
+        state.heads += 1;
+        assert.equal(bytes, OPENING_BYTES);
+        return state.head;
+      },
+    },
+  };
+}
+
+const prompt = (text) => line({ type: 'user', message: { role: 'user', content: text } });
+
+test('a short transcript gives its first prompt from the tail it already read', () => {
+  const files = fakeFiles();
+  files.set('/t.jsonl', `${line({ type: 'mode', mode: 'normal' })}${prompt('first')}${prompt('second')}`, 100);
+  const reader = new TranscriptReader({ files: files.access });
+  assert.equal(reader.read('/t.jsonl').firstPrompt, 'first');
+});
+
+test('a long transcript reads its head for the first prompt, once for the life of the file', () => {
+  // The tail of a long session holds nothing from its start. The head is read
+  // the first time and never again: a transcript is only appended to, so the
+  // first prompt cannot change however often the file moves.
+  const file = longFile({
+    head: `${line({ type: 'mode', mode: 'normal' })}${prompt('the opening ask')}`,
+    tail: `${line({ type: 'ai-title', aiTitle: 'a title' })}${prompt('a later ask')}`,
+  });
+  const reader = new TranscriptReader({ files: file.access });
+  const summary = reader.read('/long.jsonl');
+  assert.equal(summary.firstPrompt, 'the opening ask');
+  assert.equal(summary.title, 'a title');
+
+  file.state.mtimeMs = 200;
+  file.state.size += 10;
+  assert.equal(reader.read('/long.jsonl').firstPrompt, 'the opening ask');
+  assert.equal(file.state.heads, 1);
+});
+
+test('a first prompt cut off by the head window is unknown, not the prompt after it', () => {
+  // A full window with no complete prompt in it is settled as unknown: the
+  // record that was cut is the first prompt, and nothing later is in the window
+  // to be mistaken for it.
+  const file = longFile({
+    head: `${line({ type: 'mode', mode: 'normal' })}{"type":"user","message":{"content":"a brief tha`,
+  });
+  const reader = new TranscriptReader({ files: file.access });
+  assert.equal(reader.read('/long.jsonl').firstPrompt, null);
+  file.state.mtimeMs = 200;
+  assert.equal(reader.read('/long.jsonl').firstPrompt, null);
+  assert.equal(file.state.heads, 1);
+});
+
+test('a short transcript with no prompt yet is asked again when it moves', () => {
+  // Nothing has been typed yet, which is not the same as nothing ever will be.
+  const files = fakeFiles();
+  files.set('/t.jsonl', line({ type: 'mode', mode: 'normal' }), 100);
+  const reader = new TranscriptReader({ files: files.access });
+  assert.equal(reader.read('/t.jsonl').firstPrompt, null);
+
+  files.set('/t.jsonl', `${line({ type: 'mode', mode: 'normal' })}${prompt('now')}`, 200);
+  assert.equal(reader.read('/t.jsonl').firstPrompt, 'now');
+});
+
+test('a head that will not read says nothing, and is tried again', () => {
+  const file = longFile({ head: prompt('the opening ask') });
+  const readHead = file.access.readHead;
+  file.access.readHead = () => {
+    throw new Error('EIO');
+  };
+  const reader = new TranscriptReader({ files: file.access });
+  assert.equal(reader.read('/long.jsonl').firstPrompt, null);
+
+  file.access.readHead = readHead;
+  file.state.mtimeMs = 200;
+  assert.equal(reader.read('/long.jsonl').firstPrompt, 'the opening ask');
 });

@@ -11,6 +11,8 @@ import {
   EVENT_TEXT_CHARS,
   pullRequestFromRecords,
   lastActivityAt,
+  firstPrompt,
+  FIRST_PROMPT_CHARS,
 } from '../src/transcript.js';
 
 const jsonl = (...records) => records.map((r) => JSON.stringify(r)).join('\n');
@@ -187,6 +189,7 @@ test('summariseTranscript claims nothing about an empty transcript', () => {
     lavishFile: null,
     lastActivityAt: null,
     pullRequest: null,
+    firstPrompt: null,
   });
 });
 
@@ -489,4 +492,36 @@ test('a granted permission is still disproved by the work that follows', () => {
     { type: 'assistant', timestamp: '2026-08-03T06:05:00.000Z', message: { content: [] } },
   ];
   assert.equal(lastActivityAt(records), Date.parse('2026-08-03T06:05:00.000Z'));
+});
+
+// ---------------------------------------------------------------- firstPrompt
+
+test('firstPrompt is the first thing a person said, not the bookkeeping before it', () => {
+  // Claude Code writes mode, snapshot and attachment records before the first
+  // prompt, and puts a slash command's caveat block through the `user` role.
+  // None of those is somebody speaking.
+  const records = parseTranscriptTail(
+    jsonl(
+      { type: 'mode', mode: 'normal' },
+      { type: 'attachment', attachment: { type: 'skill_listing' } },
+      { type: 'user', isMeta: true, message: { content: 'Caveat: injected' } },
+      { type: 'user', message: { content: '<command-name>/clear</command-name>' } },
+      { type: 'user', message: { content: '  fix the flaky retry test  ' } },
+      { type: 'user', message: { content: 'and then the docs' } },
+    ),
+    false,
+  );
+  assert.equal(firstPrompt(records), 'fix the flaky retry test');
+});
+
+test('firstPrompt is null when nobody has said anything yet', () => {
+  const records = parseTranscriptTail(jsonl({ type: 'mode', mode: 'normal' }), false);
+  assert.equal(firstPrompt(records), null);
+});
+
+test('firstPrompt keeps only the start of a long prompt', () => {
+  // It is only ever asked how it starts, so a pasted brief is not carried whole.
+  const brief = 'x'.repeat(FIRST_PROMPT_CHARS * 50);
+  const records = parseTranscriptTail(jsonl({ type: 'user', message: { content: brief } }), false);
+  assert.equal(firstPrompt(records), 'x'.repeat(FIRST_PROMPT_CHARS));
 });
