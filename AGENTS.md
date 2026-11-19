@@ -326,6 +326,7 @@ stratified on purpose, so read the whole file rather than one section.
 | an observation time may never be substituted for a run's `updatedAt` | `src/dashboard.js` (`pullRequestForRun`) |
 | a record listing several pull requests is not a sighting; the database is the negative authority | `src/dashboard.js` (`transcriptPullRequest`) |
 | the forge asserts, ages through the same gate, `merged` is exempt, and it may never leave a row less current | `src/dashboard.js` (`withForgeState`) |
+| only the forge may say `draft`; a local `draft` is read as `open` | `src/dashboard.js` (`withForgeState`) |
 | a failed lookup drops the previous reading; cadence and the two caches | `src/forge.js` |
 | timestamps come from the caller's clock at dispatch, never `Date.now()` on return | `src/forge.js` |
 | the Bitbucket credential lives in a `0600` file and never in the environment | `src/forge-config.js` |

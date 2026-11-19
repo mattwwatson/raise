@@ -84,7 +84,8 @@ import { basename } from 'node:path';
  * @typedef {object} PullRequest
  * @property {string} url
  * @property {number|null} number parsed from the URL, null if it has no tail
- * @property {string|null} state no-mistakes' word: open, merged, closed, none
+ * @property {string|null} state no-mistakes' word: open, merged, closed, none -
+ *   or `draft`, which only a forge reading may put here (see `withForgeState`)
  * @property {number|null} observedAt epoch ms the state was last checked
  * @property {string|null} branch the branch it was opened from
  * @property {string} repoPath

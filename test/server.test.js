@@ -1705,7 +1705,7 @@ test('with it on, the forge settles a pull request nothing else was watching', a
 
     const body = await (await fetch(`http://127.0.0.1:${port}/state?t=test-token`)).json();
     const row = body.rows.find((r) => r.sessionId === 'watched');
-    assert.deepEqual(ran, [['pr', 'view', url, '--json', 'state']]);
+    assert.deepEqual(ran, [['pr', 'view', url, '--json', 'state,isDraft']]);
     assert.equal(row.pr.state, 'merged');
     assert.equal(row.pr.current, true, 'and now it may be said as the state now');
   } finally {
