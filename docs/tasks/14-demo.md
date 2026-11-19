@@ -71,9 +71,9 @@ outside these four repos.
 - **Everything visible is publishable.** Row titles show branch names, and the expanded panel
   shows conversation text. Every prompt, branch name, file name and terminal line in shot must
   be safe to publish:
-  - sls-scheduling: its checkout holds untracked member data (`surfgurad/`, `dev-downloads/`).
-    The session in shot must not read or show it, and no member name, phone number or email may
-    appear anywhere on screen. Give it a task on code, not data.
+  - sls-scheduling: real member data lives outside the repository, in a separate directory on
+    the Mac. The session in shot must not read or show it, and no member name, phone number or
+    email may appear anywhere on screen. Give it a task on code, not data.
   - No tokens, no account names, no client names, no notifications from other apps. Turn on Do
     Not Disturb and hide the menu-bar items that show personal details.
 
