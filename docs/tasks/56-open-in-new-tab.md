@@ -143,7 +143,8 @@ once, in `src/focus/applescript.js`:
 
 - **iTerm2:** `create tab with default profile command "..."` on the current window, or
   `create window with default profile command "..."` when it has none.
-- **Terminal.app:** `do script "..."` in a new tab, or a new window when there is none.
+- **Terminal.app:** `do script "..."`, which opens a new window. Its dictionary cannot make a
+  tab without System Events and the Accessibility permission; see the Implementation notes.
 - **Ghostty 1.4:** `new tab` (or `new window`) with a `surface configuration` whose `command`
   is the attach command. Checked on 19/11/2026 against the `Ghostty.sdef` shipped in 1.4.0,
   which has `new tab`, `new window`, `new surface configuration` and a `command` property. Check

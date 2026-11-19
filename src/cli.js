@@ -796,9 +796,9 @@ async function runningNewTabTerminals() {
  * when several terminals are running and telling the user to edit the file by
  * hand - is the hand-editing these commands exist to replace. Without the
  * argument it keeps the terminal already written, or writes the one supported
- * terminal that is running; see `chooseNewTabTerminal`. An argument anywhere
- * else is refused, because a word the command ignored would be a typo that
- * succeeded.
+ * terminal that is running; see `chooseNewTabTerminal`, which also refuses a
+ * terminal it does not know. Every other command ignores any further argument,
+ * as it always has.
  *
  * @param {Record<string, any>} flags
  * @param {string[]} positional
@@ -814,16 +814,6 @@ async function cmdSetFeature(flags, positional, enabled) {
       name
         ? `Unknown feature ${JSON.stringify(name)}. Raise can ${verb}: ${known}.`
         : `Usage: raise ${verb} <feature>   (${known})`,
-    );
-    process.exitCode = 1;
-    return;
-  }
-  const takesValue = enabled && Boolean(feature.field);
-  if (extra.length > (takesValue ? 1 : 0)) {
-    console.error(
-      takesValue
-        ? `Usage: raise enable ${feature.name} [${feature.field}]`
-        : `raise ${verb} ${feature.name} takes no argument, so nothing was written.`,
     );
     process.exitCode = 1;
     return;

@@ -415,12 +415,13 @@ async function focusByPaneTitle(exec, { title, termProgram, terminals }) {
  *
  * With the `new-tab` setting on, steps 3 and 4 both become a new tab running a
  * typed `hc attach`, which is then what step 1 finds on the next click. Step 3
- * is not taken at all: a terminal shown over the user's focused pane is a worse
- * answer than one in a tab of its own. The new tab is never opened while a tab
- * may already show the terminal - two typed attaches, a typed attach Raise has
- * no adapter to raise, or one it cannot tell from another server's - because a
- * second copy is not what was asked for, and on the next click it would open a
- * third. Those keep the answer they have with the setting off.
+ * waits until the tab has failed to open: a terminal shown over the user's
+ * focused pane is a worse answer than one in a tab of its own, and a better one
+ * than a refusal. The new tab is never opened while a tab may already show the
+ * terminal - two typed attaches, a typed attach Raise has no adapter to raise,
+ * or one it cannot tell from another server's - because a second copy is not
+ * what was asked for, and on the next click it would open a third. Those keep
+ * the answer they have with the setting off.
  *
  * The recorded tty is never used: it is Herdr's own, and handing it to the
  * adapters is exactly what produced "Could not find that tab in Ghostty" about a
@@ -450,27 +451,18 @@ async function focusHerdr(exec, { address, socket, terminals, opener }) {
     attachFailure = result;
   }
 
+  // The session recorded its server, and no typed attach might be showing it
+  // from a tab Raise cannot attribute or failed to raise.
+  const tabAllowed =
+    opener && socket && !attach.unattributed && !attach.ambiguous && !attachFailure;
   // The desktop app takes no socket and speaks to the default server, so a
   // session on any other server must never reach it - the same address there is
   // a different terminal.
-  if (isAppServer(socket)) {
-    const shown = await showInHerdrApp(exec, { address, borrow: !opener });
-    if (shown && !shown.front) {
-      const where = shown.via === 'shown' ? ' in its focused pane for now' : '';
-      return {
-        ok: false,
-        reason: `The Herdr app is showing terminal ${address}${where}, but Raise could not bring it to the front.`,
-        hint,
-      };
-    }
-    if (shown?.via === 'pane') return { ok: true, adapter: 'herdr-app' };
-    if (shown?.via === 'shown') {
-      return {
-        ok: true,
-        adapter: 'herdr-app',
-        note: `Shown in the Herdr app. To bring up your own terminal instead, attach it with hc attach ${address}.`,
-      };
-    }
+  const appServer = isAppServer(socket);
+  if (appServer) {
+    const shown = await showInHerdrApp(exec, { address, borrow: !tabAllowed });
+    const answer = herdrAppAnswer(shown, { address, hint });
+    if (answer) return answer;
   }
 
   if (attach.ambiguous) {
@@ -484,9 +476,7 @@ async function focusHerdr(exec, { address, socket, terminals, opener }) {
   // has no adapter for, or a tab that has since closed. That attempt is the
   // truest thing to report, and it is about a real tab this time.
   if (attachFailure) return { ...attachFailure, hint };
-  // The session recorded its server, nothing Raise can see shows it, and no
-  // typed attach might be showing it from a tab Raise cannot attribute.
-  if (opener && socket && !attach.unattributed) {
+  if (tabAllowed) {
     const hc = opener.findCommand('hc');
     const opened = hc
       ? await openInNewTab(exec, {
@@ -496,6 +486,35 @@ async function focusHerdr(exec, { address, socket, terminals, opener }) {
         })
       : null;
     if (opened) return opened;
+    if (appServer) {
+      const answer = herdrAppAnswer(await showInHerdrApp(exec, { address }), { address, hint });
+      if (answer) return answer;
+    }
   }
   return { ok: false, reason: 'Not shown anywhere Raise can see.', hint };
+}
+
+/**
+ * What a click says about what the Herdr app did, or null when it did nothing.
+ *
+ * @param {{via: 'pane'|'shown', front: boolean}|null} shown
+ * @param {{address: string, hint: string}} target
+ * @returns {FocusResult|null}
+ */
+function herdrAppAnswer(shown, { address, hint }) {
+  if (!shown) return null;
+  if (!shown.front) {
+    const where = shown.via === 'shown' ? ' in its focused pane for now' : '';
+    return {
+      ok: false,
+      reason: `The Herdr app is showing terminal ${address}${where}, but Raise could not bring it to the front.`,
+      hint,
+    };
+  }
+  if (shown.via === 'pane') return { ok: true, adapter: 'herdr-app' };
+  return {
+    ok: true,
+    adapter: 'herdr-app',
+    note: `Shown in the Herdr app. To bring up your own terminal instead, attach it with hc attach ${address}.`,
+  };
 }

@@ -1407,6 +1407,52 @@ test('new tab: the Herdr app with no pane for the session opens a tab rather tha
   ]);
 });
 
+test('new tab: the Herdr app with no pane for the session borrows it when the tab fails to open', async () => {
+  // The setting off answers this click from the app's focused pane, so a tab
+  // that will not open must leave the same answer rather than a refusal.
+  const terminal = tabOpener('iterm2', { opens: false });
+  const exec = fakeExec({
+    ps: HERDR_HOLDER,
+    'is running': 'true',
+    'pane.focus': new Error('herdr-app exited 1: {"error":"no such pane"}'),
+    'terminal.show': '{}',
+    activate: '',
+  });
+  const result = await focusSession(herdrSession({ hc_terminal_id: 't8' }), {
+    exec,
+    terminals: [terminal],
+    newTab: newTabOn(),
+    findCommand,
+  });
+  assert.deepEqual(result, {
+    ok: true,
+    adapter: 'herdr-app',
+    note: 'Shown in the Herdr app. To bring up your own terminal instead, attach it with hc attach t8.',
+  });
+  assert.ok(exec.calls.includes('herdr-app do terminal.show --terminal t8'));
+});
+
+test('new tab: the Herdr app with no pane for the session borrows it when hc cannot be found', async () => {
+  const terminal = tabOpener();
+  const exec = fakeExec({
+    ps: HERDR_HOLDER,
+    'is running': 'true',
+    'pane.focus': new Error('herdr-app exited 1: {"error":"no such pane"}'),
+    'terminal.show': '{}',
+    activate: '',
+  });
+  const result = await focusSession(herdrSession({ hc_terminal_id: 't8' }), {
+    exec,
+    terminals: [terminal],
+    newTab: newTabOn(),
+    findCommand: (name) => (name === 'hc' ? null : findCommand(name)),
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.adapter, 'herdr-app');
+  assert.match(result.note, /^Shown in the Herdr app\./);
+  assert.deepEqual(terminal.opened, []);
+});
+
 test('new tab: the Herdr app\'s own pane for the session still wins', async () => {
   const terminal = tabOpener();
   const exec = fakeExec({ ps: '', 'is running': 'true', 'pane.focus': '{}', activate: '' });

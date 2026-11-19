@@ -384,19 +384,28 @@ test('disable new-tab writes false and keeps the terminal', async () => {
   }
 });
 
-test('an argument the command would ignore is refused, not a typo that succeeded', async () => {
-  const s = scratch();
-  try {
-    for (const args of [
-      ['disable', 'new-tab', 'iterm2'],
-      ['enable', 'update-check', 'yes'],
-      ['enable', 'new-tab', 'iterm2', 'ghostty'],
-    ]) {
-      await assert.rejects(raise([...args, '--yes'], s.home), (err) => err.code === 1, args.join(' '));
+test('an argument after any feature but enable new-tab is ignored, as it was before new-tab', async () => {
+  // Only `enable new-tab` reads an argument; every other command ignored a
+  // trailing word before this change and still does, with the same output.
+  for (const [args, config] of [
+    [['enable', 'update-check'], null],
+    [['disable', 'new-tab'], '{"newTab":{"enabled":true,"terminal":"iterm2"}}\n'],
+  ]) {
+    const plain = scratch(config ? { config } : {});
+    const extra = scratch(config ? { config } : {});
+    try {
+      const without = await raise([...args, '--yes'], plain.home);
+      const withExtra = await raise([...args, 'iterm2', '--yes'], extra.home);
+      assert.equal(
+        withExtra.stdout.replaceAll(extra.home, '~'),
+        without.stdout.replaceAll(plain.home, '~'),
+        args.join(' '),
+      );
+      assert.deepEqual(read(extra.path), read(plain.path), args.join(' '));
+    } finally {
+      plain.cleanup();
+      extra.cleanup();
     }
-    assert.throws(() => readFileSync(s.path, 'utf8'), 'no file should have been created');
-  } finally {
-    s.cleanup();
   }
 });
 
