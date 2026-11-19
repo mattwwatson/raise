@@ -7,6 +7,8 @@
  */
 
 import { spawnSync, spawn } from 'node:child_process';
+import { accessSync, constants, statSync } from 'node:fs';
+import { delimiter, isAbsolute, join } from 'node:path';
 
 /** Nothing we run should ever produce this much output; stop reading if it does. */
 const MAX_OUTPUT_BYTES = 1024 * 1024;
@@ -151,4 +153,40 @@ export async function tryExecAsync(runner, command, args, options) {
   } catch {
     return null;
   }
+}
+
+/**
+ * The absolute path `exec` would run for a bare command name, or null when the
+ * `PATH` holds no such executable.
+ *
+ * **For a command that something other than this process will run**, and that
+ * is the only reason it exists. `exec` and `execAsync` hand a bare name to the
+ * operating system, which searches this process's `PATH`. A command Raise asks
+ * a terminal app to run in a new tab is searched for in *that app's*
+ * environment instead, and an app started from the Dock has the minimal
+ * `/usr/bin:/bin:/usr/sbin:/sbin` - so a bare `tmux` from Homebrew, or an `hc`
+ * in `~/.local/bin`, is not found there. Resolving it here names the same
+ * binary Raise itself has just been talking to, which is positive evidence of
+ * the right one, rather than whatever the app's `PATH` happens to reach.
+ *
+ * Synchronous file checks and no child process, so it is safe on a click path.
+ *
+ * @param {string} name a bare command name
+ * @param {{path?: string}} [options] the search path, `PATH` by default
+ * @returns {string|null}
+ */
+export function findExecutable(name, { path = process.env.PATH ?? '' } = {}) {
+  if (!name || name.includes('/')) return null;
+  for (const dir of path.split(delimiter)) {
+    if (!dir || !isAbsolute(dir)) continue;
+    const candidate = join(dir, name);
+    try {
+      if (!statSync(candidate).isFile()) continue;
+      accessSync(candidate, constants.X_OK);
+      return candidate;
+    } catch {
+      // Not here, or not executable: keep looking, as the shell would.
+    }
+  }
+  return null;
 }

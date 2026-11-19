@@ -35,11 +35,14 @@ changes.
   three minutes in. Raise can bring forward:
   - a session running directly in **Terminal.app**, **iTerm2** or **Ghostty** (1.4 or later);
   - a session inside **[tmux](#how-focusing-works)**, when that tmux session is attached in one
-    of those terminals;
+    of those terminals. A detached one gets the `tmux attach` command to run, or, with
+    [`new-tab`](#opening-a-session-nothing-is-showing) on, opens in a new tab;
   - a session inside **[Herdr](#herdr-sessions)**, when it is attached with an explicit
     `hc attach <address>` in one of those terminals, or shown in the Herdr desktop app. Not when
     you attached by picking it from `hc`'s menu: Raise cannot tell which terminal a picker
-    attach is showing.
+    attach is showing. With [`new-tab`](#opening-a-session-nothing-is-showing) on, a Herdr
+    session nothing Raise can see is showing - one attached from the menu included - opens in
+    a new tab instead.
 
 There are **no runtime dependencies at all** - Node's own builtins and nothing else. Everything
 below that names another tool is optional, and [says so](#optional-signals).
@@ -448,7 +451,8 @@ daemon creates its database on first use, and Raise looks each time it reads.
 | `raise status` | One-shot text summary; no server needed |
 | `raise doctor` | Check the setup and explain anything missing |
 | `raise focus <session>` | Bring a session's window to the front from the terminal |
-| `raise enable <feature>` / `disable <feature>` | Turn an optional feature on or off: `pull-request-state`, `update-check` |
+| `raise enable <feature>` / `disable <feature>` | Turn an optional feature on or off: `pull-request-state`, `update-check`, `new-tab` |
+| `raise enable new-tab <terminal>` | Turn `new-tab` on for one terminal: `iterm2`, `terminal-app`, `ghostty` |
 | `raise install-hooks` / `uninstall-hooks` | Manage the Claude Code hooks |
 | `raise install-codex` / `uninstall-codex` | Manage the Codex hooks |
 | `raise install-pi` / `uninstall-pi` | Manage the pi extension |
@@ -611,7 +615,8 @@ front - which is why a machine mixing plain tabs and tmux needs no configuration
 The host terminal for a tmux session is deliberately **not** stored, because a tmux session
 can be detached and reattached in a different terminal entirely. If the session is detached
 there is no window to focus, and Raise tells you the `tmux attach` command instead of failing
-silently.
+silently - or, with [`new-tab`](#opening-a-session-nothing-is-showing) on, runs that command
+itself in a new tab of the terminal you chose.
 
 Supported terminals today: **iTerm2**, **Terminal.app** and **Ghostty** (1.4 or later), plus
 **tmux** inside any of them, and **Herdr** terminals attached with `hc attach <address>` in any of
@@ -647,13 +652,19 @@ brings up whatever is showing that terminal, worked out when you click:
    until you switch back.
 4. **Nothing Raise can see** - it says so and gives you the `hc attach <address>` command.
 
+With [`new-tab`](#opening-a-session-nothing-is-showing) on, steps 3 and 4 both open the
+terminal in a new tab running `hc attach <address>` instead, and that tab is what step 1 finds
+on the next click. The app's focused pane is left showing what it was.
+
 **Attach with the address: `hc attach t5`, not bare `hc` or `hc attach` and the picker.**
 Raise finds the tab showing a terminal by its command line, and only a typed address puts the
 terminal there. A picker client's command line stays `hc` whichever terminal you chose, and
 Herdr offers no way to ask a client what it is showing, so Raise cannot tell two picker tabs
 apart and does not guess. Every session's address is in its environment as `$HC_TERMINAL_ID`,
 and `hc ls` lists them. Two tabs attached to the same address are refused for the same reason,
-and fall back to the desktop app if it is running.
+and fall back to the desktop app if it is running. With `new-tab` on you need not do this by
+hand: clicking a session attached from the menu opens a typed attach of it in a new tab, and
+the menu tab stays as it was.
 
 Two limits worth knowing. The desktop app only ever reaches the default Herdr server, so a
 session on another server (`HC_SESSION` or `HC_SOCKET`) is raised only through a typed attach,
@@ -736,7 +747,7 @@ Also off by default, opted into separately - what it sends and to whom is in
 raise enable update-check
 ```
 
-Both opt-ins live in the one file, and each command merges its own boolean into it, so turning
+Every opt-in lives in the one file, and each command merges its own setting into it, so turning
 this on cannot disturb pull request state or the Bitbucket credential beside it. The `0600`
 rule is the file's rather than either feature's: if anyone else on the machine can read it,
 Raise refuses the whole file and `raise doctor` says so.
@@ -781,6 +792,59 @@ Everything about it fails silently: offline, a timeout, a rate limit, an answer 
 sense of. Each leaves `raise serve` printing exactly what it printed before you turned this on,
 and the failed attempt is remembered too, so a laptop with no network makes one attempt a day
 rather than one per start.
+
+## Opening a session nothing is showing
+
+Off by default, like the two above. With it on, clicking a tmux session that no terminal is
+attached to, or a Herdr terminal that no tab and no app pane shows, opens it in a new tab of the
+terminal you chose - running the same command the hint would have given you - and brings that
+terminal forward. There is no toast: the tab arriving is the feedback, as for any other click.
+The next click raises that tab through the ordinary paths, because it is an attached tmux
+client or a typed `hc attach`.
+
+```sh
+raise enable new-tab             # the one supported terminal that is running
+raise enable new-tab ghostty     # or name it: iterm2, terminal-app or ghostty
+```
+
+**Raise never guesses which terminal.** Nothing a session reports can say: every Herdr terminal
+reports Herdr's own `ghostty`, and a tmux session reports whichever terminal started the tmux
+server. So the terminal is written into `~/.raise/config.json` once - the one you name, or, if
+you name none, whichever of iTerm2, Terminal.app and Ghostty (1.4 or later) is running. With
+more than one running, or none, the command refuses and says how to name one, and it refuses a
+name it does not know rather than writing it. Run it again with another name to switch.
+`raise disable new-tab` turns it off and keeps the terminal, so turning it back on needs no
+name.
+
+The tab opens in the terminal's front window, or in a new window if it has none, and a terminal
+that is not running is started - you named it. **Terminal.app opens a new window rather than a
+tab**: its scripting dictionary has no way to make a tab, short of sending it Cmd-T through
+System Events, which needs the Accessibility permission and lands in whichever window is in
+front. A new tmux client resizes the session to its own tab, which is tmux's default
+(`window-size latest`).
+
+It is a fallback, after everything that already shows the session:
+
+- A tmux session with a client attached is raised as before. The new tab opens only when nothing
+  is attached, and on the pane you clicked.
+- A Herdr terminal shown by a typed `hc attach`, or in the desktop app's own pane for it, is
+  raised as before. When the app is running with no pane for it, it opens in a new tab rather
+  than taking over the app's focused pane. A terminal you attached from `hc`'s menu can now be
+  shown too.
+- Where a tab may already be showing it - two typed attaches, a typed attach in a terminal Raise
+  has no adapter for, or one Raise cannot tell from another Herdr server's - nothing new opens,
+  because a second copy is not what you asked for. You get the answer you would have had with
+  this off.
+- If the tab cannot be opened, you get the answer and the command you would have had with it
+  off.
+
+A session on its own tmux socket, or on a Herdr server other than the default, opens on that
+socket or server. `tmux` and `hc` are run by the absolute path Raise found them at, because a
+terminal started from the Dock searches a much shorter `PATH` than your shell does.
+
+**It makes no outbound request.** It runs `tmux` or `hc` in a terminal on this machine, through
+AppleScript, like the rest of focusing, and it is macOS-only for the same reason. It is read on
+every click, so a running `raise serve` follows it with no restart.
 
 ## Troubleshooting
 

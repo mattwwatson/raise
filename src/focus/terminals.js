@@ -18,6 +18,9 @@ import {
   itermFocusByTitleScript,
   terminalAppFocusScript,
   ghosttyFocusScript,
+  itermOpenTabScript,
+  terminalAppOpenTabScript,
+  ghosttyOpenTabScript,
   appRunningScript,
   appRunningByIdScript,
   GHOSTTY_BUNDLE_ID,
@@ -46,12 +49,41 @@ import {
  * @property {(exec: Function, target: {title: string|null}) =>
  *   Promise<'ok'|'notfound'|'ambiguous'>} [focusByTitle] optional, and only
  *   iTerm2 implements it - see below
+ * @property {(exec: Function, target: {argv: string[]}) => Promise<boolean>} [openTab]
+ *   optional: run a command in a new tab and bring the terminal forward, for
+ *   the `new-tab` setting. It takes an argv array, never a command string, so
+ *   each adapter quotes it once for the way its own terminal runs a command. A
+ *   terminal without it cannot be the one that setting names.
  */
 
 const OSASCRIPT = 'osascript';
 
-function runScript(exec, script) {
-  return exec(OSASCRIPT, ['-e', script], { timeoutMs: 5000 });
+/**
+ * Long enough for the terminal to be started: the `new-tab` setting names it,
+ * so opening a tab in it starts it when it is not running, and that is slower
+ * than finding a tab in one that is.
+ */
+const OPEN_TAB_TIMEOUT_MS = 15000;
+
+function runScript(exec, script, timeoutMs = 5000) {
+  return exec(OSASCRIPT, ['-e', script], { timeoutMs });
+}
+
+/**
+ * Run an open-tab script and read its answer. Any failure - the script would
+ * not compile on an older release, the app refused, the timeout - is not
+ * opened, and the caller falls back to the refusal it would have given anyway.
+ *
+ * @param {Function} exec
+ * @param {string} script
+ * @returns {Promise<boolean>}
+ */
+async function openWith(exec, script) {
+  try {
+    return (await runScript(exec, script, OPEN_TAB_TIMEOUT_MS)).trim() === 'ok';
+  } catch {
+    return false;
+  }
 }
 
 async function isAppRunning(exec, processName) {
@@ -95,6 +127,10 @@ export const iterm2 = {
     const result = (await runScript(exec, itermFocusByTitleScript({ title }))).trim();
     return result === 'ok' || result === 'ambiguous' ? result : 'notfound';
   },
+  /** @returns {Promise<boolean>} */
+  async openTab(exec, { argv }) {
+    return openWith(exec, itermOpenTabScript({ argv }));
+  },
 };
 
 /** @type {Terminal} */
@@ -114,6 +150,14 @@ export const terminalApp = {
   async focus(exec, { tty = null }) {
     if (!tty) return false;
     return (await runScript(exec, terminalAppFocusScript({ tty }))) === 'ok';
+  },
+  /**
+   * A new window rather than a tab - see `terminalAppOpenTabScript`.
+   *
+   * @returns {Promise<boolean>}
+   */
+  async openTab(exec, { argv }) {
+    return openWith(exec, terminalAppOpenTabScript({ argv }));
   },
 };
 
@@ -150,6 +194,10 @@ export const ghostty = {
     } catch {
       return false;
     }
+  },
+  /** @returns {Promise<boolean>} */
+  async openTab(exec, { argv }) {
+    return openWith(exec, ghosttyOpenTabScript({ argv }));
   },
 };
 

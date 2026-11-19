@@ -2,11 +2,12 @@
  * `~/.raise/config.json` - reading it, refusing it when it is unsafe, and the
  * one narrow way Raise is allowed to write it.
  *
- * This is the file the user writes. Everything in it is an opt-in to something
- * that reaches the network - the forge lookup, the update check - because those
- * are the only two things that need the user's permission rather than their
- * setup. Each feature owns the meaning of its own block; what lives here is the
- * part that is a property of the *file*, and that is the mode rule.
+ * This is the file the user writes. Everything in it is an opt-in: two of them
+ * reach the network - the forge lookup, the update check - and need the user's
+ * permission rather than their setup, and the third, `new-tab`, lets a click
+ * open a terminal tab, which is something the user should have asked for. Each
+ * feature owns the meaning of its own block; what lives here is the part that is
+ * a property of the *file*, and that is the mode rule.
  *
  * **The writer lives here, beside the reader, and that is the whole reason it is
  * in this module rather than beside the commands that call it.** `0600` is a
@@ -208,12 +209,18 @@ export function watchUserConfig({ path = userConfigPath(), files = defaultConfig
 /**
  * The features `raise enable` and `raise disable` can switch, and nothing else.
  *
- * **A closed set of two, deliberately, rather than a general `raise config
- * set`.** A path-addressed JSON writer aimed at a file holding a credential is a
- * machine for making typos succeed: `raise config set forge.enable true` would
- * report success, write a key nothing reads, and leave the user with Raise's own
- * word that the feature is on. Here an unknown name is refused and both valid
- * ones are printed.
+ * **A closed set, deliberately, rather than a general `raise config set`.** A
+ * path-addressed JSON writer aimed at a file holding a credential is a machine
+ * for making typos succeed: `raise config set forge.enable true` would report
+ * success, write a key nothing reads, and leave the user with Raise's own word
+ * that the feature is on. Here an unknown name is refused and every valid one is
+ * printed.
+ *
+ * **`field` is the one value besides `enabled` a feature may write**, and only
+ * `new-tab` has one: the terminal to open in. It is named here, and its allowed
+ * values are checked by the command before `setFeature` sees them, for the same
+ * reason the set is closed - a terminal name nothing reads is a typo that would
+ * otherwise succeed.
  *
  * **`name` is `raise doctor`'s label, kebab-cased, and that is load-bearing.**
  * The diagnostic that tells you a feature is off names the command that turns it
@@ -222,8 +229,8 @@ export function watchUserConfig({ path = userConfigPath(), files = defaultConfig
  *
  * The registry lives in this module because it describes the shape of this file.
  * What each block *means* still belongs to the feature that owns it -
- * `forge-config.js` and `update-check.js` - and neither of them needs to know
- * that a command can write it.
+ * `forge-config.js`, `update-check.js` and `focus/new-tab.js` - and none of them
+ * needs to know that a command can write it.
  *
  * **`watched` is whether a *running* `raise serve` would notice the write**, and
  * the asymmetry is real rather than an oversight: the forge block is re-read on
@@ -234,7 +241,8 @@ export function watchUserConfig({ path = userConfigPath(), files = defaultConfig
  * sentence this product exists to remove, so the fact lives here beside the
  * feature it is a property of and cannot drift from a `block` name in `cli.js`.
  *
- * @typedef {{name: string, block: string, label: string, watched: boolean}} ConfigFeature
+ * @typedef {{name: string, block: string, label: string, watched: boolean,
+ *   field?: string}} ConfigFeature
  * @type {ConfigFeature[]}
  */
 export const CONFIG_FEATURES = [
@@ -242,6 +250,8 @@ export const CONFIG_FEATURES = [
   { name: 'pull-request-state', block: 'forge', label: 'Pull request state', watched: true },
   // Read once by `newerVersion` at `raise serve` startup, and never again.
   { name: 'update-check', block: 'updates', label: 'Update check', watched: false },
+  // Read on every click, so a running server follows it without a restart.
+  { name: 'new-tab', block: 'newTab', label: 'New tab', watched: true, field: 'terminal' },
 ];
 
 /** @param {string} name @returns {ConfigFeature|null} */
@@ -329,7 +339,8 @@ export function readUserConfigForWrite({ path = userConfigPath(), files = defaul
 }
 
 /**
- * Merge one boolean into the parsed file, and say what changed.
+ * Merge one boolean, and the feature's one other value if it has one, into the
+ * parsed file, and say what changed.
  *
  * Pure, so the whole of the merge is tested by calling it - the rule AGENTS.md
  * states about `dashboard.js` and `security.js`, and it matters more here
@@ -346,13 +357,20 @@ export function readUserConfigForWrite({ path = userConfigPath(), files = defaul
  * Nothing else in the block is touched, which is what keeps a `forge.bitbucket`
  * credential through a `disable`: turning the lookup off is not a request to
  * destroy a token, and re-enabling would otherwise quietly need it minted again.
+ * The same rule keeps `newTab.terminal` through a `disable`, so turning the
+ * setting back on needs no terminal named again.
+ *
+ * `value` is written to the feature's `field` and to nothing else; it is
+ * refused for a feature that has no field, and `undefined` leaves the field as
+ * it is.
  *
  * @param {Record<string, any>} data the parsed file, or `{}`
  * @param {ConfigFeature} feature
  * @param {boolean} enabled
+ * @param {string} [value] the feature's `field`, when it has one
  * @returns {{data: Record<string, any>, changes: string[]}}
  */
-export function setFeature(data, feature, enabled) {
+export function setFeature(data, feature, enabled, value) {
   const next = structuredClone(data ?? {});
   const existing = next[feature.block];
 
@@ -366,17 +384,27 @@ export function setFeature(data, feature, enabled) {
     );
   }
 
-  const block = { ...existing };
-  const before = block.enabled;
-  if (before === enabled) return { data: next, changes: [] };
+  if (value !== undefined && !feature.field) {
+    throw new Error(`${feature.name} takes no value, so ${JSON.stringify(value)} was not written.`);
+  }
 
-  block.enabled = enabled;
+  const block = { ...existing };
+  const changes = [];
+  const assign = (key, to) => {
+    const before = block[key];
+    if (before === to) return;
+    block[key] = to;
+    changes.push(
+      before === undefined
+        ? `add ${feature.block}.${key}: ${JSON.stringify(to)}`
+        : `change ${feature.block}.${key}: ${JSON.stringify(before)} -> ${JSON.stringify(to)}`,
+    );
+  };
+  assign('enabled', enabled);
+  if (value !== undefined && feature.field) assign(feature.field, value);
+  if (changes.length === 0) return { data: next, changes };
   next[feature.block] = block;
-  const change =
-    before === undefined
-      ? `add ${feature.block}.enabled: ${enabled}`
-      : `change ${feature.block}.enabled: ${JSON.stringify(before)} -> ${enabled}`;
-  return { data: next, changes: [change] };
+  return { data: next, changes };
 }
 
 /**

@@ -64,8 +64,14 @@ import { buildRows, isDismissibleBlock, summarise } from './dashboard.js';
 import { BuildStamp, PUBLIC_DIR } from './build-stamp.js';
 import { RunOwners } from './run-owner.js';
 import { focusSession } from './focus/index.js';
+import { newTabFrom } from './focus/new-tab.js';
+import { readUserConfig } from './user-config.js';
 import { checkRequest } from './security.js';
-import { exec as defaultExec, execAsync as defaultExecAsync } from './exec.js';
+import {
+  exec as defaultExec,
+  execAsync as defaultExecAsync,
+  findExecutable,
+} from './exec.js';
 import { sessionsDir, statePath, serverInfoPath, readOrCreateToken, defaultPort } from './config.js';
 
 const POLL_INTERVAL_MS = 1000;
@@ -138,6 +144,14 @@ export function createMonitorServer({
   // opt-in this server never saw until somebody restarted it. Costs a `stat` a
   // second - see `watchForgeConfig`. Tests pass a fixed config, accepted too.
   forgeConfig = watchForgeConfig(),
+  // The `new-tab` setting, read on every click rather than on the poll: a click
+  // is the only thing that consults it, so a file read per click is the whole
+  // cost and a running server follows `raise enable new-tab` with no restart.
+  // Injected so the suite can turn it on without a config file.
+  newTabSetting = () => newTabFrom(readUserConfig()),
+  // What resolves `tmux` and `hc` to the absolute paths a new tab runs; see
+  // `findExecutable`. Injected so the suite never depends on what is installed.
+  findCommand = (/** @type {string} */ name) => findExecutable(name),
   dbPath = statePath(),
   sessionsPath = sessionsDir(),
   keepaliveMs = KEEPALIVE_MS,
@@ -745,7 +759,11 @@ export function createMonitorServer({
     // stream and every hook post along with it.
     let result;
     try {
-      result = await focusSession(record, { exec: execAsync });
+      result = await focusSession(record, {
+        exec: execAsync,
+        newTab: newTabSetting(),
+        findCommand,
+      });
     } catch (err) {
       result = { ok: false, reason: `Could not focus that session: ${err.message}` };
     }

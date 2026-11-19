@@ -306,6 +306,73 @@ test('/focus never runs a synchronous child process', async () => {
   }
 });
 
+test('/focus reads the new-tab setting on each click, so turning it on needs no restart', async () => {
+  // The default reader, against the scratch RAISE_HOME: the first click finds
+  // no config file and refuses as it always has; the file is then written under
+  // the running server, and the next click opens the detached session in a tab.
+  const { dir, cleanup } = scratch();
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = dir;
+  let monitor;
+  try {
+    const port = await freePort();
+    const ran = [];
+    monitor = createMonitorServer({
+      port,
+      token: 'test-token',
+      dbPath: join(dir, 'no-such.sqlite'),
+      sessionsPath: join(dir, 'sessions'),
+      exec: () => assert.fail('no blocking commands from the server'),
+      fetch: () => assert.fail('no outbound requests from the server'),
+      findCommand: (name) => `/opt/bin/${name}`,
+      execAsync: async (command, args = []) => {
+        const line = [command, ...args].join(' ');
+        ran.push(line);
+        if (line.includes('list-panes')) return '%7\t$3\t@2\t1\tbackground';
+        if (command === 'osascript' && line.includes('create tab')) return 'ok';
+        return '';
+      },
+    });
+    await monitor.start();
+
+    const registered = await fetch(`http://127.0.0.1:${port}/event`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-raise-token': 'test-token' },
+      body: JSON.stringify({
+        session_id: 'detached',
+        hook_event_name: 'SessionStart',
+        cwd: dir,
+        host: { tmux_pane: '%7', tmux: '/tmp/tmux-501/default,1,3' },
+      }),
+    });
+    assert.equal(registered.status, 204);
+    const click = () =>
+      fetch(`http://127.0.0.1:${port}/focus?t=test-token`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-raise-token': 'test-token' },
+        body: JSON.stringify({ sessionId: 'detached' }),
+      });
+
+    const off = await click();
+    assert.equal(off.status, 409);
+    assert.equal((await off.json()).hint, 'tmux attach -t background');
+    assert.ok(!ran.some((line) => line.includes('create tab')), 'no tab while the setting is off');
+
+    writeFileSync(join(dir, 'config.json'), '{"newTab":{"enabled":true,"terminal":"iterm2"}}\n', {
+      mode: 0o600,
+    });
+    const on = await click();
+    assert.equal(on.status, 200);
+    assert.deepEqual(await on.json(), { ok: true, adapter: 'iterm2', tmuxSession: 'background' });
+    assert.ok(ran.some((line) => line.includes('/opt/bin/tmux -S /tmp/tmux-501/default attach-session -t')));
+  } finally {
+    if (monitor) await monitor.stop();
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
+    cleanup();
+  }
+});
+
 test('/focus answers a session that is no longer registered', async () => {
   const { dir, cleanup } = scratch();
   const previousHome = process.env.RAISE_HOME;

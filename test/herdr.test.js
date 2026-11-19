@@ -122,13 +122,13 @@ test('the process table yields this address\'s typed attaches and every running 
 test('findTypedAttach hands back the one tab showing the address on this server', async () => {
   const exec = fakeExec({ ps: `ttys022  hc attach t6\n${DEFAULT_HOLDER}` });
   const found = await findTypedAttach(exec, { address: 't6', socket: DEFAULT_SOCKET });
-  assert.deepEqual(found, { tty: '/dev/ttys022', ambiguous: false });
+  assert.deepEqual(found, { tty: '/dev/ttys022', ambiguous: false, unattributed: false });
 });
 
 test('findTypedAttach calls two typed attaches of one address ambiguous', async () => {
   const exec = fakeExec({ ps: `ttys022  hc attach t6\nttys020  hc attach --observe t6` });
   const found = await findTypedAttach(exec, { address: 't6', socket: DEFAULT_SOCKET });
-  assert.deepEqual(found, { tty: null, ambiguous: true });
+  assert.deepEqual(found, { tty: null, ambiguous: true, unattributed: false });
 });
 
 test('findTypedAttach drops the address when a second server is running', async () => {
@@ -142,7 +142,17 @@ test('findTypedAttach drops the address when a second server is running', async 
     ].join('\n'),
   });
   const found = await findTypedAttach(exec, { address: 't6', socket: DEFAULT_SOCKET });
-  assert.deepEqual(found, { tty: null, ambiguous: false });
+  // Dropped, and said to be dropped: a tab may well be showing this terminal,
+  // which the new-tab setting must not read as nothing showing it.
+  assert.deepEqual(found, { tty: null, ambiguous: false, unattributed: true });
+});
+
+test('a second server with no typed attach of the address leaves nothing unattributed', async () => {
+  const exec = fakeExec({
+    ps: [DEFAULT_HOLDER, `?? herdr-core hold --socket ${STATE}/lab/lab.holder.9.sock`].join('\n'),
+  });
+  const found = await findTypedAttach(exec, { address: 't6', socket: DEFAULT_SOCKET });
+  assert.deepEqual(found, { tty: null, ambiguous: false, unattributed: false });
 });
 
 test('findTypedAttach trusts the address when no holder can be seen at all', async () => {
@@ -158,6 +168,7 @@ test('findTypedAttach does not look without the session\'s server, and a failed 
   assert.deepEqual(await findTypedAttach(unused, { address: 't6', socket: null }), {
     tty: null,
     ambiguous: false,
+    unattributed: false,
   });
   assert.deepEqual(unused.calls, []);
 
@@ -165,6 +176,7 @@ test('findTypedAttach does not look without the session\'s server, and a failed 
   assert.deepEqual(await findTypedAttach(failing, { address: 't6', socket: DEFAULT_SOCKET }), {
     tty: null,
     ambiguous: false,
+    unattributed: false,
   });
 });
 
@@ -200,6 +212,17 @@ test('showInHerdrApp borrows the focused pane only when the app has none for it'
   assert.deepEqual(await showInHerdrApp(exec, { address: 't8' }), { via: 'shown', front: true });
   assert.ok(exec.calls.includes('herdr-app do terminal.show --terminal t8'));
   assert.ok(exec.calls.at(-1).includes('activate'));
+});
+
+test('showInHerdrApp borrows no pane when asked not to, for a caller with a tab to open instead', async () => {
+  const exec = fakeExec({
+    'is running': 'true',
+    'pane.focus': new Error('herdr-app exited 1: {"error":"no such pane"}'),
+    'terminal.show': '{}',
+  });
+  assert.equal(await showInHerdrApp(exec, { address: 't8', borrow: false }), null);
+  assert.ok(!exec.calls.some((c) => c.includes('terminal.show')), 'no pane was borrowed');
+  assert.ok(!exec.calls.some((c) => c.includes('to activate')), 'and the app was not raised');
 });
 
 test('showInHerdrApp never launches the app and never runs herdr-app when it is not running', async () => {
