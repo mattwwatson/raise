@@ -7,18 +7,7 @@ If you run several agent sessions across several repos, the problem is not knowi
 is happening. It is noticing the one that stopped and wants an answer, and then finding which
 of your fifteen terminal tabs it was in. That is what this fixes.
 
-```
-WAITING FOR YOU
-  payments     PAY-56-retry-backoff     Waiting for you - Claude needs your response   2m   tmux
-WAITING ON YOUR DECISION
-  search-api   SRCH-88-reindex-order    Waiting on your decision   4 open              41m  tmux
-PIPELINE PARKED
-  storefront   feat/checkout-redesign   Pipeline parked at a gate                      12s  tab
-               NO-MISTAKES  review
-WORKING
-  docs-site    fix/broken-anchors       Working                                             tab
-               NO-MISTAKES  test · Running npm test
-```
+![Raise: a session turns red and moves to the top, and clicking it opens that session in a new terminal tab](https://raw.githubusercontent.com/mattwwatson/raise/main/docs/media/raise-demo.gif)
 
 The `NO-MISTAKES` lines and the decision row are [optional signals](#optional-signals): they
 appear if you have those tools and are simply absent if you do not. Nothing else on the page
@@ -240,14 +229,7 @@ a pull request, or asking npm whether there is a newer Raise. Both are off by de
 row opens a panel with what you asked, what the agent said back, and every tool it ran with how
 each turned out - enough to decide whether to go and look without switching to the terminal.
 
-```
-payments  feat/idempotent-ledger                          PR #41 OPEN   51m  tab  Focus ↗  ⌃
-  14:39:21  YOU     can you wire up the settlement ledger and make it idempotent
-  14:39:31  CLAUDE  Looking at the existing job first - it retries on failure, so…
-  14:39:41  Read    Reading reconcile.js                                        ✓
-  14:40:11  Bash    Run the reconciliation tests                                ✗
-  14:42:41  Bash    Re-run the reconciliation tests                             …
-```
+![An expanded row: the session's recent tool calls and messages, each with its time and outcome](https://raw.githubusercontent.com/mattwwatson/raise/main/docs/media/expanded-row.png)
 
 It is fetched only when you open it, one session at a time, and it refreshes while it is
 open. Subagent side-conversations and the boilerplate an agent injects into the user role
