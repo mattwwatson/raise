@@ -412,6 +412,23 @@ test('buildRows tags a Herdr session as herdr, never as the Ghostty tab its TERM
   assert.equal(rows[0].focusable, true);
 });
 
+test('buildRows keeps a Herdr session focusable when its address has a letter in it', () => {
+  const rows = build({
+    sessions: [
+      session({
+        host: {
+          hc_terminal_id: 't1b',
+          hc_terminal_socket: '/Users/me/.local/state/herdr-core/default/default.sock',
+        },
+      }),
+    ],
+    runs: [],
+    now: 5000,
+  });
+  assert.equal(rows[0].hostKind, 'herdr');
+  assert.equal(rows[0].focusable, true);
+});
+
 test('buildRows tags a Claude Desktop session and keeps it focusable', () => {
   // The card this exists for: no tty, no terminal, and until now not focusable
   // either - so opening an old session in the desktop app put a row on the page

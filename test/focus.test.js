@@ -916,6 +916,12 @@ test('planFocus routes a Herdr session to the Herdr path, not to its recorded tt
   assert.deepEqual(plan, { kind: 'herdr', address: 't6', socket: HERDR_DEFAULT });
 });
 
+test('planFocus routes a Herdr session whose address has a letter in it to the Herdr path', () => {
+  // hc 0.1.21 hands out t1b after t19; refusing it left the row saying "no window".
+  const plan = planFocus(herdrSession({ hc_terminal_id: 't1b' }));
+  assert.deepEqual(plan, { kind: 'herdr', address: 't1b', socket: HERDR_DEFAULT });
+});
+
 test('planFocus leaves a tmux pane on the tmux path when the process tree did not say', () => {
   // A record from before the hook read the multiplexer: the order is unchanged.
   const plan = planFocus(herdrSession({ tmux_pane: '%3' }));
@@ -1003,6 +1009,14 @@ test('step 2: with no typed attach, the desktop app\'s own pane is focused and n
   assert.deepEqual(result, { ok: true, adapter: 'herdr-app' });
   assert.ok(exec.calls.includes('herdr-app do pane.focus --terminal t6'));
   assert.ok(!exec.calls.some((c) => c.includes('terminal.show')));
+});
+
+test('a typed attach of an address with a letter in it is the tab that is raised', async () => {
+  const iterm = terminalHolding('iterm2', ['/dev/ttys020']);
+  const exec = fakeExec({ ps: `ttys020  hc attach t1b\n${HERDR_HOLDER}` });
+  const result = await focusSession(herdrSession({ hc_terminal_id: 't1b' }), { exec, terminals: [iterm] });
+  assert.deepEqual(result, { ok: true, adapter: 'iterm2' });
+  assert.deepEqual(iterm.asked, ['/dev/ttys020']);
 });
 
 test('step 3: the desktop app with no pane for it shows it in the focused pane, and says so', async () => {
