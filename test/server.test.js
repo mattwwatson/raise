@@ -241,6 +241,66 @@ test('/dismiss quiets an idle nudge, and a real prompt spends the dismissal', as
   }
 });
 
+test('a hook event run by hand inside a session puts nothing on the page', async () => {
+  // Issue 52 end to end. The reporter hands the made-up event the pid and
+  // window of the session whose Bash tool ran it, which is what a real session
+  // posting first and the stranger posting second look like on the wire. The
+  // test process stands in for that agent, because pruning probes the pid.
+  const { dir, cleanup } = scratch();
+  const previousHome = process.env.RAISE_HOME;
+  process.env.RAISE_HOME = dir;
+  let monitor = null;
+  try {
+    const port = await freePort();
+    monitor = createMonitorServer({
+      port,
+      token: 'test-token',
+      dbPath: join(dir, 'no-such.sqlite'),
+      sessionsPath: join(dir, 'sessions'),
+      exec: () => assert.fail('no blocking commands from the server'),
+      fetch: () => assert.fail('no outbound requests from the server'),
+      execAsync: async () => '',
+    });
+    await monitor.start();
+
+    const post = (body) =>
+      fetch(`http://127.0.0.1:${port}/event?t=test-token`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-raise-token': 'test-token' },
+        body: JSON.stringify(body),
+      });
+    const window = { pid: process.pid, tty: '/dev/ttys004', term_program: 'iTerm.app' };
+
+    assert.equal(
+      (await post({
+        session_id: 'real',
+        hook_event_name: 'UserPromptSubmit',
+        cwd: dir,
+        transcript_path: join(dir, 'real.jsonl'),
+        host: window,
+      })).status,
+      204,
+    );
+    assert.equal(
+      (await post({ session_id: 'test', hook_event_name: 'Notification', cwd: '/tmp', host: window }))
+        .status,
+      204,
+      'the hook is never told no - it would have nowhere to say so',
+    );
+
+    const state = await (await fetch(`http://127.0.0.1:${port}/state?t=test-token`)).json();
+    const ids = state.rows.map((r) => r.sessionId);
+    assert.ok(ids.includes('real'));
+    assert.equal(ids.includes('test'), false, 'no "tmp" row waiting for you');
+    assert.equal(existsSync(join(dir, 'sessions', 'test.json')), false);
+  } finally {
+    if (monitor) await monitor.stop();
+    if (previousHome === undefined) delete process.env.RAISE_HOME;
+    else process.env.RAISE_HOME = previousHome;
+    cleanup();
+  }
+});
+
 test('/focus never runs a synchronous child process', async () => {
   // The guard the other tests carry - exec: assert.fail - only means anything
   // if something actually exercises the route. Focusing shells out to osascript
@@ -1247,6 +1307,10 @@ test('a firstmate crewmate is marked on the page, and its neighbours are not', a
           session_id: sessionId,
           hook_event_name: 'SessionStart',
           cwd,
+          // A transcript path, as every real Claude Code event carries. These sessions
+          // share the test process as their agent pid, and transcriptless sessions
+          // sharing a pid are refused - see `#settlePidConflict` in the registry.
+          transcript_path: join(dir, `${sessionId}.jsonl`),
           host: { tmux: '', tmux_pane: pane, pid },
         }),
       });
@@ -1329,6 +1393,9 @@ test('a firstmate ruling reaches the page, and a superseded one does not', async
           session_id: sessionId,
           hook_event_name: 'SessionStart',
           cwd,
+          // A transcript path, as every real Claude Code event carries - see the
+          // note on the same field in the crewmate test above.
+          transcript_path: join(dir, `${sessionId}.jsonl`),
           host: { tmux: '', tmux_pane: pane, pid: process.pid },
         }),
       });
@@ -1451,6 +1518,9 @@ test('a ruling leaves the page only when the captain provably has, not on a read
           session_id: sessionId,
           hook_event_name: 'SessionStart',
           cwd,
+          // A transcript path, as every real Claude Code event carries - see the
+          // note on the same field in the crewmate test above.
+          transcript_path: join(dir, `${sessionId}.jsonl`),
           host: { tmux: '', tmux_pane: pane, pid: process.pid },
         }),
       });
@@ -1585,6 +1655,9 @@ test('quitting every session clears the rulings, because an empty list is an ans
         session_id: sessionId,
         hook_event_name: 'SessionStart',
         cwd,
+        // A transcript path, as every real Claude Code event carries - see the
+        // note on the same field in the crewmate test above.
+        transcript_path: join(dir, `${sessionId}.jsonl`),
         host: { tmux: '', tmux_pane: pane, pid: process.pid },
       });
       assert.equal(registered.status, 204);
@@ -2214,9 +2287,11 @@ test('the poll hands the fleet snapshot what its crewmates transcripts look like
     });
     await monitor.start();
 
-    for (const [sessionId, pane, transcriptPath] of [
-      ['captain', '%0', null],
-      ['crew', '%1', transcript],
+    // Two live pids, because one agent process runs one session: the captain is
+    // the one the lock names, and it has no transcript on purpose.
+    for (const [sessionId, pane, transcriptPath, pid] of [
+      ['captain', '%0', null, process.pid],
+      ['crew', '%1', transcript, process.ppid],
     ]) {
       const registered = await fetch(`http://127.0.0.1:${port}/event`, {
         method: 'POST',
@@ -2226,7 +2301,7 @@ test('the poll hands the fleet snapshot what its crewmates transcripts look like
           hook_event_name: 'SessionStart',
           cwd: sessionId === 'captain' ? fmHome : join(dir, 'example-webapp'),
           transcript_path: transcriptPath,
-          host: { tmux: '', tmux_pane: pane, pid: process.pid },
+          host: { tmux: '', tmux_pane: pane, pid },
         }),
       });
       assert.equal(registered.status, 204);

@@ -62,7 +62,9 @@ import { UNTRACKED_WINDOW_MS } from './untracked.js';
  *   session, from its nearest ancestor process. The four fields above are
  *   environment, and a server hands its own to everything it starts
  * @property {string|null} [tty] the controlling terminal, walked up from the hook
- * @property {number|null} [pid] the agent process, used only for liveness pruning
+ * @property {number|null} [pid] the agent process, used for liveness pruning and
+ *   to refuse a second, transcriptless session on one process - see
+ *   `#settlePidConflict`
  * @property {string|null} [hostname]
  */
 
@@ -286,7 +288,8 @@ export class SessionRegistry {
    *
    * @param {HookPayload} payload
    * @param {number} [now]
-   * @returns {Session|null} the stored record, or null if the session ended
+   * @returns {Session|null} the stored record, or null if the session ended or
+   *   was refused for sharing an agent process - see `#settlePidConflict`
    */
   record(payload, now = Date.now()) {
     const sessionId = payload.session_id;
@@ -344,8 +347,89 @@ export class SessionRegistry {
       // nudges would exercise while a `PermissionRequest` did not.
       dismissedBlockAt: previous.dismissedBlockAt ?? null,
     };
+    if (!this.#settlePidConflict(record, now)) {
+      // Anything this id had stored is the same stranger from an earlier
+      // event - a record written before this rule existed, on the upgrade path.
+      this.remove(sessionId, now);
+      return null;
+    }
     this.#write(sessionId, record);
     return record;
+  }
+
+  /**
+   * Decide between a record and any other session stored on its agent pid.
+   *
+   * **One agent process runs one session at a time, so two sessions on one pid
+   * means one of them is not a session.** The reporter walks up from its parent
+   * to the nearest agent, so a hook run by hand from inside a session's Bash
+   * tool - a made-up `{"session_id":"test",...}` piped into it - arrives with
+   * that session's pid, tty and terminal id. Stored, it was a row reading
+   * Waiting for you that focused somebody else's tab, and nothing removed it:
+   * pruning asks only whether the pid is alive, and it was, being a real
+   * session's. That is issue 52.
+   *
+   * **The transcript decides, and only the transcript.** A session without one
+   * yields to any other on its pid; a session with one clears the transcriptless
+   * ones off it. Every agent's real events carry a transcript where the agent
+   * keeps one, and the hand-made payload does not.
+   *
+   * Two rejected alternatives, both tempting:
+   *
+   * - **Refuse every event with no `transcript_path`.** Simpler, and wrong:
+   *   `pi --no-session` has a session id and no session file, so every event
+   *   from it carries a null transcript and is a real session. The rule here
+   *   still keeps those, because nothing else holds their pid.
+   * - **Newest wins when both have a transcript.** It would also catch a
+   *   hand-made payload that invents a `transcript_path`, and it would make
+   *   Claude Code's in-process agent teams - each teammate reporting its own
+   *   session id from the lead's process - take turns removing each other on
+   *   every event. Which of two transcript-bearing sessions is stale cannot be
+   *   told from the pid, so both are kept, exactly as before.
+   *
+   * A record with no pid has nothing to conflict on and is left alone; that is
+   * the agent not having been identified, not two sessions sharing one.
+   *
+   * @param {Session} record the record about to be written
+   * @param {number} now
+   * @returns {boolean} false when the record yields and must not be written
+   */
+  #settlePidConflict(record, now) {
+    const pid = record.host?.pid;
+    if (!Number.isInteger(pid) || pid <= 0) return true;
+    const others = this.#sessionsOnPid(pid, record.sessionId);
+    if (others.length === 0) return true;
+    if (!record.transcriptPath) return false;
+    for (const other of others) {
+      if (!other.transcriptPath) this.remove(other.sessionId, now);
+    }
+    return true;
+  }
+
+  /**
+   * Every stored session other than `sessionId` recorded against `pid`.
+   *
+   * @param {number} pid
+   * @param {string} sessionId
+   * @returns {Session[]}
+   */
+  #sessionsOnPid(pid, sessionId) {
+    let names;
+    try {
+      names = readdirSync(this.#dir);
+    } catch {
+      return [];
+    }
+    /** @type {Session[]} */
+    const found = [];
+    for (const name of names) {
+      if (!name.endsWith('.json')) continue;
+      const id = name.slice(0, -5);
+      if (id === sessionId) continue;
+      const other = this.get(id);
+      if (other?.host?.pid === pid) found.push(other);
+    }
+    return found;
   }
 
   /**
