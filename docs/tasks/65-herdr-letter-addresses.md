@@ -1,8 +1,10 @@
 ---
 issue: 65
-status: backlog
+status: shipped
 size: S
 depends: -
+branch: fm/65-herdr-letter-addresses
+shipped: 2026-11-20
 ---
 # 65 - A Herdr session whose address has a letter in it cannot be focused
 
@@ -51,13 +53,30 @@ terminals, with or without `new-tab`.
 
 ## Acceptance
 
-- [ ] `isHerdrAddress('t1b')` and `isHerdrAddress('t1d')` are true; `t5` still is.
-- [ ] `''`, `t`, `5`, `fix`, `tab`, `tmux`, `mac/t5`, `mac/t1b`, `--terminal`, `t5 `, `T1B`,
+- [x] `isHerdrAddress('t1b')` and `isHerdrAddress('t1d')` are true; `t5` still is.
+- [x] `''`, `t`, `5`, `fix`, `tab`, `tmux`, `mac/t5`, `mac/t1b`, `--terminal`, `t5 `, `T1B`,
       `null` and `5` are all refused.
-- [ ] `planFocus` gives `kind: 'herdr'` for a session recorded with `hc_terminal_id: 't1b'`,
+- [x] `planFocus` gives `kind: 'herdr'` for a session recorded with `hc_terminal_id: 't1b'`,
       so its row is focusable and no longer says *no window*.
-- [ ] `typedAttachAddress('hc attach t1b')` returns `t1b`, so a tab holding it is found and
+- [x] `typedAttachAddress('hc attach t1b')` returns `t1b`, so a tab holding it is found and
       raised.
-- [ ] `npm test`, `npm run lint` and `npm run typecheck` pass.
+- [x] `npm test`, `npm run lint` and `npm run typecheck` pass.
 - [ ] Checked by hand: a Claude Code session in a Herdr terminal with a letter in its address
       shows `Focus` and focusing it works.
+
+## Implementation notes
+
+- `src/focus/herdr.js`: `ADDRESS` is now `/^t[0-9][0-9a-z]*$/`, and its comment records the
+  20/11/2026 measurement, why the digit after the `t` is required, and that the address is
+  never decoded. That regular expression is the only place a Herdr address is parsed:
+  `planFocus` (and through it the row's `focusable` and `raise doctor`'s count),
+  `typedAttachAddress` and `findTypedAttach` all go through `isHerdrAddress`, so nothing else
+  changed.
+- Tests pin both sides at each consumer: `isHerdrAddress` (`t1b`, `t1d` accepted; `tab`,
+  `tmux`, `T1B`, `mac/t1b` and the rest of the list refused), `typedAttachAddress`
+  (`hc attach t1b` read; `hc attach tab` and `hc attach macbook/t1b` not), `findTypedAttach`
+  (a `t1b` attach is found and a `t1` beside it is not), `planFocus` and `focusSession` (a
+  `t1b` session plans and raises through its attach tab), `buildRows` (the row is focusable)
+  and `raise doctor` (a `t1b` session is counted focusable).
+- Nothing was left open by the spec. The hand check is the last acceptance item and is
+  described in the pull request's Manual testing section.
