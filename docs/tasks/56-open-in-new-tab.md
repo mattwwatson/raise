@@ -163,7 +163,7 @@ The command crosses two quoting layers, a shell and an AppleScript string litera
 built from values a hook reported. Every value is `shellQuote`d (`src/focus/tmux.js`) and the
 result escaped for AppleScript (backslash and double quote). Tests assert the exact script for
 awkward values: a socket path with a space or a single quote, and a tmux session id. Herdr
-addresses are already checked against `^t\d+$`.
+addresses are already checked by `isHerdrAddress` (`src/focus/herdr.js`).
 
 ### tmux
 

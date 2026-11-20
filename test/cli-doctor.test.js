@@ -33,6 +33,7 @@ test('doctor counts a Herdr session with an unrecognised address as not focusabl
     const start = (sessionId, host) =>
       registry.record({ session_id: sessionId, hook_event_name: 'SessionStart', cwd: dir, host });
     start('herdr-good', { hc_terminal_id: 't8', hc_terminal_socket: '/tmp/default.sock' });
+    start('herdr-letter', { hc_terminal_id: 't1b', hc_terminal_socket: '/tmp/default.sock' });
     start('herdr-bad', { hc_terminal_id: 'bogus', hc_terminal_socket: '/tmp/default.sock' });
     start('tab', { tty: '/dev/ttys001' });
 
@@ -46,7 +47,7 @@ test('doctor counts a Herdr session with an unrecognised address as not focusabl
         CODEX_HOME: join(dir, 'codex'),
       },
     });
-    assert.match(stdout, /3 registered, 2 focusable/);
+    assert.match(stdout, /4 registered, 3 focusable/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

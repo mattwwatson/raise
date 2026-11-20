@@ -43,10 +43,16 @@ function fakeExec(responses) {
   return run;
 }
 
-test('a Herdr address is t and a number, and nothing else', () => {
+test('a Herdr address is t, a digit, then digits or lowercase letters, and nothing else', () => {
   assert.equal(isHerdrAddress('t5'), true);
   assert.equal(isHerdrAddress('t123'), true);
-  for (const bad of ['', 't', '5', 'fix', 'mac/t5', '--terminal', 't5 ', null, 5]) {
+  // Measured on hc 0.1.21: the local server handed out t17, t18, t19, t1b, t1c, t1d.
+  assert.equal(isHerdrAddress('t1b'), true);
+  assert.equal(isHerdrAddress('t1d'), true);
+  // The digit after the t is what keeps an ordinary word from reading as an address.
+  const words = ['fix', 'tab', 'tmux', 'T1B'];
+  const elsewhere = ['mac/t5', 'mac/t1b'];
+  for (const bad of ['', 't', '5', ...words, ...elsewhere, '--terminal', 't5 ', null, 5]) {
     assert.equal(isHerdrAddress(bad), false, String(bad));
   }
 });
@@ -80,6 +86,11 @@ test('a typed attach names its address however hc was invoked', () => {
   assert.equal(typedAttachAddress('hc attach --history=200 t6'), 't6');
 });
 
+test('a typed attach names an address with a letter in it', () => {
+  assert.equal(typedAttachAddress('hc attach t1b'), 't1b');
+  assert.equal(typedAttachAddress('hc attach --observe t1d'), 't1d');
+});
+
 test('the picker and anything else that names no address is not a typed attach', () => {
   // The picker's argv stays bare whatever it ends up showing - which is the
   // whole reason it is not supported.
@@ -89,6 +100,8 @@ test('the picker and anything else that names no address is not a typed attach',
   assert.equal(typedAttachAddress('hc attach macbook/t6'), null);
   // A name is resolved by the server, and we cannot ask it which terminal it means.
   assert.equal(typedAttachAddress('hc attach fix'), null);
+  assert.equal(typedAttachAddress('hc attach tab'), null);
+  assert.equal(typedAttachAddress('hc attach macbook/t1b'), null);
   assert.equal(typedAttachAddress('hc read t6'), null);
 });
 
@@ -123,6 +136,12 @@ test('findTypedAttach hands back the one tab showing the address on this server'
   const exec = fakeExec({ ps: `ttys022  hc attach t6\n${DEFAULT_HOLDER}` });
   const found = await findTypedAttach(exec, { address: 't6', socket: DEFAULT_SOCKET });
   assert.deepEqual(found, { tty: '/dev/ttys022', ambiguous: false, unattributed: false });
+});
+
+test('findTypedAttach finds the tab showing an address with a letter in it', async () => {
+  const exec = fakeExec({ ps: `ttys022  hc attach t1b\nttys020  hc attach t1\n${DEFAULT_HOLDER}` });
+  const found = await findTypedAttach(exec, { address: 't1b', socket: DEFAULT_SOCKET });
+  assert.deepEqual(found, { tty: '/dev/ttys022', ambiguous: false });
 });
 
 test('findTypedAttach calls two typed attaches of one address ambiguous', async () => {

@@ -62,8 +62,23 @@ const HERDR_APP = 'herdr-app';
 /** The server a bare `hc` and the desktop app both reach. */
 const DEFAULT_SERVER = 'default';
 
-/** Addresses are `t<number>`, per herdr-core's own error text. */
-const ADDRESS = /^t\d+$/;
+/**
+ * A local terminal address: `t`, a digit, then digits or lowercase letters.
+ *
+ * herdr-core's own error text says `t<number>`, and that is not what it hands
+ * out: measured on 20/11/2026 with hc 0.1.21, the default server's `hc ls --all`
+ * listed `t17, t18, t19, t1b, t1c, t1d`. Accepting only digits left every such
+ * session saying "no window". Whether the suffix is hexadecimal or base 36 is not
+ * established, and does not matter - the address is only handed back to `hc` and
+ * the desktop app, never decoded.
+ *
+ * The digit after the `t` is what keeps a word such as `tab` or `tmux` in an
+ * `hc attach` argv from reading as an address. Lowercase only, because nothing
+ * uppercase has been seen; widen it on a measurement, not a guess. A
+ * machine-qualified `<machine>/t9` still fails, which is right: it is a terminal
+ * on another machine.
+ */
+const ADDRESS = /^t[0-9][0-9a-z]*$/;
 
 /**
  * An executable that is the Herdr client: `hc`, `herdr-core`, or either by path.
