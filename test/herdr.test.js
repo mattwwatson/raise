@@ -141,7 +141,7 @@ test('findTypedAttach hands back the one tab showing the address on this server'
 test('findTypedAttach finds the tab showing an address with a letter in it', async () => {
   const exec = fakeExec({ ps: `ttys022  hc attach t1b\nttys020  hc attach t1\n${DEFAULT_HOLDER}` });
   const found = await findTypedAttach(exec, { address: 't1b', socket: DEFAULT_SOCKET });
-  assert.deepEqual(found, { tty: '/dev/ttys022', ambiguous: false });
+  assert.deepEqual(found, { tty: '/dev/ttys022', ambiguous: false, unattributed: false });
 });
 
 test('findTypedAttach calls two typed attaches of one address ambiguous', async () => {
