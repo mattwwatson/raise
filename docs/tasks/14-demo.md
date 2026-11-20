@@ -2,7 +2,7 @@
 issue: 14
 status: backlog
 size: M
-depends: 30
+depends: 30, 56
 ---
 # 14 - Record the demo
 
@@ -32,6 +32,10 @@ and the one that reads as "someone thought about this".
 built against a fork of Firstmate. Recording against upstream means the label in the demo is
 what an upstream user will see. Writing this spec does not wait.
 
+**Record after #56 has shipped in a release, and record from the installed package.** The click
+in the loop opens a session in a new tab (#56), and the demo should show what someone who
+installs Raise gets, not a checkout.
+
 ## What is in shot
 
 Four real sessions, each in a different repo and a different way of running, so the loop shows
@@ -42,10 +46,12 @@ the range of terminals Raise supports without saying so:
 | A Firstmate session, so its task label shows | Firstmate (the upstream home) | Herdr |
 | A worker with a no-mistakes pipeline running, so its `NO-MISTAKES` line shows | raise | Ghostty |
 | A session doing ordinary work | another of the maintainer's projects | iTerm2, inside tmux |
-| **The one that stops and waits for an answer** | a third project | Herdr or Ghostty - pick whichever focus looks clearest on screen |
+| **The one that stops and waits for an answer** | a third project | tmux or Herdr, with **nothing showing it** (a detached tmux session, or a Herdr session no tab or app pane shows) |
 
 Which session does what can be swapped while rehearsing; the requirement is that the four
-terminals and both optional signals (Firstmate, no-mistakes) appear.
+terminals and both optional signals (Firstmate, no-mistakes) appear, and that the session
+clicked is one nothing is showing, so the click opens it in a new tab (#56). Turn that on with
+`raise enable new-tab` before recording, choosing the terminal that looks clearest on screen.
 
 **Not in shot, ever:** any work or client repository, any project whose content is not safe
 to publish, and anything outside these four repositories. Which private projects appear is
@@ -56,7 +62,8 @@ decided outside this repository.
 1. The dashboard, four sessions, all working. Hold long enough to read it (2-3 s).
 2. One session changes to *Waiting for you* and moves to the top.
 3. The cursor moves to it and clicks.
-4. Its window comes to the front, showing the agent's question.
+4. A new tab opens and comes to the front, attached to that session and showing the agent's
+   question. No window was showing it before the click.
 5. Back to the dashboard, matching frame 1 closely enough that the loop has no visible jump.
 
 ## How it has to be made
