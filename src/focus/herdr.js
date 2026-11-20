@@ -216,6 +216,9 @@ export function parseHerdrProcesses(text, address) {
  * @typedef {object} TypedAttach
  * @property {string|null} tty the one tab to hand to the terminal adapters
  * @property {boolean} ambiguous more than one tab holds a typed attach of it
+ * @property {boolean} unattributed a typed attach of this address exists, but
+ *   another server is running, so it may be showing this terminal or that
+ *   server's - which is not the same as nothing showing it
  */
 
 /**
@@ -228,18 +231,20 @@ export function parseHerdrProcesses(text, address) {
  */
 export async function findTypedAttach(exec, { address, socket }) {
   // Without the server there is nothing to hold the address against.
-  if (!socket) return { tty: null, ambiguous: false };
+  if (!socket) return { tty: null, ambiguous: false, unattributed: false };
   let text;
   try {
     text = await exec('ps', ['-A', '-ww', '-o', 'tty=,args='], { timeoutMs: 5000 });
   } catch {
-    return { tty: null, ambiguous: false };
+    return { tty: null, ambiguous: false, unattributed: false };
   }
   const { attachTtys, serverDirs } = parseHerdrProcesses(text, address);
   const ours = dirname(socket);
-  if (serverDirs.some((dir) => dir !== ours)) return { tty: null, ambiguous: false };
-  if (attachTtys.length > 1) return { tty: null, ambiguous: true };
-  return { tty: attachTtys[0] ?? null, ambiguous: false };
+  if (serverDirs.some((dir) => dir !== ours)) {
+    return { tty: null, ambiguous: false, unattributed: attachTtys.length > 0 };
+  }
+  if (attachTtys.length > 1) return { tty: null, ambiguous: true, unattributed: false };
+  return { tty: attachTtys[0] ?? null, ambiguous: false, unattributed: false };
 }
 
 /**
@@ -322,11 +327,15 @@ async function osascript(exec, script) {
  * forward, so both are followed by activating it. An app that will not come
  * forward has still changed its pane, and the outcome says so with `front`.
  *
+ * `borrow: false` stops at `pane.focus`. The `new-tab` setting asks for that,
+ * because it has somewhere better to show the terminal than over whatever the
+ * user's focused pane was showing.
+ *
  * @param {Function} exec
- * @param {{address: string}} target
+ * @param {{address: string, borrow?: boolean}} target
  * @returns {Promise<HerdrAppOutcome>}
  */
-export async function showInHerdrApp(exec, { address }) {
+export async function showInHerdrApp(exec, { address, borrow = true }) {
   // `is running` never launches it. Starting the app to show one terminal would
   // open a window the user did not ask for.
   if ((await osascript(exec, appRunningByIdScript(HERDR_BUNDLE_ID))) !== 'true') return null;
@@ -334,7 +343,7 @@ export async function showInHerdrApp(exec, { address }) {
   let via = null;
   if (await herdrAppDo(exec, ['pane.focus', '--terminal', address])) {
     via = 'pane';
-  } else if (await herdrAppDo(exec, ['terminal.show', '--terminal', address])) {
+  } else if (borrow && (await herdrAppDo(exec, ['terminal.show', '--terminal', address]))) {
     via = 'shown';
   }
   if (!via) return null;

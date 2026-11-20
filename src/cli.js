@@ -41,6 +41,7 @@ import {
   formatMode,
   isUnsafeMode,
   readUserConfigForWrite,
+  readUserConfig,
   setFeature,
   writeUserConfig,
 } from './user-config.js';
@@ -57,7 +58,13 @@ import { FirstmateDecisions } from './firstmate-decisions.js';
 import { UntrackedScan } from './untracked.js';
 import { focusSession, planFocus } from './focus/index.js';
 import { ALL_TERMINALS } from './focus/terminals.js';
-import { exec, execAsync, tryExec, tryExecAsync } from './exec.js';
+import {
+  NEW_TAB_BLOCK,
+  chooseNewTabTerminal,
+  newTabFrom,
+  newTabTerminals,
+} from './focus/new-tab.js';
+import { exec, execAsync, findExecutable, tryExec, tryExecAsync } from './exec.js';
 import {
   monitorHome,
   sessionsDir,
@@ -248,6 +255,9 @@ ${bold('Usage')}
   raise status             one-shot text summary, no server needed
   raise focus <session>    bring a session's window to the front
   raise enable <feature>   turn an optional feature on (${CONFIG_FEATURES.map((f) => f.name).join(', ')})
+  raise enable new-tab [terminal]
+                           open a session nothing is showing in a new tab of that
+                           terminal (${newTabTerminals().map((t) => t.name).join(', ')})
   raise disable <feature>  turn one off again
   raise install-hooks      add the Claude Code hooks to settings.json
   raise uninstall-hooks    remove them again
@@ -680,7 +690,11 @@ async function cmdFocus(positional) {
     process.exitCode = 1;
     return;
   }
-  const result = await focusSession(record, { exec: execAsync });
+  const result = await focusSession(record, {
+    exec: execAsync,
+    newTab: newTabFrom(readUserConfig()),
+    findCommand: (name) => findExecutable(name),
+  });
   if (result.ok) {
     console.log(result.note || `Focused via ${result.adapter}.`);
   } else {
@@ -736,6 +750,24 @@ async function cmdInstallHooks(flags) {
 }
 
 /**
+ * The terminals `raise enable new-tab` could write: those Raise can open a tab
+ * in and that are running now. Asked one at a time, as the focus path asks.
+ *
+ * @returns {Promise<import('./focus/terminals.js').Terminal[]>}
+ */
+async function runningNewTabTerminals() {
+  const running = [];
+  for (const terminal of newTabTerminals()) {
+    try {
+      if (await terminal.isAvailable(execAsync)) running.push(terminal);
+    } catch {
+      // Not answering is not running.
+    }
+  }
+  return running;
+}
+
+/**
  * `raise enable <feature>` and `raise disable <feature>`.
  *
  * One implementation for both, because they differ by a boolean and nothing
@@ -758,13 +790,23 @@ async function cmdInstallHooks(flags) {
  * whole reason `forge-config.js` keeps it in a `0600` file rather than in the
  * environment; the argument does not survive being moved to a flag.
  *
+ * **`raise enable new-tab` takes the terminal as an argument, and is the only
+ * one that takes anything.** A terminal name is not a secret, so the argument
+ * against a `--token` flag does not reach it, and the alternative - refusing
+ * when several terminals are running and telling the user to edit the file by
+ * hand - is the hand-editing these commands exist to replace. Without the
+ * argument it keeps the terminal already written, or writes the one supported
+ * terminal that is running; see `chooseNewTabTerminal`, which also refuses a
+ * terminal it does not know. Every other command ignores any further argument,
+ * as it always has.
+ *
  * @param {Record<string, any>} flags
  * @param {string[]} positional
  * @param {boolean} enabled
  */
 async function cmdSetFeature(flags, positional, enabled) {
   const verb = enabled ? 'enable' : 'disable';
-  const name = positional[0];
+  const [name, ...extra] = positional;
   const feature = name ? configFeature(name) : null;
   if (!feature) {
     const known = CONFIG_FEATURES.map((f) => f.name).join(', ');
@@ -782,7 +824,33 @@ async function cmdSetFeature(flags, positional, enabled) {
   let merged;
   try {
     current = readUserConfigForWrite({ path });
-    merged = setFeature(current.data, feature, enabled);
+  } catch (err) {
+    console.error(red(err.message));
+    process.exitCode = 1;
+    return;
+  }
+
+  // Which terminal is the one decision here that needs to look at the machine,
+  // and only when the user did not name one and the file does not already.
+  let value;
+  if (enabled && feature.block === NEW_TAB_BLOCK) {
+    const named = extra[0];
+    const existing = current.data?.[NEW_TAB_BLOCK]?.terminal;
+    const choice = chooseNewTabTerminal({
+      named,
+      existing,
+      running: named === undefined ? await runningNewTabTerminals() : [],
+    });
+    if (choice.error) {
+      console.error(red(choice.error));
+      process.exitCode = 1;
+      return;
+    }
+    value = choice.terminal;
+  }
+
+  try {
+    merged = setFeature(current.data, feature, enabled, value);
   } catch (err) {
     console.error(red(err.message));
     process.exitCode = 1;
@@ -816,6 +884,18 @@ async function cmdSetFeature(flags, positional, enabled) {
   }
   const backupPath = writeUserConfig(path, merged.data);
   console.log(green(`${feature.label} ${verb}d. ${backupPath ? `Backup at ${backupPath}` : ''}`.trim()));
+
+  if (enabled && feature.block === NEW_TAB_BLOCK) {
+    const terminal = newTabTerminals().find((t) => t.name === merged.data[NEW_TAB_BLOCK]?.terminal);
+    if (terminal) {
+      console.log(
+        dim(
+          `A session nothing is showing now opens in ${terminal.label} when you click it. ` +
+            `To use another terminal, run raise enable new-tab <terminal>.`,
+        ),
+      );
+    }
+  }
 
   // Said only on the way on, and only for the forge: it is the one thing left
   // that a command cannot do for you, and the reason it cannot is that a token
@@ -1153,6 +1233,25 @@ async function cmdDoctor() {
         `the check ${ago(Date.now() - cached.checkedAt)} got no answer - usually no network, and nothing to fix; it tries again a day after that`,
       );
     }
+  }
+
+  // The third opt-in, and the one that reaches no network: it lets a click open
+  // a terminal tab. Reported on the same terms as the two above - off is silent
+  // and `off`, and a setting that is on but cannot work is a `warn` that says
+  // which command fixes it.
+  const newTabFeature = configFeature('new-tab');
+  const newTab = newTabFrom(readUserConfig());
+  const newTabLabel = newTabTerminals().find((t) => t.name === newTab.terminal)?.label;
+  if (newTab.problem) {
+    warn(newTabFeature.label, newTab.problem);
+  } else if (!newTab.enabled) {
+    off(
+      newTabFeature.label,
+      'not enabled - a session nothing is showing gets a command to run instead; ' +
+        bold(`raise enable ${newTabFeature.name}`),
+    );
+  } else {
+    ok(newTabFeature.label, `enabled - a session nothing is showing opens in ${newTabLabel}`);
   }
 
   const settings = readSettingsQuietly(DEFAULT_SETTINGS);

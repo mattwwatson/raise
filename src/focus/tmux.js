@@ -354,7 +354,9 @@ export async function selectPane(exec, { pane, tmuxEnv, sessionId, windowId }) {
  * @typedef {object} TmuxTarget
  * @property {boolean} ok
  * @property {string|null} session name of the session we will act in, for messages
- * @property {string|null} sessionId null when only a control client is attached
+ * @property {string|null} sessionId null when only a control client is attached;
+ *   for a detached session, the session the attach hint names, which is the one
+ *   a new client would attach to
  * @property {string|null} windowId a property of the pane, so the same in every session
  * @property {string|null} tty
  * @property {boolean} controlMode
@@ -393,7 +395,7 @@ export async function resolveTmuxTarget(exec, { pane, tmuxEnv }) {
     return {
       ok: false,
       session: candidates[0].sessionName,
-      sessionId: null,
+      sessionId: candidates[0].sessionId,
       windowId: candidates[0].windowId,
       tty: null,
       controlMode: false,

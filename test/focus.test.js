@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { planFocus, itermUuid, focusSession, titleNeedle } from '../src/focus/index.js';
-import { orderedTerminals, ALL_TERMINALS, ghostty } from '../src/focus/terminals.js';
+import { orderedTerminals, ALL_TERMINALS, ghostty, iterm2, terminalApp } from '../src/focus/terminals.js';
 import {
   socketArgs,
   resolveTmuxTarget,
@@ -17,6 +17,10 @@ import {
   terminalAppFocusScript,
   ghosttyFocusScript,
   escapeAppleScript,
+  itermOpenTabScript,
+  terminalAppOpenTabScript,
+  ghosttyOpenTabScript,
+  shellCommand,
 } from '../src/focus/applescript.js';
 
 /**
@@ -1163,4 +1167,460 @@ test('a Herdr session with no recorded server is refused rather than sent to the
   });
   assert.equal(result.ok, false);
   assert.deepEqual(exec.calls, [], 'nothing was run');
+});
+
+// --- Opening a session in a new tab ------------------------------------------
+
+/** A tmux socket path a hook could report, with a space and a single quote. */
+const AWKWARD_SOCKET = "/tmp/raise test/it's.sock";
+const AWKWARD_TMUX_ARGV = ['/opt/homebrew/bin/tmux', '-S', AWKWARD_SOCKET, 'attach-session', '-t', '$3'];
+
+test('shellCommand quotes every word that needs it, and a single quote inside one', () => {
+  assert.equal(
+    shellCommand(AWKWARD_TMUX_ARGV),
+    String.raw`/opt/homebrew/bin/tmux -S '/tmp/raise test/it'\''s.sock' attach-session -t '$3'`,
+  );
+});
+
+test('the iTerm2 open-tab script hands the command to sh as one double-quoted word', () => {
+  // Three layers, each escaped once: shellQuote for sh, a double-quoted word
+  // for iTerm2's own argument splitter, and the AppleScript string literal.
+  const command = String.raw`/bin/sh -c \"/opt/homebrew/bin/tmux -S '/tmp/raise test/it'\\\\''s.sock' attach-session -t '$3'\"`;
+  assert.equal(
+    itermOpenTabScript({ argv: AWKWARD_TMUX_ARGV }),
+    `tell application "iTerm2"
+  try
+    tell current window to create tab with default profile command "${command}"
+  on error
+    create window with default profile command "${command}"
+  end try
+  activate
+  return "ok"
+end tell`,
+  );
+});
+
+test('the Terminal.app open-tab script runs the command in a new window, replacing the shell', () => {
+  assert.equal(
+    terminalAppOpenTabScript({ argv: AWKWARD_TMUX_ARGV }),
+    String.raw`tell application "Terminal"
+  do script "exec /opt/homebrew/bin/tmux -S '/tmp/raise test/it'\\''s.sock' attach-session -t '$3'"
+  activate
+  return "ok"
+end tell`,
+  );
+});
+
+test('the Ghostty open-tab script sets the command on a surface configuration', () => {
+  assert.equal(
+    ghosttyOpenTabScript({ argv: AWKWARD_TMUX_ARGV }),
+    String.raw`tell application id "com.mitchellh.ghostty"
+  set cfg to new surface configuration
+  set command of cfg to "/opt/homebrew/bin/tmux -S '/tmp/raise test/it'\\''s.sock' attach-session -t '$3'"
+  if (count of windows) is 0 then
+    new window with configuration cfg
+  else
+    new tab in (window 1) with configuration cfg
+  end if
+  activate
+  return "ok"
+end tell`,
+  );
+});
+
+test('a double quote and a backslash in a value cannot end any of the string literals early', () => {
+  const argv = ['/usr/bin/env', '-u', 'HC_SESSION', 'HC_SOCKET=/tmp/a"b\\c.sock', '/bin/hc', 'attach', 't6'];
+  // The shell layer quotes the whole assignment.
+  assert.equal(
+    shellCommand(argv),
+    String.raw`/usr/bin/env -u HC_SESSION 'HC_SOCKET=/tmp/a"b\c.sock' /bin/hc attach t6`,
+  );
+  // Every double quote left inside an AppleScript literal is escaped, so the
+  // only bare ones are the literal's own two ends.
+  for (const script of [
+    itermOpenTabScript({ argv }),
+    terminalAppOpenTabScript({ argv }),
+    ghosttyOpenTabScript({ argv }),
+  ]) {
+    const line = script.split('\n').find((text) => text.includes('HC_SOCKET'));
+    const bare = line.replace(/\\./g, '').match(/"/g) ?? [];
+    assert.equal(bare.length, 2, line);
+  }
+});
+
+test('every terminal adapter can open a tab, and runs its script through osascript', async () => {
+  for (const [adapter, script] of [
+    [iterm2, itermOpenTabScript],
+    [terminalApp, terminalAppOpenTabScript],
+    [ghostty, ghosttyOpenTabScript],
+  ]) {
+    const asked = [];
+    const exec = async (command, args, options) => {
+      asked.push({ command, args, options });
+      return 'ok\n';
+    };
+    assert.equal(await adapter.openTab(exec, { argv: AWKWARD_TMUX_ARGV }), true, adapter.name);
+    assert.equal(asked.length, 1);
+    assert.equal(asked[0].command, 'osascript');
+    assert.deepEqual(asked[0].args, ['-e', script({ argv: AWKWARD_TMUX_ARGV })]);
+    // Opening may start the terminal, which takes longer than finding a tab.
+    assert.ok(asked[0].options.timeoutMs > 5000);
+  }
+});
+
+test('an open-tab script that fails is not opened, for every adapter', async () => {
+  const exec = async () => {
+    throw new Error('osascript exited 1: syntax error');
+  };
+  for (const adapter of ALL_TERMINALS) {
+    assert.equal(await adapter.openTab(exec, { argv: ['/bin/true'] }), false, adapter.name);
+  }
+});
+
+/** The setting turned on for one terminal, as `newTabFrom` returns it. */
+function newTabOn(terminal = 'iterm2') {
+  return { enabled: true, terminal, problem: null };
+}
+
+/** Resolves every command to a fixed directory, so tests never read the PATH. */
+const findCommand = (name) => `/opt/bin/${name}`;
+
+/** An adapter that opens tabs, recording each argv it was handed. */
+function tabOpener(name = 'iterm2', { opens = true } = {}) {
+  const opened = [];
+  return {
+    opened,
+    name,
+    label: name,
+    isAvailable: async () => true,
+    focus: async () => false,
+    openTab: async (_exec, { argv }) => {
+      opened.push(argv);
+      return opens;
+    },
+  };
+}
+
+const DETACHED_TMUX = {
+  'list-panes': '%7\t$3\t@2\t1\tbackground',
+  'list-clients': '',
+  'select-window': '',
+  'select-pane': '',
+};
+
+test('new tab: a detached tmux session opens in a new tab on the clicked pane', async () => {
+  const terminal = tabOpener();
+  const exec = fakeExec(DETACHED_TMUX);
+  const result = await focusSession(
+    { host: { tmux_pane: '%7', tmux: `${AWKWARD_SOCKET},123,0` } },
+    { exec, terminals: [terminal], newTab: newTabOn(), findCommand },
+  );
+  assert.deepEqual(result, { ok: true, adapter: 'iterm2', tmuxSession: 'background' });
+  // Attached by the session's id on the session's own socket, never by name.
+  assert.deepEqual(terminal.opened, [
+    ['/opt/bin/tmux', '-S', AWKWARD_SOCKET, 'attach-session', '-t', '$3'],
+  ]);
+  // The pane is selected first, so the new client opens on the right window.
+  const selectAt = exec.calls.findIndex((c) => c.includes('select-window -t $3:@2'));
+  assert.ok(selectAt >= 0, 'the window was selected in the session the tab attaches to');
+  assert.ok(exec.calls.some((c) => c.includes('select-pane -t %7')));
+});
+
+test('new tab: off, a detached tmux session keeps its refusal and hint, and nothing opens', async () => {
+  const terminal = tabOpener();
+  const exec = fakeExec(DETACHED_TMUX);
+  for (const newTab of [null, { enabled: false, terminal: null, problem: null }]) {
+    const result = await focusSession(
+      { host: { tmux_pane: '%7' } },
+      { exec, terminals: [terminal], newTab, findCommand },
+    );
+    assert.equal(result.ok, false);
+    assert.match(result.reason, /not attached/);
+    assert.equal(result.hint, 'tmux attach -t background');
+  }
+  assert.deepEqual(terminal.opened, []);
+  assert.ok(!exec.calls.some((c) => c.includes('select-window')), 'nothing was moved');
+});
+
+test('new tab: a tab that fails to open gives the refusal the setting off would have', async () => {
+  const terminal = tabOpener('iterm2', { opens: false });
+  const result = await focusSession(
+    { host: { tmux_pane: '%7' } },
+    { exec: fakeExec(DETACHED_TMUX), terminals: [terminal], newTab: newTabOn(), findCommand },
+  );
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /not attached/);
+  assert.equal(result.hint, 'tmux attach -t background');
+  assert.equal(terminal.opened.length, 1);
+});
+
+test('new tab: a tmux Raise cannot resolve to a path opens nothing', async () => {
+  // A terminal started from the Dock searches a minimal PATH, so a bare `tmux`
+  // would open a tab that fails at once. Better the refusal and its hint.
+  const terminal = tabOpener();
+  const result = await focusSession(
+    { host: { tmux_pane: '%7' } },
+    { exec: fakeExec(DETACHED_TMUX), terminals: [terminal], newTab: newTabOn(), findCommand: () => null },
+  );
+  assert.equal(result.ok, false);
+  assert.deepEqual(terminal.opened, []);
+});
+
+test('new tab: the setting names a terminal, and only that terminal opens the tab', async () => {
+  const iterm = tabOpener('iterm2');
+  const ghosttyTabs = tabOpener('ghostty');
+  const result = await focusSession(
+    { host: { tmux_pane: '%7' } },
+    {
+      exec: fakeExec(DETACHED_TMUX),
+      terminals: [iterm, ghosttyTabs],
+      newTab: newTabOn('ghostty'),
+      findCommand,
+    },
+  );
+  assert.equal(result.adapter, 'ghostty');
+  assert.deepEqual(iterm.opened, []);
+  // The default socket takes no -S at all, exactly as every other tmux command.
+  assert.deepEqual(ghosttyTabs.opened, [['/opt/bin/tmux', 'attach-session', '-t', '$3']]);
+});
+
+test('new tab: an attached tmux session is raised as before, and no tab opens', async () => {
+  const terminal = { ...tabOpener(), focus: async (_exec, { tty }) => tty === '/dev/ttys031' };
+  const exec = fakeExec({
+    'list-panes': '%1\t$3\t@2\t1\twork',
+    'list-clients': '/dev/ttys031\t0\t$3\t@2',
+    'select-window': '',
+    'select-pane': '',
+  });
+  const result = await focusSession(
+    { host: { tmux_pane: '%1' } },
+    { exec, terminals: [terminal], newTab: newTabOn(), findCommand },
+  );
+  assert.deepEqual(result, { ok: true, adapter: 'iterm2', tmuxSession: 'work' });
+  assert.deepEqual(terminal.opened, []);
+});
+
+test('new tab: the Herdr app with no pane for the session opens a tab rather than borrowing one', async () => {
+  const terminal = tabOpener();
+  const exec = fakeExec({
+    ps: HERDR_HOLDER,
+    'is running': 'true',
+    'pane.focus': new Error('herdr-app exited 1: {"error":"no such pane"}'),
+    'terminal.show': '{}',
+  });
+  const result = await focusSession(herdrSession({ hc_terminal_id: 't8' }), {
+    exec,
+    terminals: [terminal],
+    newTab: newTabOn(),
+    findCommand,
+  });
+  assert.deepEqual(result, { ok: true, adapter: 'iterm2' });
+  assert.ok(!exec.calls.some((c) => c.includes('terminal.show')), "the app's focused pane was left alone");
+  assert.deepEqual(terminal.opened, [
+    ['/usr/bin/env', '-u', 'HC_SESSION', `HC_SOCKET=${HERDR_DEFAULT}`, '/opt/bin/hc', 'attach', 't8'],
+  ]);
+});
+
+test('new tab: the Herdr app with no pane for the session borrows it when the tab fails to open', async () => {
+  // The setting off answers this click from the app's focused pane, so a tab
+  // that will not open must leave the same answer rather than a refusal.
+  const terminal = tabOpener('iterm2', { opens: false });
+  const exec = fakeExec({
+    ps: HERDR_HOLDER,
+    'is running': 'true',
+    'pane.focus': new Error('herdr-app exited 1: {"error":"no such pane"}'),
+    'terminal.show': '{}',
+    activate: '',
+  });
+  const result = await focusSession(herdrSession({ hc_terminal_id: 't8' }), {
+    exec,
+    terminals: [terminal],
+    newTab: newTabOn(),
+    findCommand,
+  });
+  assert.deepEqual(result, {
+    ok: true,
+    adapter: 'herdr-app',
+    note: 'Shown in the Herdr app. To bring up your own terminal instead, attach it with hc attach t8.',
+  });
+  assert.ok(exec.calls.includes('herdr-app do terminal.show --terminal t8'));
+});
+
+test('new tab: the Herdr app with no pane for the session borrows it when hc cannot be found', async () => {
+  const terminal = tabOpener();
+  const exec = fakeExec({
+    ps: HERDR_HOLDER,
+    'is running': 'true',
+    'pane.focus': new Error('herdr-app exited 1: {"error":"no such pane"}'),
+    'terminal.show': '{}',
+    activate: '',
+  });
+  const result = await focusSession(herdrSession({ hc_terminal_id: 't8' }), {
+    exec,
+    terminals: [terminal],
+    newTab: newTabOn(),
+    findCommand: (name) => (name === 'hc' ? null : findCommand(name)),
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.adapter, 'herdr-app');
+  assert.match(result.note, /^Shown in the Herdr app\./);
+  assert.deepEqual(terminal.opened, []);
+});
+
+test('new tab: the Herdr app\'s own pane for the session still wins', async () => {
+  const terminal = tabOpener();
+  const exec = fakeExec({ ps: '', 'is running': 'true', 'pane.focus': '{}', activate: '' });
+  const result = await focusSession(herdrSession(), {
+    exec,
+    terminals: [terminal],
+    newTab: newTabOn(),
+    findCommand,
+  });
+  assert.deepEqual(result, { ok: true, adapter: 'herdr-app' });
+  assert.deepEqual(terminal.opened, []);
+});
+
+test('new tab: a Herdr session nothing shows opens in a tab, including one attached from the menu', async () => {
+  // `hc` with no address is the picker: Raise cannot tell what it shows, so it
+  // is not a tab that shows this terminal, and the click opens a typed attach.
+  const terminal = tabOpener();
+  const exec = fakeExec({ ps: `ttys021  hc\n${HERDR_HOLDER}`, 'is running': 'false' });
+  const result = await focusSession(herdrSession({ hc_terminal_id: 't8' }), {
+    exec,
+    terminals: [terminal],
+    newTab: newTabOn(),
+    findCommand,
+  });
+  assert.deepEqual(result, { ok: true, adapter: 'iterm2' });
+  assert.equal(terminal.opened.length, 1);
+});
+
+test('new tab: the tab Raise opened is what the next click raises', async () => {
+  // The process `env` leaves behind is the absolute path to hc with the
+  // address, which is the typed attach step 1 already finds.
+  const holding = { ...tabOpener(), focus: async (_exec, { tty }) => tty === '/dev/ttys040' };
+  const exec = fakeExec({ ps: `ttys040  /opt/bin/hc attach t8\n${HERDR_HOLDER}` });
+  const result = await focusSession(herdrSession({ hc_terminal_id: 't8' }), {
+    exec,
+    terminals: [holding],
+    newTab: newTabOn(),
+    findCommand,
+  });
+  assert.deepEqual(result, { ok: true, adapter: 'iterm2' });
+  assert.deepEqual(holding.opened, []);
+});
+
+test('new tab: a session on another Herdr server names that server in the tab', async () => {
+  const terminal = tabOpener();
+  const exec = fakeExec({ ps: '', 'is running': 'true' });
+  const result = await focusSession(herdrSession({ hc_terminal_socket: HERDR_LAB }), {
+    exec,
+    terminals: [terminal],
+    newTab: newTabOn(),
+    findCommand,
+  });
+  assert.deepEqual(result, { ok: true, adapter: 'iterm2' });
+  assert.deepEqual(terminal.opened, [
+    ['/usr/bin/env', '-u', 'HC_SESSION', `HC_SOCKET=${HERDR_LAB}`, '/opt/bin/hc', 'attach', 't6'],
+  ]);
+  assert.ok(!exec.calls.some((c) => c.startsWith('herdr-app')), 'the app shows another server');
+});
+
+test('new tab: two typed attaches keep their refusal, because two tabs already show it', async () => {
+  const terminal = tabOpener();
+  const exec = fakeExec({ ps: 'ttys020  hc attach t6\nttys022  hc attach t6', 'is running': 'false' });
+  const result = await focusSession(herdrSession(), {
+    exec,
+    terminals: [terminal],
+    newTab: newTabOn(),
+    findCommand,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.ambiguous, true);
+  assert.deepEqual(terminal.opened, []);
+});
+
+test('new tab: a typed attach Raise cannot attribute to this server opens no second copy', async () => {
+  // With another server running, `hc attach t6` could be either server's t6.
+  // It may well be this one, and a new tab on every click would stack them up.
+  const terminal = tabOpener();
+  const exec = fakeExec({
+    ps: [
+      'ttys022  hc attach t6',
+      HERDR_HOLDER,
+      '?? herdr-core hold --socket /Users/me/.local/state/herdr-core/lab/lab.holder.2.sock',
+    ].join('\n'),
+    'is running': 'false',
+  });
+  const result = await focusSession(herdrSession(), {
+    exec,
+    terminals: [terminal],
+    newTab: newTabOn(),
+    findCommand,
+  });
+  assert.deepEqual(result, {
+    ok: false,
+    reason: 'Not shown anywhere Raise can see.',
+    hint: 'hc attach t6',
+  });
+  assert.deepEqual(terminal.opened, []);
+});
+
+test('new tab: a typed attach no adapter can raise keeps its answer and opens no second copy', async () => {
+  const terminal = tabOpener();
+  const exec = fakeExec({ ps: 'ttys022  hc attach t6', 'is running': 'false' });
+  const result = await focusSession(herdrSession(), {
+    exec,
+    terminals: [terminal],
+    newTab: newTabOn(),
+    findCommand,
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /Could not find that tab/);
+  assert.deepEqual(terminal.opened, []);
+});
+
+test('new tab: a Herdr tab that fails to open gives the refusal and hint the setting off would', async () => {
+  const terminal = tabOpener('iterm2', { opens: false });
+  const exec = fakeExec({ ps: '', 'is running': 'false' });
+  const result = await focusSession(herdrSession({ hc_terminal_socket: HERDR_LAB }), {
+    exec,
+    terminals: [terminal],
+    newTab: newTabOn(),
+    findCommand,
+  });
+  assert.deepEqual(result, {
+    ok: false,
+    reason: 'Not shown anywhere Raise can see.',
+    hint: `HC_SOCKET=${HERDR_LAB} hc attach t6`,
+  });
+});
+
+test('new tab: a Herdr session with no recorded server still runs nothing', async () => {
+  const terminal = tabOpener();
+  const exec = fakeExec({});
+  const result = await focusSession(herdrSession({ hc_terminal_socket: null }), {
+    exec,
+    terminals: [terminal],
+    newTab: newTabOn(),
+    findCommand,
+  });
+  assert.equal(result.ok, false);
+  assert.deepEqual(exec.calls, []);
+  assert.deepEqual(terminal.opened, []);
+});
+
+test('new tab: a setting that names no usable terminal focuses as if it were off', async () => {
+  const terminal = tabOpener();
+  const result = await focusSession(
+    { host: { tmux_pane: '%7' } },
+    {
+      exec: fakeExec(DETACHED_TMUX),
+      terminals: [terminal],
+      newTab: { enabled: true, terminal: null, problem: 'on, but no terminal is named' },
+      findCommand,
+    },
+  );
+  assert.equal(result.ok, false);
+  assert.deepEqual(terminal.opened, []);
 });

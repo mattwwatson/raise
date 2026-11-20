@@ -1,8 +1,10 @@
 ---
 issue: 56
-status: backlog
+status: shipped
 size: M
 depends: -
+branch: fm/56-open-in-new-tab
+shipped: 2026-11-19
 ---
 # 56 - Focusing a tmux or Herdr session that nothing is showing opens it in a new tab
 
@@ -141,7 +143,8 @@ once, in `src/focus/applescript.js`:
 
 - **iTerm2:** `create tab with default profile command "..."` on the current window, or
   `create window with default profile command "..."` when it has none.
-- **Terminal.app:** `do script "..."` in a new tab, or a new window when there is none.
+- **Terminal.app:** `do script "..."`, which opens a new window. Its dictionary cannot make a
+  tab without System Events and the Accessibility permission; see the Implementation notes.
 - **Ghostty 1.4:** `new tab` (or `new window`) with a `surface configuration` whose `command`
   is the attach command. Checked on 19/11/2026 against the `Ghostty.sdef` shipped in 1.4.0,
   which has `new tab`, `new window`, `new surface configuration` and a `command` property. Check
@@ -211,19 +214,115 @@ Update `README.md` in the same pull request:
 
 ## Acceptance
 
-- [ ] `raise enable new-tab` writes `newTab.enabled: true` and the only running supported
+- [x] `raise enable new-tab` writes `newTab.enabled: true` and the only running supported
       terminal; refuses with several or none running; refuses an unknown terminal name.
-- [ ] `raise disable new-tab` writes `enabled: false` and keeps `terminal`.
-- [ ] `raise doctor` reports the setting and the terminal.
-- [ ] Each adapter's `openTab` script is asserted exactly in tests, including a socket path
+- [x] `raise disable new-tab` writes `enabled: false` and keeps `terminal`.
+- [x] `raise doctor` reports the setting and the terminal.
+- [x] Each adapter's `openTab` script is asserted exactly in tests, including a socket path
       with a space and a single quote.
-- [ ] tmux, no client attached, setting on: a new tab opens on the session's pane; the next
+- [x] tmux, no client attached, setting on: a new tab opens on the session's pane; the next
       click raises that tab. Setting off: unchanged refusal and hint.
-- [ ] Herdr, app running with no pane, setting on: a new tab rather than the app's focused
+- [x] Herdr, app running with no pane, setting on: a new tab rather than the app's focused
       pane. Nothing showing it: a new tab. Next click raises the tab through the typed-attach
       path. Ambiguous typed attaches: unchanged refusal.
-- [ ] A session on a non-default tmux socket and a non-default Herdr server opens correctly.
-- [ ] Opening the tab fails: today's refusal and hint.
-- [ ] Checked by hand in iTerm2, Terminal.app and Ghostty 1.4, for tmux and Herdr.
-- [ ] README updated as listed above; `CONFIG_FEATURES` header and the decision index updated.
-- [ ] `npm test`, `npm run lint`, `npm run typecheck` pass.
+- [x] A session on a non-default tmux socket and a non-default Herdr server opens correctly.
+- [x] Opening the tab fails: today's refusal and hint.
+- [ ] Checked by hand in iTerm2, Terminal.app and Ghostty 1.4, for tmux and Herdr. Still to
+      be done; the walkthrough is in the pull request.
+- [x] README updated as listed above; `CONFIG_FEATURES` header and the decision index updated.
+- [x] `npm test`, `npm run lint`, `npm run typecheck` pass.
+
+---
+
+## Implementation notes
+
+Written 19/11/2026, while building it. The AppleScript was compiled with `osacompile` and read
+against each app's own `.sdef`; none of it was sent to a running terminal. The hand checks in
+iTerm2, Terminal.app and Ghostty are still to do.
+
+**`raise enable new-tab` takes the terminal as an argument** - `raise enable new-tab ghostty` -
+and is the only `enable` that takes anything. The spec left open whether to accept an argument
+or have the user write `terminal` by hand. The argument wins because the hand edit is exactly
+what `raise enable` was built to replace (see `docs/tasks/22-opt-in-commands.md`: a `cat >`
+recipe destroyed a credential), and a terminal name is not a secret, so the reason there is no
+`--token` flag does not reach it. Without an argument the command keeps the terminal already in
+the file, or writes the one running supported terminal, and refuses with several or none
+running. An unknown name is refused. The choice is the pure `chooseNewTabTerminal` in
+`src/focus/new-tab.js`, tested directly, because which terminals are running is the machine's
+answer and the CLI tests must not depend on it. Every other `enable` and `disable` ignores any
+further argument, as it did before.
+
+**Terminal.app opens a new window, not a tab.** This is the one place the build differs from
+*Where: a new tab in the front window*, and it is forced: Terminal.app's dictionary has no way
+to make a tab. `do script` with no `in` opens a new window, and with `in` it types into a tab
+that already exists - somebody's shell. The only route to a tab is sending Cmd-T through System
+Events, which needs the Accessibility permission for whatever runs `osascript` and lands in
+whichever window is frontmost. The README says so.
+
+**How each terminal runs the command**, which decides the quoting. Every adapter receives an
+argv array, and the one shared step is `shellCommand` (`shellQuote` on every word):
+
+- **Ghostty runs it through a shell.** Ghostty's own documentation for `command` (from
+  `ghostty +show-config --default --docs` on 1.4.0) says a command with arguments is run with
+  `/bin/sh -c`; ours always has arguments. No `shell:` prefix is written: the `command`
+  property of a surface configuration may or may not parse the prefix, and if it does not, the
+  prefix would become part of the command. Both readings lead to `/bin/sh -c` without it.
+- **iTerm2 splits it itself**, with a parser of its own (`componentsInShellCommand`, a name
+  found in the 3.7.7 binary) rather than a shell; the dictionary says only *"Shell command to
+  run"*. So the POSIX command line is handed to `/bin/sh -c` as one double-quoted word, with
+  `"` and `\` escaped inside it. That form reads the same whether or not iTerm2's parser also
+  honours single quotes, because inside double quotes a single quote is an ordinary
+  character. It has not been run against iTerm2, so it is the first thing the hand check
+  should exercise, with an awkward socket path.
+- **Terminal.app types it into a new login shell** (`do script`), so it is POSIX-quoted and
+  prefixed with `exec`, so the window ends when the attach does.
+
+Every value then goes through `escapeAppleScript` once. `test/focus.test.js` asserts each
+script exactly for a socket path with a space and a single quote and the session id `$3`, and
+separately that a `"` and a `\` in a value cannot end a string literal early.
+
+**Executables are absolute paths.** A terminal started from the Dock searches launchd's
+`/usr/bin:/bin:/usr/sbin:/sbin`, where Homebrew's `tmux` and `~/.local/bin/hc` are not found.
+`findExecutable` in `src/exec.js` resolves the name on Raise's own `PATH` - the binary Raise has
+just been talking to - and a name it cannot resolve opens nothing, leaving today's refusal.
+
+**tmux.** `resolveTmuxTarget`'s detached result now carries the session id the hint names (the
+candidate with fewest windows). Measured on a scratch tmux 3.7b server under a socket path
+holding a space and a single quote: `window-size` is `latest` by default, so the new client
+resizes the session to its own tab; `select-window -t '$0:@1'` on the detached session followed
+by `attach-session -t '$0'` attached a client already on `@1`; and the `-S` path reached the
+server through argv unharmed.
+
+**Herdr.** The tab runs `/usr/bin/env -u HC_SESSION HC_SOCKET=<socket> <hc> attach <address>`
+for every server, the default one included. The new tab's environment is the terminal app's,
+not Raise's, so a bare `hc` would reach whichever server that environment names; `HC_SOCKET`
+names any server, and clearing `HC_SESSION` leaves it the only thing that chooses. `env` execs
+`hc`, so the process the next click finds is `<path>/hc attach t6`, which `typedAttachAddress`
+already recognises. A session that recorded no server opens nothing, as it ran nothing before.
+
+**When a Herdr tab is not opened, and why.** Beyond the spec's ambiguous case, two more cases
+keep their setting-off answer, both because a tab may already be showing the terminal and a
+second copy would stack up one per click:
+
+- a typed attach that no adapter could raise (a terminal Raise has no adapter for);
+- a typed attach Raise cannot attribute because another Herdr server is running.
+  `findTypedAttach` now reports this as `unattributed` rather than as nothing found.
+
+The cost of the second is a known limit: a session on a non-default server, while the default
+server also runs, opens in a tab on the first click, and the next click gets the setting-off
+refusal rather than raising that tab, because `hc attach t6` does not say which server's `t6`
+it is. That is the existing two-server rule, unchanged, and better than a new tab per click.
+
+**Step 3 waits for the tab, rather than being skipped.** `showInHerdrApp` gained
+`borrow: false`, which stops at `pane.focus`. With the setting on, the app's own pane for the
+terminal still wins, and the focused pane is borrowed only when the tab fails to open - so a
+failed tab gives the same answer as the setting off, rather than a refusal where the app would
+have shown it.
+
+**Read at click time.** `server.js` and `raise focus` read the setting with
+`newTabFrom(readUserConfig())` on every click, so `focus/` takes it as a parameter and stays
+free of file access. `test/server.test.js` writes the file under a running server and checks the
+next click opens the tab.
+
+**`src/user-config.js`'s header was wrong once this existed**: it said everything in the file
+reaches the network. It now says two of the three opt-ins do.

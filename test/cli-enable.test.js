@@ -20,6 +20,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { CONFIG_FEATURES, configFeature } from '../src/user-config.js';
+import { newTabTerminals } from '../src/focus/new-tab.js';
 
 const execFileAsync = promisify(execFile);
 const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'raise.js');
@@ -308,7 +309,11 @@ test('every command raise doctor names is one raise enable actually accepts', as
     );
 
     for (const name of named) {
-      const { stdout: enabled } = await raise(['enable', name, '--yes'], s.home);
+      // A feature with a value is given one, so the command never has to look
+      // at which terminals are running - which would be this test touching the
+      // real machine, and answering differently on every machine it runs on.
+      const value = configFeature(name)?.field ? [newTabTerminals()[0].name] : [];
+      const { stdout: enabled } = await raise(['enable', name, ...value, '--yes'], s.home);
       assert.doesNotMatch(enabled, /Unknown feature/);
       const feature = configFeature(name);
       assert.match(stdout, new RegExp(`${feature.label}[\\s\\S]*?raise enable ${name}`));
@@ -317,4 +322,113 @@ test('every command raise doctor names is one raise enable actually accepts', as
   } finally {
     s.cleanup();
   }
+});
+
+// --- new-tab -------------------------------------------------------------------
+//
+// Every case names its terminal, or has one in the file already. Without either
+// the command asks which terminals are running, and a test that did that would
+// touch the real machine and answer differently on every machine it ran on -
+// that choice is `chooseNewTabTerminal`'s, and is tested there directly.
+
+test('enable new-tab writes the terminal it is given', async () => {
+  const s = scratch({ config: WITH_CREDENTIAL });
+  try {
+    const { stdout } = await raise(['enable', 'new-tab', 'ghostty', '--yes'], s.home);
+    assert.match(stdout, /add newTab\.enabled: true/);
+    assert.match(stdout, /add newTab\.terminal: "ghostty"/);
+    assert.match(stdout, /New tab enabled/);
+    assert.match(stdout, /opens in Ghostty/);
+    const after = read(s.path);
+    assert.deepEqual(after.newTab, { enabled: true, terminal: 'ghostty' });
+    assert.deepEqual(after.forge.bitbucket, { email: 'you@example.com', token: 'the-token' });
+    assert.equal(mode(s.path), '0600');
+  } finally {
+    s.cleanup();
+  }
+});
+
+test('enable new-tab refuses a terminal it cannot open a tab in, and writes nothing', async () => {
+  const s = scratch();
+  try {
+    await assert.rejects(
+      raise(['enable', 'new-tab', 'wezterm', '--yes'], s.home),
+      (err) => /Unknown terminal "wezterm"/.test(err.stderr) && err.code === 1,
+    );
+    assert.throws(() => readFileSync(s.path, 'utf8'), 'no file should have been created');
+  } finally {
+    s.cleanup();
+  }
+});
+
+test('enable new-tab keeps the terminal the file already names', async () => {
+  const s = scratch({ config: '{"newTab":{"enabled":false,"terminal":"terminal-app"}}\n' });
+  try {
+    const { stdout } = await raise(['enable', 'new-tab', '--yes'], s.home);
+    assert.match(stdout, /change newTab\.enabled: false -> true/);
+    assert.doesNotMatch(stdout, /newTab\.terminal/);
+    assert.deepEqual(read(s.path).newTab, { enabled: true, terminal: 'terminal-app' });
+  } finally {
+    s.cleanup();
+  }
+});
+
+test('disable new-tab writes false and keeps the terminal', async () => {
+  const s = scratch({ config: '{"newTab":{"enabled":true,"terminal":"iterm2"}}\n' });
+  try {
+    const { stdout } = await raise(['disable', 'new-tab', '--yes'], s.home);
+    assert.match(stdout, /change newTab\.enabled: true -> false/);
+    assert.deepEqual(read(s.path).newTab, { enabled: false, terminal: 'iterm2' });
+  } finally {
+    s.cleanup();
+  }
+});
+
+test('an argument after any feature but enable new-tab is ignored, as it was before new-tab', async () => {
+  // Only `enable new-tab` reads an argument; every other command ignored a
+  // trailing word before this change and still does, with the same output.
+  for (const [args, config] of [
+    [['enable', 'update-check'], null],
+    [['disable', 'new-tab'], '{"newTab":{"enabled":true,"terminal":"iterm2"}}\n'],
+  ]) {
+    const plain = scratch(config ? { config } : {});
+    const extra = scratch(config ? { config } : {});
+    try {
+      const without = await raise([...args, '--yes'], plain.home);
+      const withExtra = await raise([...args, 'iterm2', '--yes'], extra.home);
+      assert.equal(
+        withExtra.stdout.replaceAll(extra.home, '~'),
+        without.stdout.replaceAll(plain.home, '~'),
+        args.join(' '),
+      );
+      assert.deepEqual(read(extra.path), read(plain.path), args.join(' '));
+    } finally {
+      plain.cleanup();
+      extra.cleanup();
+    }
+  }
+});
+
+test('doctor reports new-tab off, on with its terminal, and on with a terminal it cannot use', async () => {
+  const s = scratch();
+  try {
+    const off = (await raise(['doctor'], s.home)).stdout;
+    assert.match(off, /New tab[\s\S]*?not enabled[\s\S]*?raise enable new-tab/);
+
+    writeFileSync(s.path, '{"newTab":{"enabled":true,"terminal":"terminal-app"}}\n');
+    chmodSync(s.path, 0o600);
+    const on = (await raise(['doctor'], s.home)).stdout;
+    assert.match(on, /New tab[\s\S]*?enabled - a session nothing is showing opens in Terminal\.app/);
+
+    writeFileSync(s.path, '{"newTab":{"enabled":true,"terminal":"wezterm"}}\n');
+    const bad = (await raise(['doctor'], s.home)).stdout;
+    assert.match(bad, /New tab[\s\S]*?"wezterm" is not a terminal Raise can open a tab in/);
+  } finally {
+    s.cleanup();
+  }
+});
+
+test('the usage names every terminal new-tab can open in', async () => {
+  const { stdout } = await execFileAsync(process.execPath, [CLI, '--help']);
+  assert.match(stdout, new RegExp(newTabTerminals().map((t) => t.name).join(', ')));
 });

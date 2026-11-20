@@ -33,6 +33,7 @@ import {
 
 const UPDATES = configFeature('update-check');
 const FORGE = configFeature('pull-request-state');
+const NEW_TAB = configFeature('new-tab');
 
 function scratch() {
   const dir = mkdtempSync(join(tmpdir(), 'raise-config-'));
@@ -85,6 +86,36 @@ test('disabling writes false and keeps the credential, so re-enabling needs no n
 test('setting a feature to what it already says is no change at all', () => {
   const { changes } = setFeature({ updates: { enabled: true } }, UPDATES, true);
   assert.deepEqual(changes, []);
+});
+
+test('enabling new-tab writes the terminal beside the boolean, and says both', () => {
+  const { data, changes } = setFeature({}, NEW_TAB, true, 'iterm2');
+  assert.deepEqual(data, { newTab: { enabled: true, terminal: 'iterm2' } });
+  assert.deepEqual(changes, ['add newTab.enabled: true', 'add newTab.terminal: "iterm2"']);
+});
+
+test('naming another terminal is a change even while the setting is already on', () => {
+  const { data, changes } = setFeature(
+    { newTab: { enabled: true, terminal: 'iterm2' } },
+    NEW_TAB,
+    true,
+    'ghostty',
+  );
+  assert.deepEqual(data.newTab, { enabled: true, terminal: 'ghostty' });
+  assert.deepEqual(changes, ['change newTab.terminal: "iterm2" -> "ghostty"']);
+});
+
+test('disabling new-tab keeps the terminal, so turning it back on names none again', () => {
+  const { data, changes } = setFeature({ newTab: { enabled: true, terminal: 'ghostty' } }, NEW_TAB, false);
+  assert.deepEqual(data.newTab, { enabled: false, terminal: 'ghostty' });
+  assert.deepEqual(changes, ['change newTab.enabled: true -> false']);
+  // No value leaves the field as it is.
+  const again = setFeature(data, NEW_TAB, true);
+  assert.deepEqual(again.data.newTab, { enabled: true, terminal: 'ghostty' });
+});
+
+test('a value for a feature that takes none is refused rather than written somewhere', () => {
+  assert.throws(() => setFeature({}, UPDATES, true, 'iterm2'), /takes no value/);
 });
 
 test('the merge never mutates what it was given', () => {

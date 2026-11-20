@@ -336,7 +336,7 @@ stratified on purpose, so read the whole file rather than one section.
 | the writer lives beside the reader, because `0600` is a property of the file | `src/user-config.js` (`writeUserConfig`) |
 | `hooks.js`'s `writeSettings` is not reused; `mode` creates and only `chmod` repairs | `src/user-config.js` (`writeUserConfig`) |
 | the backup is chmodded too, or repairing a mode leaks the credential it just secured | `src/user-config.js` (`writeUserConfig`) |
-| `enable`/`disable` are a closed set of two, named for what `doctor` prints | `src/user-config.js` (`CONFIG_FEATURES`) |
+| `enable`/`disable` are a closed set, named for what `doctor` prints, and `new-tab` alone writes a value besides `enabled` | `src/user-config.js` (`CONFIG_FEATURES`) |
 | whether a running `raise serve` notices a write is a property of the feature, not the command | `src/user-config.js` (`CONFIG_FEATURES`) |
 | `disable` writes `false` rather than deleting, and never removes a credential | `src/user-config.js` (`setFeature`) |
 | no credential may reach argv - there is no `--token` flag, now or later | `src/cli.js` (`cmdSetFeature`), `docs/tasks/22-opt-in-commands.md` |

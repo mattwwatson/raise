@@ -25,10 +25,23 @@ import { resolveTmuxTarget, selectPane, hostTmuxPane } from './tmux.js';
 import { orderedTerminals, ALL_TERMINALS } from './terminals.js';
 import { focusClaudeDesktop } from './claude-desktop.js';
 import { isHerdrAddress, findTypedAttach, isAppServer, showInHerdrApp, attachHint } from './herdr.js';
+import { openInNewTab, tmuxAttachArgv, herdrAttachArgv } from './new-tab.js';
 
 /** @typedef {import('./terminals.js').Terminal} Terminal */
 /** @typedef {import('../registry.js').Session} Session */
 /** @typedef {import('../registry.js').Host} Host */
+/** @typedef {import('./new-tab.js').NewTabSetting} NewTabSetting */
+
+/**
+ * What it takes to open a session in a new tab: the terminal the `new-tab`
+ * setting names, and a way to turn a bare command name into the absolute path
+ * the terminal will run. Null when the setting is off, or when it names no
+ * terminal Raise can open a tab in, which focuses exactly as it did before the
+ * setting existed.
+ *
+ * @typedef {{terminal: string, terminals: Terminal[],
+ *   findCommand: (name: string) => string|null}|null} TabOpener
+ */
 
 /**
  * What focusing this session will take, decided without doing any of it.
@@ -233,13 +246,26 @@ async function focusTerminal(exec, { sessionUuid, tty, termProgram, terminals })
 /**
  * Focus the window hosting a session.
  *
+ * `newTab` is the `new-tab` setting, read by the caller at click time so that
+ * this directory never touches a file, and `findCommand` resolves the commands
+ * a new tab runs - see `findExecutable` in ../exec.js. Both are defaulted to
+ * off, so a caller that passes neither focuses exactly as before the setting
+ * existed.
+ *
  * @param {Session|null} record session record
- * @param {{exec: Function, terminals?: Terminal[]}} deps `exec` must be
+ * @param {{exec: Function, terminals?: Terminal[], newTab?: NewTabSetting|null,
+ *   findCommand?: (name: string) => string|null}} deps `exec` must be
  *   asynchronous; this is reachable from the server's /focus handler.
  * @returns {Promise<FocusResult>}
  */
-export async function focusSession(record, { exec, terminals = ALL_TERMINALS }) {
+export async function focusSession(
+  record,
+  { exec, terminals = ALL_TERMINALS, newTab = null, findCommand = () => null },
+) {
   const plan = planFocus(record);
+  /** @type {TabOpener} */
+  const opener =
+    newTab?.enabled && newTab.terminal ? { terminal: newTab.terminal, terminals, findCommand } : null;
 
   if (plan.kind === 'unfocusable') {
     return { ok: false, reason: plan.reason };
@@ -254,13 +280,17 @@ export async function focusSession(record, { exec, terminals = ALL_TERMINALS }) 
   }
 
   if (plan.kind === 'herdr') {
-    return focusHerdr(exec, { address: plan.address, socket: plan.socket, terminals });
+    return focusHerdr(exec, { address: plan.address, socket: plan.socket, terminals, opener });
   }
 
   // tmux: put the right pane in front inside tmux first, then surface the
   // terminal window that tmux client is living in.
   const target = await resolveTmuxTarget(exec, { pane: plan.pane, tmuxEnv: plan.tmuxEnv });
   if (!target.ok) {
+    if (target.reason === 'detached' && opener) {
+      const opened = await openDetachedTmux(exec, { plan, target, opener });
+      if (opened) return { ...opened, tmuxSession: target.session || undefined };
+    }
     return {
       ok: false,
       reason:
@@ -318,6 +348,35 @@ export async function focusSession(record, { exec, terminals = ALL_TERMINALS }) 
 }
 
 /**
+ * Open a detached tmux session in a new tab, on the pane that was clicked.
+ *
+ * The pane is selected first, so the new client opens on the right window
+ * rather than on whichever the session was last left at. Nothing is attached
+ * to the session, so selecting moves nobody's view - the reason the attached
+ * path is so careful about it does not arise. The new client attaches by the
+ * session's id, never its name.
+ *
+ * @param {Function} exec
+ * @param {{plan: FocusPlan, target: import('./tmux.js').TmuxTarget, opener: NonNullable<TabOpener>}} input
+ * @returns {Promise<{ok: true, adapter: string}|null>}
+ */
+async function openDetachedTmux(exec, { plan, target, opener }) {
+  const tmux = opener.findCommand('tmux');
+  if (!tmux || !target.sessionId || !plan.pane) return null;
+  await selectPane(exec, {
+    pane: plan.pane,
+    tmuxEnv: plan.tmuxEnv ?? null,
+    sessionId: target.sessionId,
+    windowId: target.windowId,
+  });
+  return openInNewTab(exec, {
+    argv: tmuxAttachArgv({ tmux, tmuxEnv: plan.tmuxEnv ?? null, sessionId: target.sessionId }),
+    terminal: opener.terminal,
+    terminals: opener.terminals,
+  });
+}
+
+/**
  * Ask each terminal that supports it to find a pane by title.
  *
  * @param {Function} exec
@@ -354,15 +413,25 @@ async function focusByPaneTitle(exec, { title, termProgram, terminals }) {
  *      window.
  *   4. nothing Raise can use - refuse, and name the command that attaches it.
  *
+ * With the `new-tab` setting on, steps 3 and 4 both become a new tab running a
+ * typed `hc attach`, which is then what step 1 finds on the next click. Step 3
+ * waits until the tab has failed to open: a terminal shown over the user's
+ * focused pane is a worse answer than one in a tab of its own, and a better one
+ * than a refusal. The new tab is never opened while a tab may already show the
+ * terminal - two typed attaches, a typed attach Raise has no adapter to raise,
+ * or one it cannot tell from another server's - because a second copy is not
+ * what was asked for, and on the next click it would open a third. Those keep
+ * the answer they have with the setting off.
+ *
  * The recorded tty is never used: it is Herdr's own, and handing it to the
  * adapters is exactly what produced "Could not find that tab in Ghostty" about a
  * session that was in no Ghostty tab.
  *
  * @param {Function} exec
- * @param {{address: string, socket: string|null, terminals: Terminal[]}} target
+ * @param {{address: string, socket: string|null, terminals: Terminal[], opener: TabOpener}} target
  * @returns {Promise<FocusResult>}
  */
-async function focusHerdr(exec, { address, socket, terminals }) {
+async function focusHerdr(exec, { address, socket, terminals, opener }) {
   const hint = attachHint({ address, socket });
 
   const attach = await findTypedAttach(exec, { address, socket });
@@ -382,27 +451,18 @@ async function focusHerdr(exec, { address, socket, terminals }) {
     attachFailure = result;
   }
 
+  // The session recorded its server, and no typed attach might be showing it
+  // from a tab Raise cannot attribute or failed to raise.
+  const tabAllowed =
+    opener && socket && !attach.unattributed && !attach.ambiguous && !attachFailure;
   // The desktop app takes no socket and speaks to the default server, so a
   // session on any other server must never reach it - the same address there is
   // a different terminal.
-  if (isAppServer(socket)) {
-    const shown = await showInHerdrApp(exec, { address });
-    if (shown && !shown.front) {
-      const where = shown.via === 'shown' ? ' in its focused pane for now' : '';
-      return {
-        ok: false,
-        reason: `The Herdr app is showing terminal ${address}${where}, but Raise could not bring it to the front.`,
-        hint,
-      };
-    }
-    if (shown?.via === 'pane') return { ok: true, adapter: 'herdr-app' };
-    if (shown?.via === 'shown') {
-      return {
-        ok: true,
-        adapter: 'herdr-app',
-        note: `Shown in the Herdr app. To bring up your own terminal instead, attach it with hc attach ${address}.`,
-      };
-    }
+  const appServer = isAppServer(socket);
+  if (appServer) {
+    const shown = await showInHerdrApp(exec, { address, borrow: !tabAllowed });
+    const answer = herdrAppAnswer(shown, { address, hint });
+    if (answer) return answer;
   }
 
   if (attach.ambiguous) {
@@ -416,5 +476,45 @@ async function focusHerdr(exec, { address, socket, terminals }) {
   // has no adapter for, or a tab that has since closed. That attempt is the
   // truest thing to report, and it is about a real tab this time.
   if (attachFailure) return { ...attachFailure, hint };
+  if (tabAllowed) {
+    const hc = opener.findCommand('hc');
+    const opened = hc
+      ? await openInNewTab(exec, {
+          argv: herdrAttachArgv({ hc, address, socket }),
+          terminal: opener.terminal,
+          terminals: opener.terminals,
+        })
+      : null;
+    if (opened) return opened;
+    if (appServer) {
+      const answer = herdrAppAnswer(await showInHerdrApp(exec, { address }), { address, hint });
+      if (answer) return answer;
+    }
+  }
   return { ok: false, reason: 'Not shown anywhere Raise can see.', hint };
+}
+
+/**
+ * What a click says about what the Herdr app did, or null when it did nothing.
+ *
+ * @param {{via: 'pane'|'shown', front: boolean}|null} shown
+ * @param {{address: string, hint: string}} target
+ * @returns {FocusResult|null}
+ */
+function herdrAppAnswer(shown, { address, hint }) {
+  if (!shown) return null;
+  if (!shown.front) {
+    const where = shown.via === 'shown' ? ' in its focused pane for now' : '';
+    return {
+      ok: false,
+      reason: `The Herdr app is showing terminal ${address}${where}, but Raise could not bring it to the front.`,
+      hint,
+    };
+  }
+  if (shown.via === 'pane') return { ok: true, adapter: 'herdr-app' };
+  return {
+    ok: true,
+    adapter: 'herdr-app',
+    note: `Shown in the Herdr app. To bring up your own terminal instead, attach it with hc attach ${address}.`,
+  };
 }
