@@ -1,6 +1,6 @@
 ---
 issue: 14
-status: backlog
+status: shipped
 size: M
 depends: 30, 56
 ---
@@ -38,20 +38,19 @@ installs Raise gets, not a checkout.
 
 ## What is in shot
 
-Four real sessions, each in a different repo and a different way of running, so the loop shows
-the range of terminals Raise supports without saying so:
+Four real sessions, each running a different way. The page does not name the terminal app: a
+row's chip says only `herdr`, `tmux` or `tab`, and iTerm2 and Ghostty are both `tab`. So the
+range shown is those three chips, plus the terminal the click brings forward:
 
-| Session | Repo | Runs in |
-| --- | --- | --- |
-| A Firstmate session, so its task label shows | Firstmate (the upstream home) | Herdr |
-| A worker with a no-mistakes pipeline running, so its `NO-MISTAKES` line shows | raise | Ghostty |
-| A session doing ordinary work | another of the maintainer's projects | iTerm2, inside tmux |
-| **The one that stops and waits for an answer** | a third project | tmux or Herdr, with **nothing showing it** (a detached tmux session, or a Herdr session no tab or app pane shows) |
+| Session | Repo | Runs in | Chip |
+| --- | --- | --- | --- |
+| A Firstmate session, waiting on the captain about a crewmate's decision | Firstmate (the upstream home) | Herdr | `herdr` |
+| A Firstmate crewmate whose no-mistakes pipeline is waiting on a decision, so its `NO-MISTAKES` line and the decision row show | raise | Firstmate's tmux | `tmux`, `firstmate` |
+| A session doing ordinary work | another of the maintainer's projects | an iTerm2 tab | `tab` |
+| **The one that stops and waits for an answer** | a third project | a detached tmux session, so **nothing is showing it** | `tmux` |
 
-Which session does what can be swapped while rehearsing; the requirement is that the four
-terminals and both optional signals (Firstmate, no-mistakes) appear, and that the session
-clicked is one nothing is showing, so the click opens it in a new tab (#56). Turn that on with
-`raise enable new-tab` before recording, choosing the terminal that looks clearest on screen.
+The session clicked last is one nothing is showing, so the click opens it in a new tab (#56).
+Turn that on with `raise enable new-tab` before recording.
 
 **Not in shot, ever:** any work or client repository, any project whose content is not safe
 to publish, and anything outside these four repositories. Which private projects appear is
@@ -59,12 +58,16 @@ decided outside this repository.
 
 ## The loop, beat by beat
 
-1. The dashboard, four sessions, all working. Hold long enough to read it (2-3 s).
-2. One session changes to *Waiting for you* and moves to the top.
-3. The cursor moves to it and clicks.
-4. A new tab opens and comes to the front, attached to that session and showing the agent's
+1. The dashboard. Hold long enough to read it (2-3 s).
+2. A click on the Firstmate row brings its Herdr terminal forward, showing the decision it is
+   waiting on; then back to the dashboard.
+3. One session changes to *Waiting for you* and moves to the top.
+4. The cursor moves to it and clicks.
+5. A new tab opens and comes to the front, attached to that session and showing the agent's
    question. No window was showing it before the click.
-5. Back to the dashboard, matching frame 1 closely enough that the loop has no visible jump.
+6. Back to the dashboard. This does not match frame 1, because the session that stopped is now
+   at the top, so the loop jumps when it repeats. Accepted: a loop that ends where it started
+   would have to undo the one change it exists to show.
 
 ## How it has to be made
 
