@@ -246,7 +246,9 @@ function fleet(dir) {
       hook_event_name: 'SessionStart',
       cwd: worktree,
       transcript_path: transcript,
-      host: { pid: process.pid },
+      // Not the captain's pid: one agent process runs one session, and the
+      // captain - the pid in the lock - has no transcript to set against this one.
+      host: { pid: process.ppid },
     },
   ];
   return { snapshot, sessions };

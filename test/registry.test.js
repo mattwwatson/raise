@@ -680,3 +680,160 @@ test('the live sessions are in the set too, so one call answers the whole questi
     cleanup();
   }
 });
+
+test('a hook run by hand inside a session does not become a session of its own', () => {
+  /*
+   * Issue 52, as reported: from a Claude Code session's Bash tool,
+   *
+   *   echo '{"hook_event_name":"Notification","session_id":"test","cwd":"/tmp"}' \
+   *     | node raise-hook.js
+   *
+   * The reporter walks up from its parent to the nearest agent, which is the
+   * session that ran the command, so the made-up event arrives carrying that
+   * session's pid and window. Stored, it was a "tmp" row reading Waiting for you
+   * that focused somebody else's tab, and it outlived the hour because pruning
+   * asks only whether the pid is alive - and it was, being a real session's.
+   */
+  const { dir, cleanup } = scratch();
+  try {
+    const registry = new SessionRegistry({ dir });
+    const window = { pid: 4242, tty: '/dev/ttys004', iterm_session_id: 'w0t1p0:ABC' };
+    registry.record({
+      session_id: 'real',
+      hook_event_name: 'UserPromptSubmit',
+      cwd: '/work/repo',
+      transcript_path: '/t/real.jsonl',
+      host: window,
+    });
+
+    const stored = registry.record({
+      session_id: 'test',
+      hook_event_name: 'Notification',
+      cwd: '/tmp',
+      host: window,
+    });
+
+    assert.equal(stored, null, 'the made-up event is refused');
+    assert.equal(registry.get('test'), null, 'and nothing is written for it');
+    assert.deepEqual(
+      registry.list({ isAlive: alwaysAlive }).map((r) => r.sessionId),
+      ['real'],
+      'the session that ran the command is untouched',
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('a session with a transcript clears a transcriptless one off its agent process', () => {
+  // The other order, and the upgrade path: a record the bug already wrote sits
+  // on a live session's pid. One agent process runs one session at a time, so
+  // the next event from the real one says which of the two is the stale entry.
+  const { dir, cleanup } = scratch();
+  try {
+    const registry = new SessionRegistry({ dir });
+    registry.record({ session_id: 'test', hook_event_name: 'Notification', host: { pid: 4242 } });
+    assert.ok(registry.get('test'), 'with nothing else on the pid, it is all we know of');
+
+    registry.record({
+      session_id: 'real',
+      hook_event_name: 'Stop',
+      transcript_path: '/t/real.jsonl',
+      host: { pid: 4242 },
+    });
+
+    assert.equal(registry.get('test'), null);
+    assert.deepEqual(registry.list({ isAlive: alwaysAlive }).map((r) => r.sessionId), ['real']);
+  } finally {
+    cleanup();
+  }
+});
+
+test('a pi session with no session file keeps its row when nothing else holds its pid', () => {
+  // `pi --no-session` has a session id and no file, so `transcript_path` is
+  // null on every event. Requiring a transcript would have closed issue 52 and
+  // dropped these, which is why the rule is about sharing a pid instead.
+  const { dir, cleanup } = scratch();
+  try {
+    const registry = new SessionRegistry({ dir });
+    const stored = registry.record({
+      session_id: 'ephemeral',
+      hook_event_name: 'agent_settled',
+      agent: 'pi',
+      host: { pid: 5151 },
+    });
+    assert.equal(stored?.transcriptPath, null);
+    assert.deepEqual(registry.list({ isAlive: alwaysAlive }).map((r) => r.sessionId), ['ephemeral']);
+  } finally {
+    cleanup();
+  }
+});
+
+test('the same hand-run event inside a transcriptless session is refused too', () => {
+  // Inside `pi --no-session` neither side has a transcript, so the transcript
+  // cannot say which is real - but the one already holding the pid has been
+  // reporting from it, and a stranger arriving without a transcript has nothing
+  // to set against that.
+  const { dir, cleanup } = scratch();
+  try {
+    const registry = new SessionRegistry({ dir });
+    registry.record({
+      session_id: 'ephemeral',
+      hook_event_name: 'agent_settled',
+      agent: 'pi',
+      host: { pid: 5151 },
+    });
+    const stored = registry.record({
+      session_id: 'test',
+      hook_event_name: 'Notification',
+      cwd: '/tmp',
+      host: { pid: 5151 },
+    });
+    assert.equal(stored, null);
+    assert.deepEqual(registry.list({ isAlive: alwaysAlive }).map((r) => r.sessionId), ['ephemeral']);
+  } finally {
+    cleanup();
+  }
+});
+
+test('two sessions with transcripts on one pid are both kept', () => {
+  // Claude Code's in-process agent teams report each teammate under its own
+  // session id from the lead's process. Which of two transcript-bearing
+  // sessions is stale cannot be told from the pid, and evicting the older would
+  // have the teammates take turns removing each other.
+  const { dir, cleanup } = scratch();
+  try {
+    const registry = new SessionRegistry({ dir });
+    for (const id of ['lead', 'teammate']) {
+      registry.record({
+        session_id: id,
+        hook_event_name: 'Stop',
+        transcript_path: `/t/${id}.jsonl`,
+        host: { pid: 4242 },
+      });
+    }
+    assert.deepEqual(
+      registry.list({ isAlive: alwaysAlive }).map((r) => r.sessionId).sort(),
+      ['lead', 'teammate'],
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('sessions with no pid, or different pids, never conflict', () => {
+  const { dir, cleanup } = scratch();
+  try {
+    const registry = new SessionRegistry({ dir });
+    registry.record({ session_id: 'a', hook_event_name: 'Stop', transcript_path: '/t/a.jsonl' });
+    registry.record({ session_id: 'b', hook_event_name: 'Notification' });
+    registry.record({ session_id: 'c', hook_event_name: 'Stop', host: { pid: 111 } });
+    registry.record({ session_id: 'd', hook_event_name: 'Notification', host: { pid: 222 } });
+    assert.deepEqual(
+      registry.list({ isAlive: alwaysAlive }).map((r) => r.sessionId).sort(),
+      ['a', 'b', 'c', 'd'],
+    );
+  } finally {
+    cleanup();
+  }
+});
