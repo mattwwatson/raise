@@ -388,6 +388,7 @@ stratified on purpose, so read the whole file rather than one section.
 | which states mean a person is waiting is one set, and both the row flag and the tab title's count come off it | `src/dashboard.js` (`WANTS_YOU`, `summarise`) |
 | a pi session can never be `blocked`, because pi has no approval gate | `src/registry.js` |
 | a Codex row may go red and will never say why - no `Notification` at all | `src/registry.js` |
+| a transcriptless session yields to any other on its agent pid, and two sessions with transcripts are both kept | `src/registry.js` (`#settlePidConflict`) |
 | pi's transcript is normalised, never summarised separately | `src/pi-transcript.js` |
 | the pi reporter runs in-process, so "never fail" is stricter than for the hook | `hooks/raise-pi-extension.js` |
 | the extension is registered by path, never copied | `src/pi-extension.js` |
