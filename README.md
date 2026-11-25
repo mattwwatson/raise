@@ -31,7 +31,8 @@ changes.
     you attached by picking it from `hc`'s menu: Raise cannot tell which terminal a picker
     attach is showing. With [`new-tab`](#opening-a-session-nothing-is-showing) on, a Herdr
     session nothing Raise can see is showing - one attached from the menu included - opens in
-    a new tab instead.
+    a new tab instead. This is Herdr Core (`hc`) and the Herdr desktop app; the older `herdr`
+    terminal multiplexer is [not supported](#herdr-sessions) for focusing yet.
 
 There are **no runtime dependencies at all** - Node's own builtins and nothing else. Everything
 below that names another tool is optional, and [says so](#optional-signals).
@@ -608,7 +609,8 @@ itself in a new tab of the terminal you chose.
 
 Supported terminals today: **iTerm2**, **Terminal.app** and **Ghostty** (1.4 or later), plus
 **tmux** inside any of them, and **Herdr** terminals attached with `hc attach <address>` in any of
-them or shown in the Herdr desktop app - see below.
+them or shown in the Herdr desktop app - see below. The older `herdr` terminal multiplexer is not
+one of them.
 
 ### Claude Desktop sessions
 
@@ -628,6 +630,11 @@ already imported, so the link would land on that duplicate rather than the sessi
 - which is why Raise never uses it.
 
 ### Herdr sessions
+
+**This means Herdr Core - the `hc` client and the Herdr desktop app - and not the older `herdr`
+terminal multiplexer, where you run `herdr` and it draws its own workspaces, tabs and panes.**
+A session inside that one is still monitored like any other - it appears, ranks and turns red as
+usual - but Raise does not recognise it as Herdr, so focusing it will not bring up its pane.
 
 A session running in a Herdr terminal is marked `herdr`, and focusing it
 brings up whatever is showing that terminal, worked out when you click:
